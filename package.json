@@ -1,0 +1,51 @@
+{
+  "name": "mifirma-api",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "API de MiFirma — firma electrónica de documentos (núcleo, RLS y motor de firma)",
+  "scripts": {
+    "dev": "tsx watch src/index.ts",
+    "start": "tsx src/index.ts",
+    "typecheck": "tsc --noEmit",
+    "test": "tsx --test test/*.test.ts",
+    "test:engine": "tsx --test test/motor.test.ts test/uruguay.test.ts test/paraguay.test.ts test/facturacion.test.ts",
+    "corrida": "tsx scripts/correr-corrida.ts",
+    "chat": "tsx scripts/chat.ts",
+    "provisionar": "tsx scripts/provisionar.ts",
+    "provisionar:estudio": "tsx scripts/provisionar_estudio.ts",
+    "set-password": "tsx scripts/set-password.ts",
+    "invitar": "tsx scripts/invitar.ts",
+    "facturar": "tsx scripts/facturar.ts",
+    "operador": "tsx scripts/operador.ts",
+    "migrate": "psql \"$DATABASE_OWNER_URL\" -v ON_ERROR_STOP=1 -f migrations/001_nucleo_y_rls.sql"
+  },
+  "dependencies": {
+    "@anthropic-ai/sdk": "^0.32.1",
+    "@fastify/cookie": "^9.4.0",
+    "@fastify/rate-limit": "^9.1.0",
+    "fastify": "^4.28.1",
+    "kysely": "^0.27.4",
+    "pg": "^8.12.0",
+    "jose": "^5.9.6",
+    "zod": "^3.23.8",
+    "dotenv": "^16.4.5",
+    "decimal.js": "^10.4.3",
+    "nodemailer": "^6.9.16",
+    "pdfkit": "^0.15.1",
+    "pdf-lib": "^1.17.1",
+    "web-push": "^3.6.7"
+  },
+  "devDependencies": {
+    "tsx": "^4.19.1",
+    "typescript": "^5.6.3",
+    "@types/node": "^22.7.5",
+    "@types/pg": "^8.11.10",
+    "@types/nodemailer": "^6.4.16",
+    "@types/pdfkit": "^0.13.5",
+    "@types/web-push": "^3.6.4"
+  },
+  "overrides": {
+    "form-data": "^4.0.6"
+  }
+}

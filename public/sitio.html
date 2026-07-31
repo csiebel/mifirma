@@ -1,0 +1,514 @@
+<!doctype html>
+<html lang="es">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>MiFirma · Nómina y RRHH</title>
+<meta name="theme-color" content="#123a5e" />
+<link rel="icon" type="image/svg+xml" href="/favicon.svg" />
+<link rel="apple-touch-icon" href="/apple-touch-icon.png" />
+<link rel="preconnect" href="https://fonts.googleapis.com" />
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+<link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700;800&display=swap" rel="stylesheet" />
+<style>
+  /* ===========================================================
+     MARCA — valores PROVISORIOS. Reemplazar por los exactos de
+     Interfase (hex de color y nombre de la fuente). Cambiando estas
+     variables y el <link> de la fuente, se actualizan la web y la app.
+     =========================================================== */
+  :root {
+    --brand: #123a5e;
+    --brand-600: #1a5482;
+    --brand-50: #eaf2f8;
+    --accent: #0aa2b0;
+    --accent-50: #e6f6f7;
+    --ink: #16202e;
+    --muted: #5b6573;
+    --soft: #f3f6f9;
+    --line: #e4eaf0;
+    --paper: #ffffff;
+    --radius: 12px;
+    --shadow: 0 1px 2px rgba(18,32,46,.05), 0 12px 32px rgba(18,32,46,.08);
+    --font: 'Plus Jakarta Sans', system-ui, -apple-system, sans-serif;
+  }
+  * { box-sizing: border-box; }
+  html { scroll-behavior: smooth; }
+  body { margin: 0; background: var(--paper); color: var(--ink); font-family: var(--font); line-height: 1.55; -webkit-font-smoothing: antialiased; }
+  a { color: var(--brand-600); text-decoration: none; }
+  h1, h2, h3 { line-height: 1.15; letter-spacing: -.01em; }
+  .wrap { max-width: 1140px; margin: 0 auto; padding: 0 24px; }
+
+  .btn { display: inline-block; font-family: inherit; font-size: 14px; font-weight: 600; cursor: pointer; border: 1px solid var(--brand); background: var(--brand); color: #fff; padding: 11px 20px; border-radius: 8px; transition: filter .15s, transform .12s; white-space: nowrap; line-height: 1.2; }
+  .btn:hover { filter: brightness(1.12); }
+  .btn:active { transform: translateY(1px); }
+  .btn.big { padding: 14px 28px; font-size: 15px; }
+  .btn.ghost { background: transparent; color: var(--brand); }
+  .btn.ghost:hover { background: var(--brand-50); filter: none; }
+  .btn.block { display: block; width: 100%; text-align: center; }
+
+  header.top { position: sticky; top: 0; z-index: 30; background: rgba(255,255,255,.9); backdrop-filter: blur(8px); border-bottom: 1px solid var(--line); }
+  .top .wrap { display: flex; align-items: center; justify-content: space-between; gap: 18px; height: 66px; }
+  .brand { display: flex; align-items: center; gap: 10px; font-weight: 800; color: var(--ink); }
+  .logo-web { height: 56px; display: block; }
+  .brand .mark { width: 32px; height: 32px; border-radius: 8px; background: var(--brand); color: #fff; display: grid; place-items: center; font-size: 17px; font-weight: 800; }
+  .brand .name { font-size: 15.5px; }
+  .brand .name span { color: var(--brand-600); }
+  .top nav { display: flex; align-items: center; gap: 14px; flex-wrap: nowrap; }
+  .top nav .btn { flex-shrink: 0; }
+  .top nav a.link { color: var(--muted); font-size: 14px; font-weight: 500; }
+  .top nav a.link:hover { color: var(--ink); }
+  .langsel { font-family: inherit; font-size: 13px; color: var(--ink); border: 1px solid var(--line); background: #fff; border-radius: 8px; padding: 7px 8px; cursor: pointer; }
+  input.invalid, select.invalid { border-color: #d64545 !important; background: #fef5f5; }
+  @media (max-width: 980px) { .top nav a.link { display: none; } }
+  @media (max-width: 620px) {
+    .top .wrap { height: auto; flex-wrap: wrap; gap: 10px; padding-top: 10px; padding-bottom: 10px; }
+    .top nav { flex-basis: 100%; justify-content: flex-end; gap: 8px; flex-wrap: wrap; }
+    .top nav .btn { padding: 9px 14px; }
+    .langsel { padding: 6px 8px; }
+    .logo-web { height: 48px; }
+  }
+
+  .lang-draft { display: none; background: #fff7e6; border-bottom: 1px solid #f0d9a8; color: #7a5a12; font-size: 12.5px; text-align: center; padding: 8px 16px; }
+
+  .hero { background: linear-gradient(180deg, var(--brand-50), #fff 75%); border-bottom: 1px solid var(--line); }
+  .hero .wrap { display: grid; grid-template-columns: 1.05fr .95fr; gap: 48px; align-items: center; padding: 76px 24px 72px; }
+  @media (max-width: 900px) { .hero .wrap { grid-template-columns: 1fr; gap: 36px; padding: 52px 24px; } }
+  .eyebrow { display: inline-block; font-size: 12px; font-weight: 700; letter-spacing: .12em; text-transform: uppercase; color: var(--brand-600); background: #fff; border: 1px solid var(--line); padding: 6px 12px; border-radius: 999px; margin: 0 0 20px; }
+  .hero h1 { font-size: clamp(34px, 5vw, 54px); font-weight: 800; margin: 0 0 18px; }
+  .hero p.lead { font-size: clamp(16px, 1.9vw, 19px); color: var(--muted); margin: 0 0 28px; max-width: 52ch; }
+  .cta-row { display: flex; flex-wrap: wrap; gap: 12px; align-items: center; }
+  .fineprint { margin: 18px 0 0; font-size: 13px; color: var(--muted); }
+  .rise { opacity: 0; transform: translateY(14px); animation: rise .6s cubic-bezier(.2,.7,.2,1) forwards; }
+  @keyframes rise { to { opacity: 1; transform: none; } }
+
+  .mock { background: #fff; border: 1px solid var(--line); border-radius: 14px; box-shadow: var(--shadow); overflow: hidden; }
+  .mock .bar { display: flex; align-items: center; gap: 7px; padding: 11px 14px; border-bottom: 1px solid var(--line); background: var(--soft); }
+  .mock .bar i { width: 9px; height: 9px; border-radius: 50%; background: #cdd6df; display: inline-block; }
+  .mock .body { padding: 18px; }
+  .mock .line { height: 10px; border-radius: 5px; background: var(--brand-50); margin: 0 0 12px; }
+  .mock .line.s { width: 55%; }
+  .mock .line.m { width: 78%; }
+  .mock .chip { display: inline-flex; align-items: center; gap: 8px; font-size: 13px; font-weight: 600; color: var(--brand); background: var(--brand-50); border-radius: 8px; padding: 8px 12px; margin: 2px 6px 2px 0; }
+  .mock .row { display: flex; justify-content: space-between; padding: 10px 0; border-top: 1px dashed var(--line); font-size: 13px; }
+  .mock .row b { color: var(--ink); }
+  .mock .row span { color: var(--muted); }
+  .mock .total { display: flex; justify-content: space-between; padding: 12px 0 2px; font-weight: 800; color: var(--brand); border-top: 2px solid var(--brand-50); margin-top: 4px; }
+
+  section.band { padding: 76px 0; }
+  section.soft { background: var(--soft); border-top: 1px solid var(--line); border-bottom: 1px solid var(--line); }
+  .sechead { max-width: 720px; margin: 0 auto 46px; text-align: center; }
+  .sechead h2 { font-size: clamp(26px, 3.6vw, 38px); font-weight: 800; margin: 0 0 12px; }
+  .sechead p { color: var(--muted); font-size: 16px; margin: 0; }
+
+  .benefits { display: grid; grid-template-columns: repeat(4, 1fr); gap: 16px; }
+  @media (max-width: 900px) { .benefits { grid-template-columns: repeat(2, 1fr); } }
+  @media (max-width: 540px) { .benefits { grid-template-columns: 1fr; } }
+  .benefit { background: #fff; border: 1px solid var(--line); border-radius: var(--radius); padding: 22px; transition: transform .15s, box-shadow .15s; }
+  .benefit:hover { transform: translateY(-2px); box-shadow: var(--shadow); }
+  .benefit .ico { width: 38px; height: 38px; border-radius: 9px; background: var(--accent-50); color: var(--accent); display: grid; place-items: center; margin-bottom: 14px; }
+  .benefit h3 { font-size: 15.5px; font-weight: 700; margin: 0; }
+
+  .feature-row { display: grid; grid-template-columns: 1fr 1fr; gap: 52px; align-items: center; padding: 30px 0; }
+  .feature-row.flip .ftext { order: 2; }
+  @media (max-width: 900px) { .feature-row { grid-template-columns: 1fr; gap: 28px; } .feature-row.flip .ftext { order: 0; } }
+  .ftext h3 { font-size: clamp(22px, 3vw, 30px); font-weight: 800; margin: 0 0 12px; }
+  .ftext > p { color: var(--muted); margin: 0 0 20px; font-size: 16px; }
+  .checks { list-style: none; padding: 0; margin: 0; }
+  .checks li { display: flex; gap: 12px; align-items: flex-start; padding: 9px 0; font-size: 15px; }
+  .checks li svg { flex: none; margin-top: 2px; color: var(--accent); }
+
+  .roadmap { display: grid; grid-template-columns: repeat(4, 1fr); gap: 16px; }
+  @media (max-width: 900px) { .roadmap { grid-template-columns: repeat(2, 1fr); } }
+  @media (max-width: 540px) { .roadmap { grid-template-columns: 1fr; } }
+  .rm { background: #fff; border: 1px dashed var(--line); border-radius: var(--radius); padding: 20px; }
+  .rm .tag { font-size: 11px; font-weight: 700; letter-spacing: .08em; text-transform: uppercase; color: var(--accent); }
+  .rm h3 { font-size: 16px; font-weight: 700; margin: 8px 0 4px; }
+  .rm p { color: var(--muted); font-size: 13.5px; margin: 0; }
+
+  section.band.novedades { background: var(--brand-50); }
+  .news-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 16px; }
+  @media (max-width: 900px) { .news-grid { grid-template-columns: repeat(2, 1fr); } }
+  @media (max-width: 540px) { .news-grid { grid-template-columns: 1fr; } }
+  .nw { background: #fff; border: 1px solid var(--line); border-radius: var(--radius); padding: 22px; box-shadow: 0 1px 2px rgba(18,32,46,.04); }
+  .nw .tag { display: inline-block; font-size: 11px; font-weight: 700; letter-spacing: .06em; text-transform: uppercase; color: var(--accent); background: var(--accent-50); padding: 3px 9px; border-radius: 999px; }
+  .nw h3 { font-size: 17px; font-weight: 700; margin: 12px 0 6px; }
+  .nw p { color: var(--muted); font-size: 14.5px; line-height: 1.5; margin: 0; }
+
+  .planes-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 18px; align-items: start; }
+  @media (max-width: 880px) { .planes-grid { grid-template-columns: 1fr; } }
+  .plan { background: #fff; border: 1px solid var(--line); border-radius: var(--radius); padding: 26px; display: flex; flex-direction: column; box-shadow: var(--shadow); }
+  .plan h3 { font-size: 21px; font-weight: 800; margin: 4px 0 0; }
+  .plan .moneda-tag { font-size: 11px; color: var(--muted); letter-spacing: .08em; text-transform: uppercase; font-weight: 600; }
+  .plan .precio { margin: 16px 0 4px; display: flex; align-items: baseline; gap: 8px; flex-wrap: wrap; }
+  .plan .precio .monto { font-size: 32px; font-weight: 800; line-height: 1; color: var(--brand); }
+  .plan .precio .per { color: var(--muted); font-size: 14px; }
+  .plan .detalle { color: var(--muted); font-size: 13.5px; margin: 10px 0 0; min-height: 20px; }
+  .plan .franjas { margin: 14px 0 0; padding: 0; list-style: none; font-size: 13px; }
+  .plan .franjas li { padding: 6px 0; border-top: 1px dashed var(--line); display: flex; justify-content: space-between; gap: 12px; }
+  .plan .franjas li:first-child { border-top: 0; }
+  .plan .franjas .val { color: var(--accent); font-weight: 700; }
+  .plan .sep { flex: 1; }
+  .plan .cta { margin-top: 22px; }
+
+  .form-card { background: #fff; border: 1px solid var(--line); border-radius: 16px; box-shadow: var(--shadow); padding: 36px; max-width: 760px; margin: 0 auto; }
+  .form-card h2 { font-size: 30px; font-weight: 800; margin: 0 0 8px; }
+  .form-card .sub { color: var(--muted); margin: 0 0 26px; font-size: 15px; }
+  .grid2 { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; }
+  @media (max-width: 620px) { .grid2 { grid-template-columns: 1fr; } }
+  .field { margin-bottom: 16px; }
+  .field.full { grid-column: 1 / -1; }
+  label { display: block; font-size: 12px; color: var(--muted); margin-bottom: 6px; font-weight: 600; letter-spacing: .02em; }
+  label .opt { color: #aeb8c2; font-weight: 400; }
+  input, select { width: 100%; font-family: inherit; font-size: 14px; color: var(--ink); border: 1px solid var(--line); background: var(--soft); border-radius: 9px; padding: 11px 12px; }
+  input:focus, select:focus { outline: 2px solid var(--brand-50); border-color: var(--brand); }
+  fieldset { border: 0; padding: 0; margin: 0 0 8px; }
+  legend { font-size: 15px; color: var(--ink); padding: 0; margin: 18px 0 12px; font-weight: 700; }
+  .msg { margin-top: 16px; padding: 12px 14px; border-radius: 9px; font-size: 14px; display: none; }
+  .msg.err { display: block; background: #fdecea; color: #a3372b; border: 1px solid #f3cfc9; }
+  .ok-card { text-align: center; padding: 14px 6px; }
+  .ok-card .check { width: 54px; height: 54px; border-radius: 50%; background: var(--accent-50); color: var(--accent); display: grid; place-items: center; margin: 0 auto 18px; }
+  .ok-card h3 { font-size: 26px; font-weight: 800; margin: 0 0 10px; }
+  .ok-card p { color: var(--muted); margin: 0 0 8px; }
+  .ok-card .acceso { background: var(--soft); border: 1px solid var(--line); border-radius: 10px; padding: 14px 16px; margin: 18px auto 22px; max-width: 380px; text-align: left; font-size: 14px; }
+  .ok-card .acceso b { color: var(--ink); }
+
+  footer.foot { background: var(--ink); color: #aeb8c2; padding: 40px 0; }
+  .foot .wrap { display: flex; justify-content: space-between; align-items: center; gap: 16px; flex-wrap: wrap; }
+  .foot .brand { color: #fff; }
+  .foot .brand .name span { color: #7fb0d8; }
+  .foot a { color: #aeb8c2; font-size: 14px; }
+  .foot a:hover { color: #fff; }
+  .foot .links { display: flex; gap: 18px; flex-wrap: wrap; }
+</style>
+</head>
+<body>
+
+<header class="top">
+  <div class="wrap">
+    <a class="brand" href="/" aria-label="MiFirma" style="text-decoration:none">
+      <svg viewBox="0 0 272 60" class="logo-web" role="img" aria-label="MiFirma"><rect x="0" y="14" width="36" height="6.5" rx="3.25" fill="#123a5e"/><rect x="0" y="25" width="23" height="6.5" rx="3.25" fill="#0aa2b0"/><rect x="0" y="36" width="31" height="6.5" rx="3.25" fill="#123a5e"/><text x="52" y="26" font-family="'Plus Jakarta Sans',system-ui,sans-serif" font-size="25" font-weight="700" fill="#123a5e">MiFirma</text><text x="52" y="47" font-family="'Plus Jakarta Sans',system-ui,sans-serif" font-size="13.5" font-weight="500" fill="#0a7d88">New Generation</text></svg>
+    </a>
+    <nav>
+      <a class="link" href="#beneficios" data-i18n="web.nav.benefits">Beneficios</a>
+      <a class="link" href="#capacidades" data-i18n="web.nav.capabilities">Capacidades</a>
+      <a class="link" href="#planes" data-i18n="web.nav.plans">Planes</a>
+      <select id="selLang" class="langsel" aria-label="Idioma / Language"></select>
+      <a class="btn ghost" href="/entrar" data-i18n="web.nav.login">Ingresar</a>
+      <a class="btn" href="/entrar?modo=registro" data-i18n="web.nav.signup">Crear cuenta</a>
+    </nav>
+  </div>
+</header>
+<div class="lang-draft" id="langDraft"></div>
+
+<section class="hero">
+  <div class="wrap">
+    <div>
+      <span class="eyebrow rise" data-i18n="web.hero.eyebrow">Nómina y RRHH · Uruguay y Paraguay</span>
+      <h1 class="rise" style="animation-delay:.06s" data-i18n="web.hero.title">Gestión simplificada del capital humano.</h1>
+      <p class="lead rise" style="animation-delay:.12s" data-i18n="web.hero.lead">MiFirma potencia a tu equipo de RR. HH. con una nómina precisa y una gestión sólida para cada etapa del ciclo laboral. La cuenta la hace un motor; vos cargás las novedades.</p>
+      <div class="cta-row rise" style="animation-delay:.18s">
+        <a href="/entrar?modo=registro" class="btn big" data-i18n="web.hero.cta1">Crear cuenta</a>
+        <a href="#planes" class="btn ghost big" data-i18n="web.hero.cta2">Ver planes</a>
+      </div>
+      <p class="fineprint rise" style="animation-delay:.24s" data-i18n="web.hero.fine">Sin tarjeta para empezar · Tu empresa arranca en modo prueba.</p>
+    </div>
+    <div class="mock rise" style="animation-delay:.2s" aria-hidden="true">
+      <div class="bar"><i></i><i></i><i></i></div>
+      <div class="body">
+        <div class="row"><span data-i18n="web.hero.m.base">Sueldo base</span><b>UYU 60.000</b></div>
+        <div class="row"><span data-i18n="web.hero.m.aportes">Aportes personales</span><b>− UYU 10.275</b></div>
+        <div class="row"><span data-i18n="web.hero.m.irpf">IRPF</span><b>− UYU 0</b></div>
+        <div class="total"><span data-i18n="web.hero.m.neto">Neto del mes</span><span>UYU 49.725</span></div>
+        <div style="margin-top:16px"><span class="chip" data-i18n="web.hero.m.recibo">Recibo emitido · inmutable</span></div>
+      </div>
+    </div>
+  </div>
+</section>
+
+<section id="beneficios" class="band">
+  <div class="wrap">
+    <div class="sechead">
+      <h2 data-i18n="web.benefits.title">Todo lo que tu equipo de RR. HH. necesita, sin perder el control de la cuenta.</h2>
+      <p data-i18n="web.benefits.sub">Una base sólida y precisa para liquidar y gestionar personas, pensada para crecer país por país.</p>
+    </div>
+    <div class="benefits" id="benefits"></div>
+  </div>
+</section>
+
+<section id="capacidades" class="band soft">
+  <div class="wrap">
+
+    <div class="feature-row">
+      <div class="ftext">
+        <h3 data-i18n="web.cap.emp.title">Gestión de empleados</h3>
+        <p data-i18n="web.cap.emp.desc">Centralizá los datos de tu gente en un solo lugar: contratos, datos personales, historial laboral y aportes.</p>
+        <ul class="checks">
+          <li><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="9"/><path d="M8 12l3 3 5-6"/></svg> <span data-i18n="web.cap.emp.c1">Ciclo de vida del empleado y versiones del contrato</span></li>
+          <li><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="9"/><path d="M8 12l3 3 5-6"/></svg> <span data-i18n="web.cap.emp.c2">Cargos, unidades y organigrama</span></li>
+          <li><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="9"/><path d="M8 12l3 3 5-6"/></svg> <span data-i18n="web.cap.emp.c3">Legajo y documentación</span></li>
+          <li><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="9"/><path d="M8 12l3 3 5-6"/></svg> <span data-i18n="web.cap.emp.c4">Estudios y certificaciones con vencimiento</span></li>
+        </ul>
+      </div>
+      <div class="mock" aria-hidden="true"><div class="bar"><i></i><i></i><i></i></div><div class="body">
+        <div class="line m"></div><div class="line"></div><div class="line s"></div>
+      </div></div>
+    </div>
+
+    <div class="feature-row flip">
+      <div class="ftext">
+        <h3 data-i18n="web.cap.self.title">Autoservicio para empleados</h3>
+        <p data-i18n="web.cap.self.desc">Tu gente accede a lo suyo sin pasar cada consulta por RR. HH.</p>
+        <ul class="checks">
+          <li><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="9"/><path d="M8 12l3 3 5-6"/></svg> <span data-i18n="web.cap.self.c1">Ver y descargar recibos de sueldo</span></li>
+          <li><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="9"/><path d="M8 12l3 3 5-6"/></svg> <span data-i18n="web.cap.self.c2">Solicitar y seguir licencias</span></li>
+          <li><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="9"/><path d="M8 12l3 3 5-6"/></svg> <span data-i18n="web.cap.self.c3">Acceder a certificados y capacitaciones</span></li>
+          <li><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="9"/><path d="M8 12l3 3 5-6"/></svg> <span data-i18n="web.cap.self.c4">Apps para iOS y Android en camino</span></li>
+        </ul>
+      </div>
+      <div class="mock" aria-hidden="true"><div class="bar"><i></i><i></i><i></i></div><div class="body">
+        <div class="line s"></div><div class="line m"></div><div class="line"></div>
+      </div></div>
+    </div>
+
+    <div class="feature-row">
+      <div class="ftext">
+        <h3 data-i18n="web.cap.pay.title">Procesamiento de nómina</h3>
+        <p data-i18n="web.cap.pay.desc">Automatizá y controlá todo el ciclo de la nómina, con precisión y según las reglas de cada país.</p>
+        <ul class="checks">
+          <li><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="9"/><path d="M8 12l3 3 5-6"/></svg> <span data-i18n="web.cap.pay.c1">Sueldos, aportes e impuestos por régimen</span></li>
+          <li><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="9"/><path d="M8 12l3 3 5-6"/></svg> <span data-i18n="web.cap.pay.c2">Aguinaldo, salario vacacional y liquidación final, según el país</span></li>
+          <li><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="9"/><path d="M8 12l3 3 5-6"/></svg> <span data-i18n="web.cap.pay.c3">Modalidades flexibles: mensual, jornal, hora, destajo, mixto</span></li>
+          <li><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="9"/><path d="M8 12l3 3 5-6"/></svg> <span data-i18n="web.cap.pay.c4">Multimoneda y recibos inmutables</span></li>
+          <li><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="9"/><path d="M8 12l3 3 5-6"/></svg> <span data-i18n="web.cap.pay.c5">Ajustes por liquidación: premios, viáticos, gratificaciones y descuentos</span></li>
+          <li><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="9"/><path d="M8 12l3 3 5-6"/></svg> <span data-i18n="web.cap.pay.c6">Empleados en relación de dependencia y proveedores unipersonales, con sus facturas</span></li>
+        </ul>
+      </div>
+      <div class="mock" aria-hidden="true"><div class="bar"><i></i><i></i><i></i></div><div class="body">
+        <div class="row"><span data-i18n="web.cap.pay.m.dev">Devengos</span><b>UYU 64.000</b></div>
+        <div class="row"><span data-i18n="web.cap.pay.m.ap">Aportes (BPS, FONASA, FRL)</span><b>− UYU 10.960</b></div>
+        <div class="row"><span data-i18n="web.cap.pay.m.irpf">IRPF</span><b>− UYU 0</b></div>
+        <div class="total"><span data-i18n="web.cap.pay.m.neto">Neto</span><span>UYU 53.040</span></div>
+      </div></div>
+    </div>
+
+    <div class="feature-row flip">
+      <div class="ftext">
+        <h3 data-i18n="web.cap.comm.title">Comunicación y capacitación</h3>
+        <p data-i18n="web.cap.comm.desc">Mantené al día la formación de tu equipo y avisá lo importante a tiempo.</p>
+        <ul class="checks">
+          <li><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="9"/><path d="M8 12l3 3 5-6"/></svg> <span data-i18n="web.cap.comm.c1">Catálogo de capacitaciones e inscripciones</span></li>
+          <li><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="9"/><path d="M8 12l3 3 5-6"/></svg> <span data-i18n="web.cap.comm.c2">Registro de quién completó qué</span></li>
+          <li><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="9"/><path d="M8 12l3 3 5-6"/></svg> <span data-i18n="web.cap.comm.c3">Alertas de vencimiento de certificaciones</span></li>
+          <li><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="9"/><path d="M8 12l3 3 5-6"/></svg> <span data-i18n="web.cap.comm.c4">Notificaciones internas (en el roadmap)</span></li>
+        </ul>
+      </div>
+      <div class="mock" aria-hidden="true"><div class="bar"><i></i><i></i><i></i></div><div class="body">
+        <div class="line s"></div><div class="line m"></div>
+      </div></div>
+    </div>
+
+    <div class="feature-row">
+      <div class="ftext">
+        <h3 data-i18n="web.cap.ai.title">Asistente con inteligencia artificial</h3>
+        <p data-i18n="web.cap.ai.desc">Preguntá en tu idioma y resolvé en segundos lo que antes era buscar en menús o esperar a RR. HH.</p>
+        <ul class="checks">
+          <li><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="9"/><path d="M8 12l3 3 5-6"/></svg> <span data-i18n="web.cap.ai.c1">Consultá recibos, saldos de licencia y vencimientos en lenguaje natural</span></li>
+          <li><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="9"/><path d="M8 12l3 3 5-6"/></svg> <span data-i18n="web.cap.ai.c2">Te guía en el uso del sistema: qué es cada cosa y dónde se hace</span></li>
+          <li><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="9"/><path d="M8 12l3 3 5-6"/></svg> <span data-i18n="web.cap.ai.c3">Responde en el idioma de cada usuario</span></li>
+          <li><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="9"/><path d="M8 12l3 3 5-6"/></svg> <span data-i18n="web.cap.ai.c4">Nunca inventa cifras: las trae del motor de liquidación</span></li>
+        </ul>
+      </div>
+      <div class="mock" aria-hidden="true"><div class="bar"><i></i><i></i><i></i></div><div class="body">
+        <div class="line m"></div><div class="line"></div><div class="line s"></div>
+      </div></div>
+    </div>
+
+  </div>
+</section>
+
+<section id="novedades" class="band novedades">
+  <div class="wrap">
+    <div class="sechead">
+      <h2 data-i18n="web.news.title">Novedades</h2>
+      <p data-i18n="web.news.sub">Lo último que sumamos al producto desde tu última visita.</p>
+    </div>
+    <div class="news-grid">
+      <div class="nw"><div class="tag" data-i18n="web.news.badge">Nuevo</div><h3 data-i18n="web.news.n1.title">Portal para estudios contables</h3><p data-i18n="web.news.n1.desc">Si liquidás para varias empresas, ahora administrás toda tu cartera de clientes desde un único acceso.</p></div>
+      <div class="nw"><div class="tag" data-i18n="web.news.badge">Nuevo</div><h3 data-i18n="web.news.n2.title">Recibos a tu medida</h3><p data-i18n="web.news.n2.desc">Diseñá el recibo con la identidad de cada empresa —logo, encabezado y secciones—. Lo emitido queda congelado e inalterable.</p></div>
+      <div class="nw"><div class="tag" data-i18n="web.news.badge">Nuevo</div><h3 data-i18n="web.news.n3.title">Beneficios al personal</h3><p data-i18n="web.news.n3.desc">Registrá y gestioná los beneficios que ofrecés a tu equipo, junto al resto del legajo.</p></div>
+      <div class="nw"><div class="tag" data-i18n="web.news.badge">Nuevo</div><h3 data-i18n="web.news.n4.title">Sueldo variable</h3><p data-i18n="web.news.n4.desc">Comisiones y productividad calculadas por el motor de liquidación, sin planillas aparte.</p></div>
+      <div class="nw"><div class="tag" data-i18n="web.news.badge">Nuevo</div><h3 data-i18n="web.news.n5.title">Avisos en tiempo real</h3><p data-i18n="web.news.n5.desc">Notificaciones push para que tu gente se entere de recibos, licencias y comunicados al instante.</p></div>
+      <div class="nw"><div class="tag" data-i18n="web.news.badge">Nuevo</div><h3 data-i18n="web.news.n6.title">Acceso renovado y más seguro</h3><p data-i18n="web.news.n6.desc">Nueva pantalla de ingreso, verificación en dos pasos y recuperación de contraseña por correo.</p></div>
+    </div>
+  </div>
+</section>
+
+<section class="band">
+  <div class="wrap">
+    <div class="sechead"><h2 data-i18n="web.roadmap.title">Lo que viene</h2><p data-i18n="web.roadmap.sub">Sobre el mismo núcleo, sin rehacer nada: el roadmap del producto.</p></div>
+    <div class="roadmap">
+      <div class="rm"><div class="tag" data-i18n="web.roadmap.tag">Próximamente</div><h3 data-i18n="web.roadmap.r1.title">Reclutamiento</h3><p data-i18n="web.roadmap.r1.desc">Vacantes, candidatos y seguimiento del proceso de selección.</p></div>
+      <div class="rm"><div class="tag" data-i18n="web.roadmap.tag">Próximamente</div><h3 data-i18n="web.roadmap.r2.title">Onboarding</h3><p data-i18n="web.roadmap.r2.desc">Alta guiada de nuevos ingresos sobre el legajo.</p></div>
+      <div class="rm"><div class="tag" data-i18n="web.roadmap.tag">Próximamente</div><h3 data-i18n="web.roadmap.r3.title">Beneficios</h3><p data-i18n="web.roadmap.r3.desc">Gestión de beneficios al personal.</p></div>
+      <div class="rm"><div class="tag" data-i18n="web.roadmap.tag">Próximamente</div><h3 data-i18n="web.roadmap.r4.title">Apps móviles</h3><p data-i18n="web.roadmap.r4.desc">Autoservicio del empleado en iOS y Android.</p></div>
+    </div>
+  </div>
+</section>
+
+<section id="planes" class="band soft">
+  <div class="wrap">
+    <div class="sechead">
+      <h2 data-i18n="web.plans.title">Planes</h2>
+      <p data-i18n="web.plans.sub">Elegí cómo querés pagar: un precio fijo, o por cantidad de funcionarios. Las tarifas las define el plan; abajo ves las vigentes.</p>
+    </div>
+    <div id="grillaPlanes" class="planes-grid"><p style="color:var(--muted);text-align:center">…</p></div>
+  </div>
+</section>
+
+<section id="enrolar" class="band">
+  <div class="wrap" style="text-align:center;max-width:760px">
+    <h2 data-i18n="web.enroll.title">Creá tu cuenta</h2>
+    <p class="sub">Empezás en minutos. Elegí cómo vas a usar MiFirma: como empresa que liquida sus propios sueldos, o como estudio contable que gestiona varias empresas.</p>
+    <div style="display:flex;gap:12px;justify-content:center;flex-wrap:wrap;margin-top:24px">
+      <a class="btn big" href="/entrar?modo=registro" data-i18n="web.enroll.btn">Crear empresa</a>
+      <a class="btn big ghost" href="/entrar?tipo=estudio&amp;modo=registro">Soy un estudio contable</a>
+    </div>
+    <p class="sub" style="margin-top:20px">¿Ya tenés cuenta? <a href="/entrar" style="color:var(--brand);font-weight:600" data-i18n="web.nav.login">Ingresar</a></p>
+  </div>
+</section>
+
+<footer class="foot">
+  <div class="wrap">
+    <div class="brand"><svg viewBox="0 0 272 60" style="height:38px;display:block" role="img" aria-label="MiFirma"><rect x="0" y="14" width="36" height="6.5" rx="3.25" fill="#fff"/><rect x="0" y="25" width="23" height="6.5" rx="3.25" fill="#0aa2b0"/><rect x="0" y="36" width="31" height="6.5" rx="3.25" fill="#fff"/><text x="52" y="26" font-family="'Plus Jakarta Sans',system-ui,sans-serif" font-size="25" font-weight="700" fill="#fff">MiFirma</text><text x="52" y="47" font-family="'Plus Jakarta Sans',system-ui,sans-serif" font-size="13.5" font-weight="500" fill="#6fd2da">New Generation</text></svg></div>
+    <div class="links">
+      <a href="#beneficios" data-i18n="web.nav.benefits">Beneficios</a>
+      <a href="#capacidades" data-i18n="web.nav.capabilities">Capacidades</a>
+      <a href="#planes" data-i18n="web.nav.plans">Planes</a>
+      <a href="/entrar" data-i18n="web.nav.login">Ingresar</a>
+      <a href="/entrar?modo=registro" data-i18n="web.nav.signup">Crear cuenta</a>
+    </div>
+  </div>
+</footer>
+
+<script>
+  const $ = (s) => document.querySelector(s);
+  const esc = (s) => String(s ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
+  const fmt = (v) => { const n = Number(v); return Number.isFinite(n) ? n.toFixed(2) : v; };
+  const ILIMITADO = 100000;
+
+  // ---- i18n ----
+  const IDIOMAS = [['es', 'Español'], ['gn', 'Guaraní'], ['en', 'English'], ['pt', 'Português']];
+  let LANG = localStorage.getItem('png_lang') || 'es';
+  let I18N = {};
+  const t = (k) => (I18N[k] != null ? I18N[k] : k);
+
+  // Textos del render de precios (autocontenidos; gn cae a es).
+  const PRECIO_I18N = {
+    es: { free: 'Gratis', freeDesc: 'Sin cargo mientras dure el plan.', fixed: 'Precio fijo, sin importar la cantidad de funcionarios.', perEmp: 'Por funcionario', perEmpDesc: 'Cada funcionario se cobra según el tramo en el que cae:', perEach: 'Por cada funcionario activo en el período.', firstFree: 'Los primeros {n} funcionarios, sin cargo.', func: 'func.', orMore: 'o más', noCharge: 'sin cargo', chooseEmpty: 'Elegí un plan…', choose: 'Elegir', none: 'Todavía no hay planes publicados.', loadErr: 'No se pudieron cargar los planes. ¿Está el servidor corriendo?', per_mensual: 'por mes', per_semestral: 'por semestre', per_anual: 'por año', s_mensual: 'mes', s_semestral: 'semestre', s_anual: 'año' },
+    en: { free: 'Free', freeDesc: 'No charge while the plan lasts.', fixed: 'Fixed price, regardless of headcount.', perEmp: 'Per employee', perEmpDesc: 'Each employee is charged by the tier they fall into:', perEach: 'Per active employee in the period.', firstFree: 'First {n} employees, free.', func: 'emp.', orMore: 'or more', noCharge: 'free', chooseEmpty: 'Choose a plan…', choose: 'Choose', none: 'No plans published yet.', loadErr: 'Could not load plans. Is the server running?', per_mensual: 'per month', per_semestral: 'per half-year', per_anual: 'per year', s_mensual: 'mo', s_semestral: 'half-yr', s_anual: 'yr' },
+    pt: { free: 'Grátis', freeDesc: 'Sem custo enquanto durar o plano.', fixed: 'Preço fixo, independente da quantidade de funcionários.', perEmp: 'Por funcionário', perEmpDesc: 'Cada funcionário é cobrado pela faixa em que se enquadra:', perEach: 'Por funcionário ativo no período.', firstFree: 'Os primeiros {n} funcionários, sem custo.', func: 'func.', orMore: 'ou mais', noCharge: 'sem custo', chooseEmpty: 'Escolha um plano…', choose: 'Escolher', none: 'Ainda não há planos publicados.', loadErr: 'Não foi possível carregar os planos. O servidor está rodando?', per_mensual: 'por mês', per_semestral: 'por semestre', per_anual: 'por ano', s_mensual: 'mês', s_semestral: 'semestre', s_anual: 'ano' },
+    gn: {},
+  };
+  const pr = (k) => (PRECIO_I18N[LANG] && PRECIO_I18N[LANG][k]) || PRECIO_I18N.es[k];
+
+
+  const BENEFICIOS = [
+    ['web.benefit.1', 'M4 3h16v18H4zM8 7h8M8 11h8M8 15h5'],
+    ['web.benefit.2', 'M12 3a9 9 0 100 18 9 9 0 000-18zM3 12h18M12 3c3 3.3 3 14.7 0 18M12 3c-3 3.3-3 14.7 0 18'],
+    ['web.benefit.3', 'M9 11a3 3 0 100-6 3 3 0 000 6zM17 11a3 3 0 100-6 3 3 0 000 6zM3 20c0-3 3-5 6-5s6 2 6 5M15 20c0-2 1-3.5 2.5-4.2'],
+    ['web.benefit.4', 'M12 3l8 4v5c0 5-3.5 7.5-8 9-4.5-1.5-8-4-8-9V7zM9 12l2 2 4-4'],
+    ['web.benefit.5', 'M4 5h16v11H8l-4 4zM8 9h8M8 12h5'],
+    ['web.benefit.6', 'M12 2l8 4v6c0 5-3.5 8-8 10-4.5-2-8-5-8-10V6z'],
+    ['web.benefit.7', 'M12 3a9 9 0 100 18 9 9 0 000-18zM9.5 9.5a2.5 2.5 0 015 0c0 2-2.5 1.5-2.5 3.5M12 16h.01'],
+    ['web.benefit.8', 'M4 20V10M10 20V4M16 20v-8M22 20H2'],
+  ];
+  function pintarBeneficios() {
+    $('#benefits').innerHTML = BENEFICIOS.map(([k, d]) =>
+      '<div class="benefit"><div class="ico"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="' + d + '"/></svg></div><h3>' + esc(t(k)) + '</h3></div>'
+    ).join('');
+  }
+
+  function bloquePrecio(p) {
+    const per = pr('per_' + p.periodo) || p.periodo;
+    const perCorto = pr('s_' + p.periodo) || p.periodo;
+    if (p.modo_precio === 'fijo') {
+      if (Number(p.precio_fijo) === 0) return { monto: pr('free'), per: '', detalle: pr('freeDesc'), franjas: '' };
+      return { monto: esc(p.moneda) + ' ' + fmt(p.precio_fijo), per: per, detalle: pr('fixed'), franjas: '' };
+    }
+    if (p.tramos && p.tramos.length) {
+      const items = p.tramos.map((tr) => {
+        const rango = tr.hasta == null ? (tr.desde + ' ' + pr('orMore')) : (tr.desde + '–' + tr.hasta);
+        const val = Number(tr.precio) === 0 ? pr('noCharge') : (esc(p.moneda) + ' ' + fmt(tr.precio));
+        return '<li><span>' + esc(rango) + ' ' + esc(pr('func')) + '</span><span class="val">' + val + '</span></li>';
+      }).join('');
+      return { monto: pr('perEmp'), per: per, detalle: pr('perEmpDesc'), franjas: '<ul class="franjas">' + items + '</ul>' };
+    }
+    let det = pr('perEach');
+    if (p.funcionarios_gratis > 0 && p.funcionarios_gratis < ILIMITADO) det = pr('firstFree').replace('{n}', p.funcionarios_gratis);
+    return { monto: esc(p.moneda) + ' ' + fmt(p.precio_por_funcionario), per: pr('func') + ' · ' + perCorto, detalle: det, franjas: '' };
+  }
+
+  let PLANES_CACHE = null;
+  async function cargarPlanes() {
+    const cont = $('#grillaPlanes');
+    const sel = $('#fPlan');
+    try {
+      if (!PLANES_CACHE) {
+        const r = await fetch('/planes-publicos');
+        if (!r.ok) throw new Error('no');
+        PLANES_CACHE = (await r.json()).planes || [];
+      }
+      if (!PLANES_CACHE.length) { cont.innerHTML = '<p style="color:var(--muted);text-align:center">' + esc(pr('none')) + '</p>'; return; }
+      cont.innerHTML = '';
+      if (sel) sel.innerHTML = '<option value="">' + esc(pr('chooseEmpty')) + '</option>';
+      for (const p of PLANES_CACHE) {
+        const b = bloquePrecio(p);
+        const card = document.createElement('div');
+        card.className = 'plan';
+        card.innerHTML =
+          '<div class="moneda-tag">' + esc(p.moneda) + '</div>' +
+          '<h3>' + esc(p.nombre) + '</h3>' +
+          '<div class="precio"><span class="monto">' + b.monto + '</span>' + (b.per ? '<span class="per">' + esc(b.per) + '</span>' : '') + '</div>' +
+          '<div class="detalle">' + esc(b.detalle) + '</div>' +
+          b.franjas +
+          '<div class="sep"></div>' +
+          '<div class="cta"><button class="btn block" data-plan="' + esc(p.codigo) + '">' + esc(pr('choose')) + ' ' + esc(p.nombre) + '</button></div>';
+        cont.appendChild(card);
+        if (sel) { const opt = document.createElement('option'); opt.value = p.codigo; opt.textContent = p.nombre; sel.appendChild(opt); }
+      }
+      cont.querySelectorAll('button[data-plan]').forEach((btn) => {
+        btn.addEventListener('click', () => { window.location.href = '/entrar?modo=registro'; });
+      });
+    } catch {
+      cont.innerHTML = '<p style="color:#a3372b;text-align:center">' + esc(pr('loadErr')) + '</p>';
+    }
+  }
+
+  function aplicarI18n() {
+    document.querySelectorAll('[data-i18n]').forEach((el) => { const k = el.dataset.i18n; if (I18N[k] != null) el.textContent = I18N[k]; });
+    document.documentElement.lang = LANG;
+    $('#langDraft').textContent = I18N['app.lang.draft'] || '';
+    $('#langDraft').style.display = LANG === 'gn' ? 'block' : 'none';
+  }
+
+  async function cambiarIdioma(lang) {
+    LANG = lang;
+    localStorage.setItem('png_lang', lang);
+    try { const r = await fetch('/i18n?idioma=' + encodeURIComponent(lang)); I18N = (await r.json()).ui || {}; } catch (e) { I18N = {}; }
+    aplicarI18n();
+    pintarBeneficios();
+    cargarPlanes();
+    const sel = $('#selLang'); if (sel) sel.value = lang;
+  }
+
+  // Init
+  (function initLang() {
+    const sel = $('#selLang');
+    sel.innerHTML = IDIOMAS.map(([c, n]) => '<option value="' + c + '">' + n + '</option>').join('');
+    sel.value = LANG;
+    sel.addEventListener('change', () => cambiarIdioma(sel.value));
+  })();
+  cambiarIdioma(LANG);
+</script>
+</body>
+</html>

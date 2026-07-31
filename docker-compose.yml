@@ -1,0 +1,46 @@
+# Levanta Postgres + la app para probar en condiciones parecidas a producción,
+# en tu máquina. NO es el deploy en sí; es para validar el contenedor localmente.
+#
+# Secuencia (ver DEPLOY.md):
+#   1) docker compose up -d db        (esperá a que esté "healthy")
+#   2) DATABASE_OWNER_URL=postgres://mifirma_owner:owner_local@localhost:5433/mifirma ./scripts/migrar.sh
+#   3) psql "postgres://mifirma_owner:owner_local@localhost:5433/mifirma" \
+#        -c "ALTER ROLE app_user LOGIN PASSWORD 'app_local';"
+#   4) docker compose up -d app       (recién ahora la app conecta como app_user)
+#   5) abrí http://localhost:3000/app
+services:
+  db:
+    image: postgres:16
+    environment:
+      POSTGRES_USER: mifirma_owner
+      POSTGRES_PASSWORD: owner_local
+      POSTGRES_DB: mifirma
+    ports:
+      - "5433:5432"
+    volumes:
+      - mifirma_pg:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U mifirma_owner -d mifirma"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  app:
+    build: .
+    depends_on:
+      db:
+        condition: service_healthy
+    environment:
+      PORT: 3000
+      DATABASE_URL: postgres://app_user:app_local@db:5432/mifirma
+      DATABASE_OWNER_URL: postgres://mifirma_owner:owner_local@db:5432/mifirma
+      AUTH_DEV_SECRET: dev-secreto-local-cambialo
+      OPERADOR_JWT_SECRET: op-secreto-local-cambialo
+      APP_BASE_URL: http://localhost:3000
+      ANTHROPIC_API_KEY: ""
+    ports:
+      - "3000:3000"
+    restart: on-failure
+
+volumes:
+  mifirma_pg:

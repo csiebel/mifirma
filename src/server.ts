@@ -1,0 +1,476 @@
+import Fastify, { type FastifyInstance, type FastifyRequest } from 'fastify';
+import rateLimit from '@fastify/rate-limit';
+import cookie from '@fastify/cookie';
+import { readFileSync } from 'node:fs';
+import { ZodError } from 'zod';
+import { autenticar, type Identidad } from './auth/identity';
+import { HttpError } from './http/errors';
+import { realmDePath, tokenDeCookie, tokenCsrfDeCookie, setCookieSesion, setCookieCsrf, LOGIN_PATHS } from './http/cookies_sesion';
+import { verificarTokenOperador } from './operador/sesion';
+import { verificarTokenEstudio } from './estudio/sesion';
+import { verificarTokenOferente } from './oferente/sesion';
+import { registrarRutasAuth } from './http/routes/auth';
+import { registrarRutasPersonas } from './http/routes/personas';
+import { registrarRutasChat } from './http/routes/chat';
+import { registrarRutasConsultas } from './http/routes/consultas';
+import { registrarRutasEmpleados } from './http/routes/empleados';
+import { registrarRutasEstructura } from './http/routes/estructura';
+import { registrarRutasNovedades } from './http/routes/novedades';
+import { registrarRutasRRHH } from './http/routes/rrhh';
+import { registrarRutasUsuarios } from './http/routes/usuarios';
+import { registrarRutasRoles } from './http/routes/roles';
+import { registrarRutasAuditoria } from './http/routes/auditoria';
+import { registrarRutasCorridas } from './http/routes/corridas';
+import { registrarRutasAsientos } from './http/routes/asientos';
+import { registrarRutasLicencias } from './http/routes/licencias';
+import { registrarRutasRetenciones } from './http/routes/retenciones';
+import { registrarRutasIntegracion } from './http/routes/integracion';
+import { registrarRutasAusentismo } from './http/routes/ausentismo';
+import { registrarRutasFacturacion } from './http/routes/facturacion';
+import { registrarRutasOperador } from './http/routes/operador';
+import { registrarRutasPublico } from './http/routes/publico';
+import { registrarRutasPagosWebhook } from './http/routes/pagos_webhook';
+import { registrarRutasAyuda } from './http/routes/ayuda';
+import { registrarRutasDocumentos } from './http/routes/documentos';
+import { registrarRutasFacturas } from './http/routes/facturas';
+import { registrarRutasMi } from './http/routes/mi';
+import { registrarRutasComunicados } from './http/routes/comunicados';
+import { registrarRutasSolicitudes } from './http/routes/solicitudes';
+import { registrarRutasBeneficios } from './http/routes/beneficios';
+import { registrarRutasConceptosAusencia } from './http/routes/conceptos_ausencia';
+import { registrarRutasConceptosManuales } from './http/routes/conceptos_manuales';
+import { registrarRutasPlanesVariables } from './http/routes/planes_variables';
+import { registrarRutasInvitacionPlantilla } from './http/routes/invitacion_plantilla';
+import { registrarRutasEstudios } from './http/routes/estudios';
+import { registrarRutasEstudioAuth } from './http/routes/estudio_auth';
+import { registrarRutasOferenteAuth } from './http/routes/oferente_auth';
+import { registrarRutasOferenteOfertas } from './http/routes/oferente_ofertas';
+import { registrarRutasOferenteEventos } from './http/routes/oferente_eventos';
+
+declare module 'fastify' {
+  interface FastifyRequest {
+    identidad: Identidad;
+    authViaCookie: boolean; // true si la identidad se resolvió por cookie (no por Authorization)
+  }
+}
+
+// Fase C (medir, sin cortar): loguea en warn cuando una request se autenticó por el header
+// Authorization en vez de por cookie (cliente con JS viejo). Solo observabilidad: no cambia
+// el flujo. Sin token ni datos sensibles: realm + ruta + método + user-agent truncado.
+// Se excluye /integracion/* (usa api_token por header, es lo esperado).
+function avisarAuthPorHeader(req: FastifyRequest, realm: string, path: string): void {
+  if (path.startsWith('/integracion/')) return;
+  const ua = req.headers['user-agent'];
+  req.log.warn(
+    { evento: 'auth_por_header_fase_c', realm, ruta: path, metodo: req.method, ua: (ua || '').slice(0, 120) },
+    'Fase C: identidad resuelta por header Authorization (sin cookie)',
+  );
+}
+
+export function construirServidor(): FastifyInstance {
+  const app = Fastify({ logger: true, bodyLimit: 5 * 1024 * 1024, trustProxy: true }); // 5 MB: margen para subidas de imágenes en base64 (banners, fotos)
+
+  // Rate-limit por IP: defensa en profundidad contra fuerza bruta y abuso. Dos cubetas por
+  // IP — una estricta para autenticación/alta, otra holgada para el uso normal de la app
+  // (que hace muchas llamadas). Store en memoria: con varias instancias el límite es por
+  // instancia, suficiente para el MVP. trustProxy (arriba) hace que req.ip sea la IP real
+  // del cliente detrás del proxy de Railway, no la del proxy.
+  const PREFIJOS_AUTH = ['/auth/', '/enrolar', '/operador/login', '/estudio/login', '/estudio/registro', '/estudio/reset', '/oferente/login', '/oferente/registro', '/oferente/reset'];
+  const esAuth = (url: string) => {
+    const path = (url || '').split('?')[0];
+    return PREFIJOS_AUTH.some((p) => path.startsWith(p));
+  };
+  app.register(rateLimit, {
+    global: true,
+    timeWindow: '1 minute',
+    max: (req: any) => (esAuth(req.url) ? 20 : 600),
+    keyGenerator: (req: any) => (req.ip || 'sin-ip') + '|' + (esAuth(req.url) ? 'auth' : 'gen'),
+    errorResponseBuilder: () => ({ error: 'Demasiadas solicitudes. Esperá un momento y reintentá.' }),
+  });
+
+  // Cookies de sesión httpOnly (Fase A migración a cookies; ver docs/plan-auth-httponly-cookies.md).
+  // Parsea req.cookies y habilita reply.setCookie/clearCookie. Sin firma: el valor es un JWT
+  // que ya se verifica por su propia firma; no hace falta firmar la cookie además.
+  app.register(cookie);
+
+  // Cabeceras de seguridad en todas las respuestas (defensa en profundidad):
+  //  - nosniff: el navegador no reinterpreta el tipo de un archivo (clave para los
+  //    documentos subidos por usuarios: evita que un archivo se ejecute como HTML).
+  //  - X-Frame-Options + frame-ancestors 'none': evitan clickjacking (embeber la app).
+  //  - HSTS: fuerza HTTPS en visitas futuras.
+  //  - CSP: permite el JS/CSS inline que usa el frontend y las fuentes de Google, y
+  //    bloquea la carga de scripts/recursos de otros orígenes. Rutas que sirven imágenes
+  //    (p. ej. SVG de beneficios) fijan su propia CSP más estricta en su handler.
+  app.addHook('onRequest', async (_req, reply) => {
+    reply.header('X-Content-Type-Options', 'nosniff');
+    reply.header('X-Frame-Options', 'DENY');
+    reply.header('Referrer-Policy', 'strict-origin-when-cross-origin');
+    reply.header('Strict-Transport-Security', 'max-age=31536000; includeSubDomains');
+    reply.header(
+      'Content-Security-Policy',
+      "default-src 'self'; " +
+        "script-src 'self' 'unsafe-inline'; " +
+        "style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; " +
+        "font-src 'self' https://fonts.gstatic.com data:; " +
+        "img-src 'self' data: blob:; " +
+        "connect-src 'self'; " +
+        "worker-src 'self'; " +
+        "frame-ancestors 'none'; " +
+        "base-uri 'self'; " +
+        "form-action 'self'; " +
+        "object-src 'none'",
+    );
+  });
+
+  app.get('/health', async () => ({ ok: true }));
+
+  // Sitio comercial (público): presentación + planes + enrolamiento self-service.
+  app.get('/', async (_req, reply) => {
+    try {
+      const html = readFileSync(new URL('../public/sitio.html', import.meta.url), 'utf8');
+      reply.type('text/html').send(html);
+    } catch {
+      reply.type('text/html').send('<h1>Falta public/sitio.html</h1>');
+    }
+  });
+
+  // Consola del CLIENTE (empresa): la app de siempre, ahora servida en /app.
+  // La página es pública; las APIs validan el token de empresa adentro.
+  app.get('/app', async (_req, reply) => {
+    try {
+      const html = readFileSync(new URL('../public/index.html', import.meta.url), 'utf8');
+      reply.header('Cache-Control', 'no-store').type('text/html').send(html);
+    } catch {
+      reply.type('text/html').send('<h1>Falta public/index.html</h1>');
+    }
+  });
+
+  // Consola de OPERADOR (proveedor del SaaS): página aparte, otra URL, otro acceso.
+  // La página es pública; las APIs /operador/* validan el token de operador adentro.
+  app.get('/operador', async (_req, reply) => {
+    try {
+      const html = readFileSync(new URL('../public/operador.html', import.meta.url), 'utf8');
+      reply.header('Cache-Control', 'no-store').type('text/html').send(html);
+    } catch {
+      reply.type('text/html').send('<h1>Falta public/operador.html</h1>');
+    }
+  });
+
+  // Consola de CONTADORES (estudio): página aparte, otra URL, otro realm de auth.
+  // La página es pública; las APIs /estudio/* son públicas (registro/login) o validan
+  // el token de estudio adentro (/estudio/yo).
+  app.get('/estudio', async (_req, reply) => {
+    try {
+      const html = readFileSync(new URL('../public/estudio.html', import.meta.url), 'utf8');
+      reply.header('Cache-Control', 'no-store').type('text/html').send(html);
+    } catch {
+      reply.type('text/html').send('<h1>Falta public/estudio.html</h1>');
+    }
+  });
+
+  // Consola de OFERENTE (banco, financiera, comercio, anunciante): página aparte, otra
+  // URL, otro realm de auth. La página es pública; las APIs /oferente/* son públicas
+  // (registro/login) o validan el token de oferente adentro (/oferente/yo).
+  app.get('/oferente', async (_req, reply) => {
+    try {
+      const html = readFileSync(new URL('../public/oferente.html', import.meta.url), 'utf8');
+      reply.header('Cache-Control', 'no-store').type('text/html').send(html);
+    } catch {
+      reply.type('text/html').send('<h1>Falta public/oferente.html</h1>');
+    }
+  });
+
+  // App del EMPLEADO (autoservicio móvil): página propia servida en /mi.
+  // Pública; las APIs /mi/* validan el token de empresa adentro.
+  app.get('/mi', async (_req, reply) => {
+    try {
+      const html = readFileSync(new URL('../public/mi.html', import.meta.url), 'utf8');
+      reply.header('Cache-Control', 'no-store').type('text/html').send(html);
+    } catch {
+      reply.type('text/html').send('<h1>Falta public/mi.html</h1>');
+    }
+  });
+
+  // Página de ACCESO unificada (login + alta, empresa o estudio contable).
+  // Pública; sus llamadas (/auth/*, /estudio/*, /industrias-publicas) validan adentro.
+  app.get('/entrar', async (_req, reply) => {
+    try {
+      const html = readFileSync(new URL('../public/entrar.html', import.meta.url), 'utf8');
+      reply.header('Cache-Control', 'no-store').type('text/html').send(html);
+    } catch {
+      reply.type('text/html').send('<h1>Falta public/entrar.html</h1>');
+    }
+  });
+
+  // PWA: manifest, service worker e íconos. Públicos (sin token), servidos como
+  // archivos sueltos igual que las páginas HTML.
+  app.get('/manifest.webmanifest', async (_req, reply) => {
+    try {
+      const body = readFileSync(new URL('../public/manifest.webmanifest', import.meta.url), 'utf8');
+      reply.type('application/manifest+json').send(body);
+    } catch {
+      reply.code(404).send('manifest no encontrado');
+    }
+  });
+  app.get('/sw.js', async (_req, reply) => {
+    try {
+      const body = readFileSync(new URL('../public/sw.js', import.meta.url), 'utf8');
+      reply.type('text/javascript').header('Service-Worker-Allowed', '/').header('Cache-Control', 'no-store').send(body);
+    } catch {
+      reply.code(404).send('sw no encontrado');
+    }
+  });
+  for (const ic of ['icon-192.png', 'icon-512.png', 'icon-maskable-512.png', 'apple-touch-icon.png']) {
+    app.get('/' + ic, async (_req, reply) => {
+      try {
+        const buf = readFileSync(new URL('../public/' + ic, import.meta.url));
+        reply.type('image/png').send(buf);
+      } catch {
+        reply.code(404).send('icono no encontrado');
+      }
+    });
+  }
+  for (const sv of ['favicon.svg', 'logo.svg', 'logo-blanco.svg']) {
+    app.get('/' + sv, async (_req, reply) => {
+      try {
+        const body = readFileSync(new URL('../public/' + sv, import.meta.url), 'utf8');
+        reply.type('image/svg+xml').send(body);
+      } catch {
+        reply.code(404).send('svg no encontrado');
+      }
+    });
+  }
+  app.get('/manifest-empleado.webmanifest', async (_req, reply) => {
+    try {
+      const body = readFileSync(new URL('../public/manifest-empleado.webmanifest', import.meta.url), 'utf8');
+      reply.type('application/manifest+json').send(body);
+    } catch {
+      reply.code(404).send('manifest no encontrado');
+    }
+  });
+
+  // Rutas públicas (sin token): la página, health y el login de desarrollo.
+  const PUBLICAS = new Set([
+    '/',
+    '/app',
+    '/entrar',
+    '/mi',
+    '/health',
+    '/manifest.webmanifest',
+    '/manifest-empleado.webmanifest',
+    '/sw.js',
+    '/favicon.svg',
+    '/logo.svg',
+    '/logo-blanco.svg',
+    '/icon-192.png',
+    '/icon-512.png',
+    '/icon-maskable-512.png',
+    '/apple-touch-icon.png',
+    '/auth/login',
+    '/auth/login/elegir-empresa',
+    '/auth/otp',
+    '/auth/otp/elegir',
+    '/auth/otp/reenviar',
+    '/auth/reset/solicitar',
+    '/auth/reset/confirmar',
+    '/auth/login-dev',
+    '/auth/registro-dev',
+    '/auth/logout',
+    '/planes-publicos',
+    '/industrias-publicas',
+    '/enrolar',
+    '/ayudas',
+    '/i18n',
+    '/integracion/asistencia',
+  ]);
+
+  // Rutas públicas (sin token) de cada realm con auth propia: la página y los endpoints
+  // pre-login (login/registro/reset). TODO lo demás bajo ese prefijo exige el token del
+  // realm en el hook central (defensa en profundidad: si una ruta nueva se olvidara de
+  // validar, igual queda protegida acá). Los handlers siguen resolviendo su sesión tipada.
+  const PUBLICAS_OPERADOR = new Set(['/operador', '/operador/login', '/operador/logout']);
+  const PUBLICAS_ESTUDIO = new Set([
+    '/estudio',
+    '/estudio/registro',
+    '/estudio/registro/verificar',
+    '/estudio/registro/reenviar',
+    '/estudio/login',
+    '/estudio/login/elegir',
+    '/estudio/reset/solicitar',
+    '/estudio/reset/confirmar',
+    '/estudio/logout',
+  ]);
+  const PUBLICAS_OFERENTE = new Set([
+    '/oferente',
+    '/oferente/registro',
+    '/oferente/registro/verificar',
+    '/oferente/registro/reenviar',
+    '/oferente/login',
+    '/oferente/login/elegir',
+    '/oferente/reset/solicitar',
+    '/oferente/reset/confirmar',
+    '/oferente/logout',
+  ]);
+
+  // Marca por request: true si la identidad terminó resolviéndose por cookie (lo pone el
+  // puente de abajo). El hook de CSRF solo actúa cuando es true.
+  app.decorateRequest('authViaCookie', false);
+
+  // Autenticación: resuelve la identidad (empresa + usuario) y la adjunta al
+  // request. A partir de acá todo handler usa withUsuario(...) / withTenant(...).
+  app.addHook('preHandler', async (req) => {
+    let path = req.url.split('?')[0];
+    // Normalizamos la barra final: '/mi/' se trata igual que '/mi'. Algunos
+    // navegadores/PWA (sobre todo iOS) agregan la barra, y sin esto la página
+    // caía en el chequeo de token y devolvía "Falta el token Bearer".
+    if (path.length > 1 && path.endsWith('/')) path = path.slice(0, -1);
+    // Puente cookie→header (Fase A): si el cliente NO manda Authorization pero sí trae
+    // la cookie de sesión del realm, la exponemos como Bearer para que los verificadores
+    // y los handlers (que leen req.headers.authorization) acepten la cookie sin cambios.
+    // Header-first: si vino el header, se respeta tal cual (compatibilidad total).
+    if (!req.headers.authorization) {
+      const tok = tokenDeCookie(req, realmDePath(path));
+      if (tok) {
+        req.headers.authorization = `Bearer ${tok}`;
+        req.authViaCookie = true; // identidad por cookie => el hook de CSRF aplica en mutaciones
+      }
+    }
+    // La consola de operador tiene su propia autenticación (token), no la de cliente.
+    if (path === '/operador' || path.startsWith('/operador/')) {
+      if (!PUBLICAS_OPERADOR.has(path)) {
+        await verificarTokenOperador(req.headers.authorization);
+        if (!req.authViaCookie) avisarAuthPorHeader(req, 'operador', path);
+      }
+      return;
+    }
+    if (path === '/estudio' || path.startsWith('/estudio/')) {
+      if (!PUBLICAS_ESTUDIO.has(path)) {
+        await verificarTokenEstudio(req.headers.authorization);
+        if (!req.authViaCookie) avisarAuthPorHeader(req, 'estudio', path);
+      }
+      return;
+    }
+    if (path === '/oferente' || path.startsWith('/oferente/')) {
+      if (!PUBLICAS_OFERENTE.has(path)) {
+        await verificarTokenOferente(req.headers.authorization);
+        if (!req.authViaCookie) avisarAuthPorHeader(req, 'oferente', path);
+      }
+      return;
+    }
+    // Webhooks de pasarelas de pago: público (sin sesión), validado por la FIRMA del proveedor.
+    if (path.startsWith('/pagos/webhook/')) return;
+    if (PUBLICAS.has(path)) return;
+    req.identidad = await autenticar(req.headers.authorization);
+    if (!req.authViaCookie) avisarAuthPorHeader(req, 'empresa', path);
+  });
+
+  // CSRF (Fase B): en métodos que mutan, si la identidad se resolvió por COOKIE, exigir
+  // double-submit (header X-CSRF-Token == cookie csrf_<realm>) + Origin/Referer del propio
+  // dominio. Si vino por Authorization (frontend no migrado o API de integración) no se
+  // chequea nada: un atacante cross-site no puede setear ese header. Exentas: rutas públicas
+  // (login/registro/reset/logout) y /integracion/* (usa api_token, no la sesión).
+  app.addHook('preHandler', async (req) => {
+    const m = req.method;
+    if (m !== 'POST' && m !== 'PUT' && m !== 'DELETE') return;
+    if (!req.authViaCookie) return;
+    let path = req.url.split('?')[0];
+    if (path.length > 1 && path.endsWith('/')) path = path.slice(0, -1);
+    if (path.startsWith('/integracion/')) return;
+    if (PUBLICAS.has(path) || PUBLICAS_OPERADOR.has(path) || PUBLICAS_ESTUDIO.has(path) || PUBLICAS_OFERENTE.has(path)) return;
+    // Double-submit: el header X-CSRF-Token debe coincidir con la cookie csrf del realm.
+    const cookieTok = tokenCsrfDeCookie(req, realmDePath(path));
+    const h = req.headers['x-csrf-token'];
+    const headerTok = Array.isArray(h) ? h[0] : h;
+    if (!cookieTok || !headerTok || cookieTok !== headerTok) {
+      throw new HttpError(403, 'Falta o no coincide el token CSRF. Recargá la página e intentá de nuevo.');
+    }
+    // Origin/Referer del propio dominio (defensa en profundidad sobre SameSite=Lax).
+    const host = req.headers.host;
+    const fuente = req.headers.origin || req.headers.referer;
+    let origenOk = false;
+    if (host && fuente) {
+      try {
+        origenOk = new URL(fuente).host === host;
+      } catch {
+        origenOk = false;
+      }
+    }
+    if (!origenOk) throw new HttpError(403, 'Origen no permitido para esta operación.');
+  });
+
+  // Set-cookie de sesión (Fase A): cuando un endpoint de login de la allowlist devuelve
+  // { token }, además de mandarlo en el JSON (compat con los frontends actuales) lo
+  // guardamos en la cookie httpOnly del realm. Se usa allowlist explícita —no "cualquier
+  // payload con token"— para no confundir un api_token o el token de "abrir empresa como
+  // contador" (que es de empresa, servido desde /estudio/*) con la sesión del path.
+  app.addHook('preSerialization', async (req, reply, payload) => {
+    let path = req.url.split('?')[0];
+    if (path.length > 1 && path.endsWith('/')) path = path.slice(0, -1);
+    const realm = LOGIN_PATHS.get(path);
+    if (realm) {
+      const p = payload as { token?: unknown } | null;
+      if (p && typeof p === 'object' && typeof p.token === 'string' && p.token) {
+        setCookieSesion(req, reply, realm, p.token);
+        setCookieCsrf(req, reply, realm); // cookie CSRF (no httpOnly) para el double-submit (Fase B)
+      }
+    }
+    return payload;
+  });
+
+  registrarRutasAuth(app);
+  registrarRutasPersonas(app);
+  registrarRutasChat(app);
+  registrarRutasConsultas(app);
+  registrarRutasEmpleados(app);
+  registrarRutasEstructura(app);
+  registrarRutasNovedades(app);
+  registrarRutasRRHH(app);
+  registrarRutasUsuarios(app);
+  registrarRutasRoles(app);
+  registrarRutasAuditoria(app);
+  registrarRutasCorridas(app);
+  registrarRutasAsientos(app);
+  registrarRutasLicencias(app);
+  registrarRutasRetenciones(app);
+  registrarRutasIntegracion(app);
+  registrarRutasAusentismo(app);
+  registrarRutasFacturacion(app);
+  registrarRutasOperador(app);
+  registrarRutasPublico(app);
+  registrarRutasPagosWebhook(app);
+  registrarRutasAyuda(app);
+  registrarRutasDocumentos(app);
+  registrarRutasMi(app);
+  registrarRutasComunicados(app);
+  registrarRutasSolicitudes(app);
+  registrarRutasBeneficios(app);
+  registrarRutasConceptosAusencia(app);
+  registrarRutasConceptosManuales(app);
+  registrarRutasPlanesVariables(app);
+  registrarRutasInvitacionPlantilla(app);
+  registrarRutasEstudios(app);
+  registrarRutasEstudioAuth(app);
+  registrarRutasOferenteAuth(app);
+  registrarRutasOferenteOfertas(app);
+  registrarRutasOferenteEventos(app);
+  registrarRutasFacturas(app);
+
+  app.setErrorHandler((err, _req, reply) => {
+    if (err instanceof ZodError) {
+      reply.code(400).send({ error: 'Datos inválidos', detalles: err.issues });
+      return;
+    }
+    const status = (err as { statusCode?: number }).statusCode ?? 500;
+    if (status >= 500) {
+      // No filtrar detalles internos (mensajes de la base, config, stack) al cliente:
+      // se loguea del lado servidor y se responde con un mensaje genérico.
+      app.log.error(err);
+      reply.code(status).send({ error: 'Ocurrió un error en el servidor. Probá de nuevo en un momento.' });
+      return;
+    }
+    // 4xx (incluye los HttpError intencionales): el mensaje es apto para el usuario.
+    reply.code(status).send({ error: err.message });
+  });
+
+  return app;
+}

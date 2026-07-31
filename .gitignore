@@ -1,0 +1,25 @@
+# Dependencias
+node_modules/
+
+# Variables de entorno y secretos (¡nunca subir!). Se mantiene .env.example.
+.env
+.env.local
+.env.*.local
+
+# Builds / salidas
+dist/
+build/
+
+# Logs
+*.log
+npm-debug.log*
+
+# Sistema operativo
+.DS_Store
+
+# Editores
+.vscode/
+.idea/
+
+# Zips de entregas
+*.zip
