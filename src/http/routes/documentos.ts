@@ -1,76 +1,102 @@
 import type { FastifyInstance } from 'fastify';
 import { z } from 'zod';
-import { registrarSesion } from '../../services/auditoria';
 import * as branding from '../../services/branding';
-import { verIndustriaEmpresa, setIndustriaEmpresa } from '../../services/industrias';
-import { verDatosEmpresa, setDatosEmpresa } from '../../services/empresa';
+import { listarIndustrias, verIndustriaCuenta, setIndustriaCuenta } from '../../services/industrias';
+import { verDatosCuenta, setDatosCuenta } from '../../services/empresa';
 
-const PERIODO = z.string().regex(/^[0-9]{4}-(0[1-9]|1[0-2])$/);
-
-// Documentos binarios y branding. Todo pasa por req.identidad (token de empresa)
-// y, en el caso del recibo, por el RLS de `recibo` (alcance jerárquico).
+/**
+ * Marca y datos de la cuenta.
+ *
+ * Lo que había acá de payroll —recibos en PDF, envío masivo de recibos,
+ * plantilla del recibo, configuración de firma de recibos— se fue con el
+ * dominio. Los documentos de MiFirma van a tener sus propias rutas cuando esté
+ * el motor de flujo.
+ */
 export function registrarRutasDocumentos(app: FastifyInstance) {
-  // Recibo en PDF. Si el usuario no puede ver ese recibo (alcance), da 404.
-
-  // Enviar UN recibo por correo (al email del empleado). La corrida debe estar emitida.
-
-  // Enviar TODOS los recibos de una corrida emitida (envío masivo).
-
-  // Logo de la empresa (imagen). La consola lo baja con el token y lo muestra.
-  app.get('/empresa/logo', async (req, reply) => {
-    const { cuentaId, usuarioId } = req.identidad;
-    const logo = await branding.verLogo(cuentaId, usuarioId);
+  // ---- Logo ----
+  app.get('/cuenta/logo', async (req, reply) => {
+    const { cuentaId, identidadId } = req.identidad;
+    const logo = await branding.verLogo(cuentaId, identidadId);
     if (!logo) return reply.code(404).send({ error: 'Sin logo' });
     reply.header('Content-Type', logo.mime);
+    // no-store: si el cliente cambia el logo, nadie tiene que ver el viejo.
     reply.header('Cache-Control', 'no-store');
-    return reply.send(logo.buffer);
+    return reply.send(logo.bytes);
   });
 
-  // Subir/reemplazar el logo (base64 sin el prefijo data:). Gateado en el servicio.
-  const logoBody = z.object({ base64: z.string().min(1), mime: z.enum(['image/png', 'image/jpeg']) });
-  app.put('/empresa/logo', async (req) => {
-    const { base64, mime } = logoBody.parse(req.body);
-    const { cuentaId, usuarioId } = req.identidad;
-    return branding.guardarLogo(cuentaId, usuarioId, base64, mime);
+  app.get('/cuenta/marca', async (req) => {
+    const { cuentaId, identidadId } = req.identidad;
+    return branding.verMarca(cuentaId, identidadId);
   });
 
-  app.delete('/empresa/logo', async (req) => {
-    const { cuentaId, usuarioId } = req.identidad;
-    return branding.borrarLogo(cuentaId, usuarioId);
+  app.put('/cuenta/logo', async (req) => {
+    const b = z
+      .object({
+        base64: z.string().min(1),
+        mime: z.enum(['image/png', 'image/jpeg', 'image/webp', 'image/svg+xml']),
+      })
+      .parse(req.body);
+    const { cuentaId, identidadId } = req.identidad;
+    return branding.guardarLogo(cuentaId, identidadId, Buffer.from(b.base64, 'base64'), b.mime);
   });
 
-  // Config de firma de recibos (modalidad y, si avanzada, proveedor). Gateado en el servicio.
-
-  // Industria / rubro de la empresa.
-  app.get('/empresa/industria', async (req) => {
-    const { cuentaId, usuarioId } = req.identidad;
-    return verIndustriaEmpresa(cuentaId, usuarioId);
-  });
-  app.put('/empresa/industria', async (req) => {
-    const { cuentaId, usuarioId } = req.identidad;
-    const b = z.object({ industria_id: z.string().nullable().optional() }).parse(req.body);
-    return setIndustriaEmpresa(cuentaId, usuarioId, b.industria_id ?? null);
+  app.delete('/cuenta/logo', async (req) => {
+    const { cuentaId, identidadId } = req.identidad;
+    return branding.borrarLogo(cuentaId, identidadId);
   });
 
-  // Datos de la empresa (nombre, razon social, identificacion fiscal, BPS/IPS, domicilio).
-  // Pais y moneda son de solo lectura: los define el proveedor del servicio.
-  app.get('/empresa/datos', async (req) => {
-    const { cuentaId, usuarioId } = req.identidad;
-    return verDatosEmpresa(cuentaId, usuarioId);
-  });
-  app.put('/empresa/datos', async (req) => {
-    const { cuentaId, usuarioId } = req.identidad;
-    const b = z.object({
-      nombre: z.string().min(1),
-      razon_social: z.string().nullable().optional(),
-      id_fiscal: z.string().nullable().optional(),
-      num_seguridad_social: z.string().nullable().optional(),
-      domicilio: z.string().nullable().optional(),
-    }).parse(req.body);
-    return setDatosEmpresa(cuentaId, usuarioId, b);
+  app.put('/cuenta/colores', async (req) => {
+    const COLOR = z.string().regex(/^#[0-9a-fA-F]{6}$/).nullable();
+    const b = z.object({ primario: COLOR, texto: COLOR }).parse(req.body);
+    const { cuentaId, identidadId } = req.identidad;
+    return branding.setColores(cuentaId, identidadId, b.primario, b.texto);
   });
 
-  // Plantilla del recibo (presentacional, por empresa). Gateada en el servicio (admin).
+  // ---- Industria ----
+  app.get('/industrias', async (req) => {
+    const { cuentaId, identidadId } = req.identidad;
+    return { industrias: await listarIndustrias(cuentaId, identidadId) };
+  });
 
-  // Vista previa: PDF de muestra con la plantilla en edición (no guardada).
+  app.get('/cuenta/industria', async (req) => {
+    const { cuentaId, identidadId } = req.identidad;
+    return verIndustriaCuenta(cuentaId, identidadId);
+  });
+
+  app.put('/cuenta/industria', async (req) => {
+    const b = z.object({ industria_id: z.string().uuid().nullable().optional() }).parse(req.body);
+    const { cuentaId, identidadId } = req.identidad;
+    return setIndustriaCuenta(cuentaId, identidadId, b.industria_id ?? null);
+  });
+
+  // ---- Datos ----
+  //
+  // País y moneda no se editan desde acá: definen el paquete de país que aplica
+  // —marco legal, proveedores acreditados, régimen de facturación— y cambiarlos
+  // por un formulario dejaría documentos firmados bajo un marco y la cuenta
+  // declarando otro.
+  app.get('/cuenta/datos', async (req) => {
+    const { cuentaId, identidadId } = req.identidad;
+    return verDatosCuenta(cuentaId, identidadId);
+  });
+
+  app.put('/cuenta/datos', async (req) => {
+    const b = z
+      .object({
+        nombre: z.string().min(1).max(120).optional(),
+        razon_social: z.string().max(200).nullable().optional(),
+        identificacion_fiscal: z.string().max(40).nullable().optional(),
+        domicilio: z.string().max(300).nullable().optional(),
+        idioma: z.string().max(12).optional(),
+      })
+      .parse(req.body);
+    const { cuentaId, identidadId } = req.identidad;
+    return setDatosCuenta(cuentaId, identidadId, {
+      nombreMostrado: b.nombre,
+      razonSocial: b.razon_social,
+      identificacionFiscal: b.identificacion_fiscal,
+      domicilio: b.domicilio,
+      idioma: b.idioma,
+    });
+  });
 }

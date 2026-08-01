@@ -36,14 +36,14 @@ const SISTEMA = `Sos el asistente de un sistema de liquidación de sueldos y RRH
  */
 export async function responder(
   cuentaId: string,
-  usuarioId: string,
+  identidadId: string,
   pregunta: string,
 ): Promise<string> {
   const apiKey = process.env.ANTHROPIC_API_KEY;
   if (!apiKey) throw new Error('Falta ANTHROPIC_API_KEY en el entorno.');
 
   // Gate de habilitación (override de la empresa -> plan). Si está apagado, no se gasta nada.
-  if (!(await asistenteHabilitado(cuentaId, usuarioId))) {
+  if (!(await asistenteHabilitado(cuentaId, identidadId))) {
     return 'El asistente conversacional no está habilitado en el plan de tu empresa.';
   }
 
@@ -75,7 +75,7 @@ export async function responder(
         if (bloque.type === 'tool_use') {
           let contenido: string;
           try {
-            const data = await ejecutarHerramienta(cuentaId, usuarioId, bloque.name, bloque.input);
+            const data = await ejecutarHerramienta(cuentaId, identidadId, bloque.name, bloque.input);
             contenido = JSON.stringify(data);
           } catch (e) {
             contenido = JSON.stringify({ error: (e as Error).message });
@@ -92,10 +92,10 @@ export async function responder(
       .map((b) => b.text)
       .join('\n')
       .trim();
-    await registrarConsumoIA(cuentaId, usuarioId, { periodo, modelo: MODELO, inputTokens: inTok, outputTokens: outTok });
+    await registrarConsumoIA(cuentaId, identidadId, { periodo, modelo: MODELO, inputTokens: inTok, outputTokens: outTok });
     return texto;
   }
 
-  await registrarConsumoIA(cuentaId, usuarioId, { periodo, modelo: MODELO, inputTokens: inTok, outputTokens: outTok });
+  await registrarConsumoIA(cuentaId, identidadId, { periodo, modelo: MODELO, inputTokens: inTok, outputTokens: outTok });
   return 'No pude completar la consulta en los pasos disponibles.';
 }

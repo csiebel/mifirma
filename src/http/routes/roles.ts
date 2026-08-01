@@ -2,44 +2,52 @@ import type { FastifyInstance } from 'fastify';
 import { z } from 'zod';
 import * as roles from '../../services/roles';
 
-const ALCANCE = z.enum(['propio', 'equipo', 'area', 'empresa']);
-
-// Módulo de definición de roles (panel del admin). Rutas autenticadas; el permiso
-// usuario:escribir se valida en el servicio. El catálogo describe los "ladrillos"
-// del modelo de permisos para que la UI arme la matriz.
+/**
+ * Panel de roles.
+ *
+ * Sin `alcance`: en MiFirma la capacidad es binaria y el "sobre qué documentos"
+ * lo dan las carpetas. Ver el encabezado de `services/roles.ts`.
+ *
+ * El permiso se valida en el servicio y, de verdad, en las políticas RLS.
+ */
 export function registrarRutasRoles(app: FastifyInstance) {
-  app.get('/roles/catalogo', async () => roles.catalogoCapacidades());
+  app.get('/roles/catalogo', async (req) => {
+    const { cuentaId, identidadId } = req.identidad;
+    return roles.catalogoCapacidades(cuentaId, identidadId);
+  });
 
   app.get('/roles/detalle', async (req) => {
-    const { cuentaId, usuarioId } = req.identidad;
-    return { roles: await roles.listarRolesDetalle(cuentaId, usuarioId) };
+    const { cuentaId, identidadId } = req.identidad;
+    return { roles: await roles.listarRolesDetalle(cuentaId, identidadId) };
   });
 
   app.post('/roles', async (req) => {
-    const { nombre } = z.object({ nombre: z.string().min(1) }).parse(req.body);
-    const { cuentaId, usuarioId } = req.identidad;
-    return roles.crearRol(cuentaId, usuarioId, nombre);
+    const b = z
+      .object({ codigo: z.string().min(1).max(40), nombre: z.string().min(1).max(80) })
+      .parse(req.body);
+    const { cuentaId, identidadId } = req.identidad;
+    return roles.crearRol(cuentaId, identidadId, b.codigo, b.nombre);
   });
 
   app.patch('/roles/:id', async (req) => {
     const { id } = z.object({ id: z.string().uuid() }).parse(req.params);
-    const { nombre } = z.object({ nombre: z.string().min(1) }).parse(req.body);
-    const { cuentaId, usuarioId } = req.identidad;
-    return roles.renombrarRol(cuentaId, usuarioId, id, nombre);
+    const b = z
+      .object({ nombre: z.string().min(1).max(80), idioma: z.string().max(12).optional() })
+      .parse(req.body);
+    const { cuentaId, identidadId } = req.identidad;
+    return roles.renombrarRol(cuentaId, identidadId, id, b.nombre, b.idioma ?? 'es');
   });
 
   app.delete('/roles/:id', async (req) => {
     const { id } = z.object({ id: z.string().uuid() }).parse(req.params);
-    const { cuentaId, usuarioId } = req.identidad;
-    return roles.borrarRol(cuentaId, usuarioId, id);
+    const { cuentaId, identidadId } = req.identidad;
+    return roles.borrarRol(cuentaId, identidadId, id);
   });
 
   app.put('/roles/:id/capacidad', async (req) => {
     const { id } = z.object({ id: z.string().uuid() }).parse(req.params);
-    const b = z
-      .object({ recurso: z.string().min(1), accion: z.string().min(1), alcance: ALCANCE.nullable() })
-      .parse(req.body);
-    const { cuentaId, usuarioId } = req.identidad;
-    return roles.setCapacidad(cuentaId, usuarioId, id, b.recurso, b.accion, b.alcance);
+    const b = z.object({ capacidad_id: z.string().uuid(), activa: z.boolean() }).parse(req.body);
+    const { cuentaId, identidadId } = req.identidad;
+    return roles.setCapacidad(cuentaId, identidadId, id, b.capacidad_id, b.activa);
   });
 }

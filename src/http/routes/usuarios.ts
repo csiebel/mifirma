@@ -8,22 +8,22 @@ import { cambiarMiPassword } from '../../services/cuenta';
 // listar los roles disponibles. Gateadas por permiso en el servicio (admin).
 export function registrarRutasUsuarios(app: FastifyInstance) {
   app.get('/roles', async (req) => {
-    const { cuentaId, usuarioId } = req.identidad;
-    return usuarios.listarRoles(cuentaId, usuarioId);
+    const { cuentaId, identidadId } = req.identidad;
+    return usuarios.listarRoles(cuentaId, identidadId);
   });
 
   app.post('/usuarios', async (req) => {
     const b = z
       .object({ relacion_id: z.string().uuid(), email: z.string().min(3), rol_id: z.string().uuid(), vincular: z.boolean().optional() })
       .parse(req.body);
-    const { cuentaId, usuarioId } = req.identidad;
-    return usuarios.crearAcceso(cuentaId, usuarioId, { relacionId: b.relacion_id, email: b.email, rolId: b.rol_id, vincular: b.vincular });
+    const { cuentaId, identidadId } = req.identidad;
+    return usuarios.crearAcceso(cuentaId, identidadId, { relacionId: b.relacion_id, email: b.email, rolId: b.rol_id, vincular: b.vincular });
   });
 
   // Listado de usuarios de la empresa (con sus roles y estado).
   app.get('/usuarios', async (req) => {
-    const { cuentaId, usuarioId } = req.identidad;
-    return { usuarios: await usuarios.listarUsuarios(cuentaId, usuarioId) };
+    const { cuentaId, identidadId } = req.identidad;
+    return { usuarios: await usuarios.listarUsuarios(cuentaId, identidadId) };
   });
 
   // Invitar a un usuario NUEVO (crea la persona y manda la invitación por correo).
@@ -36,34 +36,34 @@ export function registrarRutasUsuarios(app: FastifyInstance) {
         rol_id: z.string().uuid().optional(),
       })
       .parse(req.body);
-    const { cuentaId, usuarioId } = req.identidad;
-    return invitarUsuario(cuentaId, usuarioId, { nombre: b.nombre, email: b.email, documento: b.documento, rolId: b.rol_id });
+    const { cuentaId, identidadId } = req.identidad;
+    return invitarUsuario(cuentaId, identidadId, { nombre: b.nombre, email: b.email, documento: b.documento, rolId: b.rol_id });
   });
 
   app.post('/usuarios/:id/roles', async (req) => {
     const { id } = z.object({ id: z.string().uuid() }).parse(req.params);
     const { rol_id } = z.object({ rol_id: z.string().uuid() }).parse(req.body);
-    const { cuentaId, usuarioId } = req.identidad;
-    return usuarios.asignarRol(cuentaId, usuarioId, id, rol_id);
+    const { cuentaId, identidadId } = req.identidad;
+    return usuarios.asignarRol(cuentaId, identidadId, id, rol_id);
   });
 
   app.delete('/usuarios/:id/roles/:rolId', async (req) => {
     const { id, rolId } = z.object({ id: z.string().uuid(), rolId: z.string().uuid() }).parse(req.params);
-    const { cuentaId, usuarioId } = req.identidad;
-    return usuarios.quitarRol(cuentaId, usuarioId, id, rolId);
+    const { cuentaId, identidadId } = req.identidad;
+    return usuarios.quitarRol(cuentaId, identidadId, id, rolId);
   });
 
   app.post('/usuarios/:id/activo', async (req) => {
     const { id } = z.object({ id: z.string().uuid() }).parse(req.params);
     const { activo } = z.object({ activo: z.boolean() }).parse(req.body);
-    const { cuentaId, usuarioId } = req.identidad;
-    return usuarios.setActivoUsuario(cuentaId, usuarioId, id, activo);
+    const { cuentaId, identidadId } = req.identidad;
+    return usuarios.setActivoUsuario(cuentaId, identidadId, id, activo);
   });
 
   app.post('/usuarios/:id/reinvitar', async (req) => {
     const { id } = z.object({ id: z.string().uuid() }).parse(req.params);
-    const { cuentaId, usuarioId } = req.identidad;
-    return usuarios.reenviarInvitacion(cuentaId, usuarioId, id);
+    const { cuentaId, identidadId } = req.identidad;
+    return usuarios.reenviarInvitacion(cuentaId, identidadId, id);
   });
 
   app.post('/usuarios/:id/otp', async (req) => {
@@ -71,14 +71,14 @@ export function registrarRutasUsuarios(app: FastifyInstance) {
     const { telefono, canal } = z
       .object({ telefono: z.string().nullable().optional(), canal: z.enum(['email', 'sms', 'whatsapp']) })
       .parse(req.body);
-    const { cuentaId, usuarioId } = req.identidad;
-    return usuarios.setCanalOtpUsuario(cuentaId, usuarioId, id, telefono ?? null, canal);
+    const { cuentaId, identidadId } = req.identidad;
+    return usuarios.setCanalOtpUsuario(cuentaId, identidadId, id, telefono ?? null, canal);
   });
 
   // Cambiar la propia contraseña (cualquier usuario autenticado, sólo la suya).
   app.put('/yo/password', async (req) => {
     const b = z.object({ actual: z.string().min(1), nueva: z.string().min(1) }).parse(req.body);
-    const { cuentaId, usuarioId } = req.identidad;
-    return cambiarMiPassword(cuentaId, usuarioId, b.actual, b.nueva);
+    const { cuentaId, identidadId } = req.identidad;
+    return cambiarMiPassword(cuentaId, identidadId, b.actual, b.nueva);
   });
 }

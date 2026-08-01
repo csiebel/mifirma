@@ -9,7 +9,7 @@ const cuerpo = z.object({ pregunta: z.string().min(1) });
 export function registrarRutasChat(app: FastifyInstance) {
   app.post('/chat', async (req) => {
     const { pregunta } = cuerpo.parse(req.body);
-    const respuesta = await responder(req.identidad.cuentaId, req.identidad.usuarioId, pregunta);
+    const respuesta = await responder(req.identidad.cuentaId, req.identidad.identidadId, pregunta);
     return { respuesta };
   });
 }

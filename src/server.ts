@@ -11,7 +11,6 @@ import { registrarRutasAuth } from './http/routes/auth';
 import { registrarRutasChat } from './http/routes/chat';
 import { registrarRutasUsuarios } from './http/routes/usuarios';
 import { registrarRutasRoles } from './http/routes/roles';
-import { registrarRutasIntegracion } from './http/routes/integracion';
 import { registrarRutasOperador } from './http/routes/operador';
 import { registrarRutasPublico } from './http/routes/publico';
 import { registrarRutasPagosWebhook } from './http/routes/pagos_webhook';
@@ -379,7 +378,6 @@ export function construirServidor(): FastifyInstance {
   registrarRutasChat(app);
   registrarRutasUsuarios(app);
   registrarRutasRoles(app);
-  registrarRutasIntegracion(app);
   registrarRutasOperador(app);
   registrarRutasPublico(app);
   registrarRutasPagosWebhook(app);
