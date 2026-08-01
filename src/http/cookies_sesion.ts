@@ -86,11 +86,14 @@ export function clearCookieSesion(reply: FastifyReply, realm: Realm): void {
 export const LOGIN_PATHS: ReadonlyMap<string, Realm> = new Map<string, Realm>([
   // Empresa (sess_emp)
   ['/auth/login', 'emp'],
-  ['/auth/login/elegir-empresa', 'emp'],
   ['/auth/otp', 'emp'],
-  ['/auth/login-dev', 'emp'],
-  ['/auth/registro-dev', 'emp'],
-  ['/enrolar', 'emp'],
+  // Elegir cuenta emite la sesión definitiva cuando la identidad tiene acceso a
+  // más de una. Se llamaba 'elegir-empresa' en payroll y quedó apuntando a una
+  // ruta que ya no existe: el que tenía dos cuentas entraba sin cookie.
+  ['/auth/login/elegir-cuenta', 'emp'],
+  // El alta emite sesión igual que un login. Sin esto, la empresa se crea, el
+  // navegador salta a /app y ahí no hay cookie: consola vacía y a /entrar.
+  ['/auth/registro', 'emp'],
   // Estudio (sess_est)
   ['/estudio/login', 'est'],
   ['/estudio/login/elegir', 'est'],

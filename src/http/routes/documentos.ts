@@ -3,6 +3,7 @@ import { z } from 'zod';
 import * as branding from '../../services/branding';
 import { listarIndustrias, verIndustriaCuenta, setIndustriaCuenta } from '../../services/industrias';
 import { verDatosCuenta, setDatosCuenta } from '../../services/empresa';
+import { quienSoy } from '../../services/cuenta';
 
 /**
  * Marca y datos de la cuenta.
@@ -13,6 +14,15 @@ import { verDatosCuenta, setDatosCuenta } from '../../services/empresa';
  * el motor de flujo.
  */
 export function registrarRutasDocumentos(app: FastifyInstance) {
+  // ---- Quién soy ----
+  //
+  // Lo primero que pide la consola al abrir. Va acá y no en una ruta nueva
+  // porque es lectura de la cuenta activa, igual que /cuenta/datos.
+  app.get('/mi/quien-soy', async (req) => {
+    const { cuentaId, identidadId } = req.identidad;
+    return quienSoy(cuentaId, identidadId);
+  });
+
   // ---- Logo ----
   app.get('/cuenta/logo', async (req, reply) => {
     const { cuentaId, identidadId } = req.identidad;

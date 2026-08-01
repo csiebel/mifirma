@@ -125,3 +125,43 @@ export async function cambiarMiTelefono(
 
   return { ok: true, telefono: tel };
 }
+
+
+/**
+ * Quién soy y dónde estoy parado.
+ *
+ * La consola lo necesita para dos cosas: mostrar en qué cuenta estás —quien
+ * trabaja para tres empresas necesita verlo, no adivinarlo— y saber qué botones
+ * tiene sentido dibujar.
+ *
+ * ⚠ `capacidades` es para la PANTALLA, no para autorizar. Cada llamada la vuelve
+ * a decidir la política RLS con el contexto de la sesión. Un cliente que mienta
+ * acá no gana nada.
+ */
+export async function quienSoy(cuentaId: string, identidadId: string) {
+  return withUsuario(cuentaId, identidadId, async (trx, autz) => {
+    const i = await trx
+      .selectFrom('identidad')
+      .select(['email_mostrado', 'nombre_mostrado'])
+      .where('id', '=', identidadId)
+      .executeTakeFirst();
+    const c = await trx
+      .selectFrom('cuenta')
+      .select(['nombre_mostrado', 'pais', 'moneda', 'idioma', 'tipo'])
+      .where('id', '=', cuentaId)
+      .executeTakeFirst();
+
+    return {
+      identidad_id: identidadId,
+      email: i?.email_mostrado ?? null,
+      nombre: i?.nombre_mostrado ?? null,
+      cuenta_id: cuentaId,
+      cuenta_nombre: c?.nombre_mostrado ?? null,
+      tipo: c?.tipo ?? null,
+      pais: c?.pais ?? null,
+      moneda: c?.moneda ?? null,
+      idioma: c?.idioma ?? null,
+      capacidades: [...autz.capacidades].sort(),
+    };
+  });
+}

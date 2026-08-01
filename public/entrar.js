@@ -149,8 +149,10 @@
     if (j.tipo === 'elegir_cuenta') return mostrarCuentas(j);
     throw new Error('Respuesta inesperada del servidor.');
   }
-  function entrar(j){
-    try{ localStorage.setItem('mf_token', j.token); }catch(e){}
+  // La sesión viaja en la cookie httpOnly que setea el servidor. NO se guarda el
+  // token en localStorage: ahí lo lee cualquier script inyectado, y en un
+  // producto de firma electrónica el token de sesión es la firma de la persona.
+  function entrar(_j){
     location.href = '/app';
   }
 

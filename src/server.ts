@@ -11,6 +11,7 @@ import { registrarRutasAuth } from './http/routes/auth';
 import { registrarRutasChat } from './http/routes/chat';
 import { registrarRutasUsuarios } from './http/routes/usuarios';
 import { registrarRutasRoles } from './http/routes/roles';
+import { registrarRutasCarpetas } from './http/routes/carpetas';
 import { registrarRutasOperador } from './http/routes/operador';
 import { registrarRutasPublico } from './http/routes/publico';
 import { registrarRutasPagosWebhook } from './http/routes/pagos_webhook';
@@ -142,7 +143,7 @@ export function construirServidor(): FastifyInstance {
 
   // JavaScript de las páginas públicas. Se sirve como archivo suelto, igual que
   // el HTML: para dos archivos no vale la pena montar un servidor de estáticos.
-  for (const js of ['sitio.js', 'entrar.js']) {
+  for (const js of ['sitio.js', 'entrar.js', 'consola.js']) {
     app.get('/' + js, async (_req, reply) => {
       try {
         const body = readFileSync(new URL('../public/' + js, import.meta.url), 'utf8');
@@ -202,11 +203,14 @@ export function construirServidor(): FastifyInstance {
 
   // Rutas públicas (sin token): la página, health y el login de desarrollo.
   const PUBLICAS = new Set([
+    // Páginas y estáticos
     '/',
     '/app',
     '/entrar',
-    '/mi',
     '/health',
+    '/sitio.js',
+    '/entrar.js',
+    '/consola.js',
     '/manifest.webmanifest',
     '/manifest-empleado.webmanifest',
     '/sw.js',
@@ -217,22 +221,23 @@ export function construirServidor(): FastifyInstance {
     '/icon-512.png',
     '/icon-maskable-512.png',
     '/apple-touch-icon.png',
+    // Autenticación: todo lo que ocurre ANTES de tener sesión
     '/auth/login',
-    '/auth/login/elegir-empresa',
+    '/auth/login/elegir-cuenta',
     '/auth/otp',
     '/auth/otp/elegir',
     '/auth/otp/reenviar',
     '/auth/reset/solicitar',
     '/auth/reset/confirmar',
-    '/auth/login-dev',
-    '/auth/registro-dev',
+    '/auth/registro',
     '/auth/logout',
-    '/planes-publicos',
-    '/industrias-publicas',
-    '/enrolar',
+    // Datos que consume la página comercial sin token
+    '/publico/planes',
+    '/publico/industrias',
+    '/publico/salud',
+    '/publico/paises',
     '/ayudas',
     '/i18n',
-    '/integracion/asistencia',
   ]);
 
   // Rutas públicas (sin token) de cada realm con auth propia: la página y los endpoints
@@ -358,6 +363,7 @@ export function construirServidor(): FastifyInstance {
   registrarRutasChat(app);
   registrarRutasUsuarios(app);
   registrarRutasRoles(app);
+  registrarRutasCarpetas(app);
   registrarRutasOperador(app);
   registrarRutasPublico(app);
   registrarRutasPagosWebhook(app);

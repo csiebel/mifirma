@@ -15,6 +15,14 @@ import { fijarContexto } from '../../db/contexto';
  * El alta self-service NO vive acá: está en `/auth/registro`, que tiene su
  * propio tope de altas por IP. Duplicarla en dos rutas duplicaría también el
  * lugar donde hay que acordarse de poner el freno.
+ *
+ * ═══ POR QUÉ LOS PRECIOS SE ARMAN CON SQL CRUDO ═══
+ *
+ * `precio_metrica` y las columnas comerciales de `plan` llegaron en la
+ * migración 019, después de que se generara `db/schema.ts`. Consultarlas con el
+ * query builder tipado obligaría a regenerar el esquema para tocar la página de
+ * precios. Con `sql` explícito el tipo lo declara la consulta y no hay
+ * dependencia con la generación.
  */
 
 /** Contexto anónimo: sin identidad, sin cuenta. Sólo lee catálogos. */
@@ -58,24 +66,83 @@ export function registrarRutasPublico(app: FastifyInstance) {
     };
   });
 
-  // Planes activos, para mostrar precios en el sitio.
+  /**
+   * En qué países se puede contratar.
+   *
+   * No hay ninguna tabla de "países habilitados" ni hace falta: un país está
+   * abierto cuando el operador le cargó precios a por lo menos un plan público.
+   * Cargar el precio ES habilitar el país, y así no existe el estado absurdo de
+   * un país anunciado sin precios que nadie puede contratar.
+   */
+  app.get('/publico/paises', async () => {
+    const r = await anonimo((trx) =>
+      sql<{ pais: string }>`
+        select distinct pm.pais
+          from precio_metrica pm
+          join plan p on p.id = pm.plan_id
+         where pm.vigente_hasta is null and p.activo and p.publico
+         order by 1
+      `.execute(trx),
+    );
+    return { paises: r.rows };
+  });
+
+  /**
+   * Planes con sus precios para un país.
+   *
+   * Ni un monto ni una moneda viven en el código: salen de `precio_metrica`,
+   * que carga el operador. Un plan sin precio para ese país simplemente no
+   * aparece — es el mismo mecanismo que habilita el país.
+   */
   app.get('/publico/planes', async (req) => {
     const idioma = idiomaDe(req as any);
-    const filas: any[] = await anonimo((trx) =>
-      trx
-        .selectFrom('plan')
-        .select(['id', 'codigo', 'nombre_i18n', 'orden'])
-        .where('activo', '=', true)
-        .orderBy('orden')
-        .execute(),
+    const q = z.object({ pais: z.string().length(2).optional() }).parse(req.query);
+    const pais = (q.pais ?? '').toUpperCase();
+    if (!pais) return { planes: [] };
+
+    const r = await anonimo((trx) =>
+      sql<{
+        id: string; codigo: string; nombre_i18n: unknown; descripcion_i18n: unknown;
+        incluye_i18n: unknown; destacado: boolean; orden: number;
+        moneda: string; metrica: string; nivel_firma: string | null; precio_unitario: string;
+      }>`
+        select p.id, p.codigo, p.nombre_i18n, p.descripcion_i18n, p.incluye_i18n,
+               p.destacado, p.orden,
+               pm.moneda, pm.metrica, pm.nivel_firma, pm.precio_unitario
+          from plan p
+          join precio_metrica pm on pm.plan_id = p.id
+         where pm.pais = ${pais} and pm.vigente_hasta is null
+           and p.activo and p.publico
+         order by p.orden, pm.metrica, pm.nivel_firma nulls first
+      `.execute(trx),
     );
-    return {
-      planes: filas.map((f: any) => ({
-        id: f.id,
-        codigo: f.codigo,
-        nombre: textoI18n(f.nombre_i18n, idioma) ?? f.codigo,
-      })),
-    };
+
+    const porPlan = new Map<string, any>();
+    for (const f of r.rows) {
+      let plan = porPlan.get(f.id);
+      if (!plan) {
+        plan = {
+          id: f.id,
+          codigo: f.codigo,
+          nombre: textoI18n(f.nombre_i18n, idioma) ?? f.codigo,
+          descripcion: textoI18n(f.descripcion_i18n, idioma),
+          incluye: listaI18n(f.incluye_i18n, idioma),
+          destacado: f.destacado,
+          moneda: f.moneda,
+          precios: [],
+        };
+        porPlan.set(f.id, plan);
+      }
+      plan.precios.push({
+        metrica: f.metrica,
+        nivel_firma: f.nivel_firma,
+        // `numeric` llega como string desde pg —a propósito, para no perder
+        // decimales— y así se manda: el que formatea es el navegador, con la
+        // moneda al lado.
+        precio: f.precio_unitario,
+      });
+    }
+    return { planes: [...porPlan.values()] };
   });
 
   // Salud del servicio, para el monitoreo. No dice nada del contenido.
