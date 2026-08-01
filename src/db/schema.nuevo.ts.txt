@@ -1,0 +1,343 @@
+/**
+ * MiFirma — tipos de la base, generados por introspección.
+ *
+ * NO editar a mano: se regenera desde el esquema real con
+ *
+ *   DATABASE_URL="postgresql://usuario@localhost:5432/mifirma" \
+ *     npx kysely-codegen --dialect postgres --out-file src/db/schema.ts
+ *
+ * Cubre las migraciones 001 a 009: núcleo (cuenta, identidad, anclajes,
+ * credencial, membresía, persona), permisos (rol, capacidad, usuario_rol),
+ * carpetas con sus permisos, dominio de firma (archivo, circuito, instancia,
+ * participación, ubicación) y otorgamientos.
+ *
+ * Al agregar migraciones hay que volver a generarlo, o TypeScript va a seguir
+ * creyendo en un esquema que ya no existe.
+ */
+
+import type { ColumnType } from "kysely";
+
+export type Generated<T> = T extends ColumnType<infer S, infer I, infer U>
+  ? ColumnType<S, I | undefined, U>
+  : ColumnType<T, T | undefined, T>;
+
+export type Int8 = ColumnType<string, bigint | number | string, bigint | number | string>;
+
+export type Json = JsonValue;
+
+export type JsonArray = JsonValue[];
+
+export type JsonObject = {
+  [x: string]: JsonValue | undefined;
+};
+
+export type JsonPrimitive = boolean | number | string | null;
+
+export type JsonValue = JsonArray | JsonObject | JsonPrimitive;
+
+export type Timestamp = ColumnType<Date, Date | string, Date | string>;
+
+export interface AnclajeIdentidad {
+  creado_en: Generated<Timestamp>;
+  documento_numero_norm: string | null;
+  documento_tipo: string | null;
+  emisor: string | null;
+  evidencia_id: string | null;
+  id: Generated<string>;
+  identidad_id: string;
+  idp: string | null;
+  idp_sujeto: string | null;
+  metodo_prueba: string;
+  nivel_garantia: string;
+  pais: string | null;
+  probado_en: Generated<Timestamp>;
+  revocado_en: Timestamp | null;
+  serie_certificado: string | null;
+  sujeto_certificado: string | null;
+  tipo: string;
+  valor_normalizado: string | null;
+  vigente_hasta: Timestamp | null;
+}
+
+export interface Archivo {
+  bytes: Int8;
+  clase: string;
+  clave_almacenamiento: string;
+  creado_en: Generated<Timestamp>;
+  cuenta_custodia_id: string;
+  id: Generated<string>;
+  mime: string;
+  paginas: number | null;
+  region: string;
+  sha256: Buffer;
+}
+
+export interface Capacidad {
+  accion: string;
+  descripcion_i18n: Json;
+  id: Generated<string>;
+  recurso: string;
+}
+
+export interface Carpeta {
+  creada_en: Generated<Timestamp>;
+  creada_por: string | null;
+  cuenta_id: string;
+  id: Generated<string>;
+  nombre_i18n: Json;
+  padre_id: string | null;
+  ruta: string;
+  sistema: string | null;
+}
+
+export interface CarpetaPermiso {
+  acciones: string[];
+  carpeta_id: string;
+  creado_en: Generated<Timestamp>;
+  cuenta_id: string;
+  id: Generated<string>;
+  otorgado_por: string | null;
+  rol_id: string;
+}
+
+export interface Circuito {
+  archivo_base_id: string;
+  cerrado_en: Timestamp | null;
+  creado_en: Generated<Timestamp>;
+  creado_por_identidad_id: string;
+  cuenta_propietaria_id: string;
+  dias_vigencia: number | null;
+  enviado_en: Timestamp | null;
+  estado: Generated<string>;
+  id: Generated<string>;
+  idioma: Generated<string>;
+  modo: string;
+  modo_sello: string | null;
+  motivo_cancelacion: string | null;
+  nivel_firma: string;
+  pais_marco: string;
+  permite_delegar: Generated<boolean>;
+  politica_idioma: Generated<string>;
+  politica_rechazo: Generated<string>;
+  prorrogable: Generated<boolean>;
+  prorrogas_usadas: Generated<number>;
+  titulo: string;
+  vence_en: Timestamp | null;
+}
+
+export interface Credencial {
+  bloqueada_hasta: Timestamp | null;
+  creada_en: Generated<Timestamp>;
+  hash_password: string | null;
+  identidad_id: string;
+  idp_externo: string | null;
+  idp_sujeto: string | null;
+  intentos_fallidos: Generated<number>;
+  otp_habilitado: Generated<boolean>;
+  password_cambiada_en: Timestamp | null;
+  telefono_e164: string | null;
+  ultimo_acceso_en: Timestamp | null;
+}
+
+export interface Cuenta {
+  cerrada_en: Timestamp | null;
+  creada_en: Generated<Timestamp>;
+  estado: Generated<string>;
+  id: Generated<string>;
+  identidad_titular_id: string | null;
+  idioma: Generated<string>;
+  modo_clave: Generated<string>;
+  modo_sello: Generated<string>;
+  moneda: string;
+  nombre_mostrado: string;
+  pais: string;
+  plan_id: string | null;
+  suspendida_en: Timestamp | null;
+  tipo: string;
+}
+
+export interface Empresa {
+  actualizada_en: Generated<Timestamp>;
+  cuenta_id: string;
+  domicilio: string | null;
+  identificacion_fiscal: string | null;
+  industria_id: string | null;
+  razon_social: string;
+}
+
+export interface Identidad {
+  anclaje_principal_id: string | null;
+  creada_en: Generated<Timestamp>;
+  creada_por_cuenta_id: string | null;
+  email_mostrado: string;
+  email_normalizado: string;
+  email_verificado_en: Timestamp | null;
+  estado: Generated<string>;
+  fusionada_en_id: string | null;
+  id: Generated<string>;
+  idioma_preferido: string | null;
+  nombre_mostrado: string | null;
+}
+
+export interface Industria {
+  codigo: string;
+  id: Generated<string>;
+  nombre_i18n: Json;
+}
+
+export interface Instancia {
+  archivo_firmado_id: string | null;
+  cerrada_en: Timestamp | null;
+  circuito_id: string;
+  creada_en: Generated<Timestamp>;
+  cuenta_propietaria_id: string;
+  estado: Generated<string>;
+  id: Generated<string>;
+  numero: number;
+  sha256_vigente: Buffer | null;
+}
+
+export interface Membresia {
+  creada_en: Generated<Timestamp>;
+  cuenta_id: string;
+  desde: Generated<Timestamp>;
+  estado: Generated<string>;
+  hasta: Timestamp | null;
+  id: Generated<string>;
+  identidad_id: string;
+  persona_id: string | null;
+}
+
+export interface Otorgamiento {
+  alcances: string[];
+  anclaje_destino_id: string | null;
+  circuito_id: string | null;
+  condicionado_a_cuenta_id: string | null;
+  creado_en: Generated<Timestamp>;
+  cuenta_id: string | null;
+  cuenta_otorgante_id: string;
+  id: Generated<string>;
+  identidad_id: string | null;
+  instancia_id: string | null;
+  irrevocable: Generated<boolean>;
+  motivo_revocacion: string | null;
+  nivel_garantia_minimo: Generated<string>;
+  origen: string;
+  otorgado_por: string | null;
+  revocado_en: Timestamp | null;
+  revocado_por: string | null;
+  vigente_desde: Generated<Timestamp>;
+  vigente_hasta: Timestamp | null;
+}
+
+export interface Participacion {
+  anclaje_usado_id: string | null;
+  caracter: Generated<string>;
+  circuito_id: string;
+  creada_en: Generated<Timestamp>;
+  cuenta_propietaria_id: string;
+  cuenta_representada_id: string | null;
+  delegada_a_id: string | null;
+  delegada_por_id: string | null;
+  documento_exigido_num: string | null;
+  documento_exigido_pais: string | null;
+  documento_exigido_tipo: string | null;
+  estado: Generated<string>;
+  firmada_en: Timestamp | null;
+  id: Generated<string>;
+  identidad_id: string;
+  idioma_declarado: string | null;
+  idioma_efectivo: string | null;
+  instancia_id: string;
+  minimo_requerido: number | null;
+  motivo_delegacion: string | null;
+  motivo_rechazo: string | null;
+  nivel_garantia_minimo: Generated<string>;
+  nivel_garantia_obtenido: string | null;
+  orden: Generated<number>;
+  papel: string;
+  proveedor_elegido_id: string | null;
+  proveedor_sugerido_id: string | null;
+}
+
+export interface Persona {
+  apellidos: string | null;
+  cargo: string | null;
+  creada_en: Generated<Timestamp>;
+  cuenta_id: string;
+  id: Generated<string>;
+  identidad_id: string | null;
+  jefe_persona_id: string | null;
+  legajo: string | null;
+  nombres: string | null;
+  unidad_organizativa_id: string | null;
+}
+
+export interface Plan {
+  activo: Generated<boolean>;
+  codigo: string;
+  creado_en: Generated<Timestamp>;
+  id: Generated<string>;
+  nombre_i18n: Json;
+  orden: Generated<number>;
+}
+
+export interface Rol {
+  codigo: string;
+  creado_en: Generated<Timestamp>;
+  cuenta_id: string | null;
+  id: Generated<string>;
+  nombre_i18n: Json;
+  sistema: Generated<boolean>;
+}
+
+export interface RolCapacidad {
+  capacidad_id: string;
+  rol_id: string;
+}
+
+export interface Ubicacion {
+  archivada: Generated<boolean>;
+  carpeta_id: string;
+  circuito_id: string | null;
+  creada_en: Generated<Timestamp>;
+  cuenta_id: string;
+  fijada: Generated<boolean>;
+  id: Generated<string>;
+  instancia_id: string | null;
+  movida_en: Timestamp | null;
+  movida_por: string | null;
+}
+
+export interface UsuarioRol {
+  asignado_en: Generated<Timestamp>;
+  asignado_por: string | null;
+  cuenta_id: string;
+  id: Generated<string>;
+  identidad_id: string;
+  rol_id: string;
+}
+
+export interface DB {
+  anclaje_identidad: AnclajeIdentidad;
+  archivo: Archivo;
+  capacidad: Capacidad;
+  carpeta: Carpeta;
+  carpeta_permiso: CarpetaPermiso;
+  circuito: Circuito;
+  credencial: Credencial;
+  cuenta: Cuenta;
+  empresa: Empresa;
+  identidad: Identidad;
+  industria: Industria;
+  instancia: Instancia;
+  membresia: Membresia;
+  otorgamiento: Otorgamiento;
+  participacion: Participacion;
+  persona: Persona;
+  plan: Plan;
+  rol: Rol;
+  rol_capacidad: RolCapacidad;
+  ubicacion: Ubicacion;
+  usuario_rol: UsuarioRol;
+}

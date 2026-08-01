@@ -83,3 +83,30 @@ insert into otorgamiento (id, instancia_id, identidad_id, alcances, origen,
   ('a8000000-0000-0000-0000-000000000002', 'a6000000-0000-0000-0000-000000000002',
    'e0000000-0000-0000-0000-000000000001', array['metadatos','leer','evidencia'],
    'participacion', 'aaaaaaaa-0000-0000-0000-000000000001', true);
+
+-- ---------------------------------------------------------------------------
+-- Billing y medios de pago (migraciones 012 y 013). Solo cuenta A: los tests
+-- verifican que B no ve nada de esto y que el firmante externo tampoco.
+-- ---------------------------------------------------------------------------
+insert into pasarela_pago (id, proveedor, nombre, modo) values
+  ('c0000000-0000-0000-0000-000000000001', 'mercadopago', 'MercadoPago UY', 'sandbox');
+
+insert into medio_pago (id, cuenta_id, tipo, pasarela_id, token_externo, marca,
+                        ultimos_cuatro, moneda, es_default) values
+  ('c1000000-0000-0000-0000-000000000001', 'aaaaaaaa-0000-0000-0000-000000000001',
+   'tarjeta', 'c0000000-0000-0000-0000-000000000001', 'tok_prueba_a', 'visa',
+   '4242', 'UYU', true);
+
+insert into suscripcion (id, cuenta_id, plan_id, moneda) values
+  ('c2000000-0000-0000-0000-000000000001', 'aaaaaaaa-0000-0000-0000-000000000001',
+   '11111111-0000-0000-0000-000000000001', 'UYU');
+
+insert into factura_plataforma (id, cuenta_id, periodo, plan_id, moneda,
+                                monto_neto, monto_total, estado) values
+  ('c3000000-0000-0000-0000-000000000001', 'aaaaaaaa-0000-0000-0000-000000000001',
+   '2026-07', '11111111-0000-0000-0000-000000000001', 'UYU', 1000, 1220, 'borrador');
+
+insert into factura_linea (factura_id, orden, concepto, detalle_i18n, cantidad,
+                           precio_unitario, monto) values
+  ('c3000000-0000-0000-0000-000000000001', 1, 'firma', '{"es":"Firmas avanzadas"}',
+   10, 100, 1000);

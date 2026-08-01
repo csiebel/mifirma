@@ -5,6 +5,18 @@
 
 \set ON_ERROR_STOP on
 
+-- Identificadores de la semilla. Van acá y no en la línea de comandos: un test
+-- que sólo corre si alguien recuerda nueve `-v` es un test que no se corre.
+\set cuenta_a    'aaaaaaaa-0000-0000-0000-000000000001'
+\set cuenta_b    'bbbbbbbb-0000-0000-0000-000000000001'
+\set ident_a     'a0000000-0000-0000-0000-000000000001'
+\set ident_b     'b0000000-0000-0000-0000-000000000001'
+\set ident_ext   'e0000000-0000-0000-0000-000000000001'
+\set anclaje_a   'a1000000-0000-0000-0000-000000000001'
+\set anclaje_b   'b1000000-0000-0000-0000-000000000001'
+\set anclaje_ext 'e1000000-0000-0000-0000-000000000001'
+\set otorg_ext   'a8000000-0000-0000-0000-000000000001'
+
 -- ---------- TEST 1: contexto vacío no ve absolutamente nada ------------------
 begin;
   do $$
@@ -166,3 +178,74 @@ begin;
   end $$;
 rollback;
 
+
+-- ---------- TEST 11: la plata no cruza cuentas --------------------------------
+-- Distinto de T2: acá no hay otorgamiento que valga. Un documento puede cruzar
+-- de la cuenta A a un firmante de la B; una factura, jamás.
+begin;
+  set local app.actor = 'cuenta';
+  set local app.cuenta_id = :'cuenta_b';
+  set local app.identidad_id = :'ident_b';
+  set local app.anclajes_probados = :'anclaje_b';
+  set local app.nivel_garantia = 'bajo';
+
+  do $$
+  declare v int;
+  begin
+    select count(*) into v from factura_plataforma;
+      if v <> 0 then raise exception 'FALLA T11: B ve facturas de A (%)', v; end if;
+    select count(*) into v from factura_linea;
+      if v <> 0 then raise exception 'FALLA T11: B ve líneas de factura de A (%)', v; end if;
+    select count(*) into v from suscripcion;
+      if v <> 0 then raise exception 'FALLA T11: B ve la suscripción de A (%)', v; end if;
+    select count(*) into v from medio_pago;
+      if v <> 0 then raise exception 'FALLA T11: B ve el medio de pago de A (%)', v; end if;
+    raise notice 'OK T11 — la facturación no cruza cuentas';
+  end $$;
+rollback;
+
+-- ---------- TEST 12: el firmante externo no ve nada de billing ----------------
+-- Su otorgamiento le da acceso a UN documento. No lo convierte en cliente.
+begin;
+  set local app.actor = 'externo';
+  set local app.identidad_id = :'ident_ext';
+  set local app.otorgamiento_id = :'otorg_ext';
+  set local app.anclajes_probados = :'anclaje_ext';
+  set local app.nivel_garantia = 'bajo';
+
+  do $$
+  declare v int;
+  begin
+    select count(*) into v from instancia;
+      if v <> 1 then raise exception 'FALLA T12: el externo debería ver 1 instancia, ve %', v; end if;
+    select count(*) into v from factura_plataforma;
+      if v <> 0 then raise exception 'FALLA T12: el externo ve facturas (%)', v; end if;
+    select count(*) into v from medio_pago;
+      if v <> 0 then raise exception 'FALLA T12: el externo ve medios de pago (%)', v; end if;
+    select count(*) into v from suscripcion;
+      if v <> 0 then raise exception 'FALLA T12: el externo ve suscripciones (%)', v; end if;
+    raise notice 'OK T12 — el otorgamiento da acceso a un documento, no a la cuenta';
+  end $$;
+rollback;
+
+-- ---------- TEST 13: sin capacidad de facturación no se ve la factura ---------
+-- La cuenta correcta no alcanza: dentro de la cuenta A, quien no tiene la
+-- capacidad `facturacion.leer` tampoco ve la factura de su propia empresa.
+begin;
+  set local app.actor = 'cuenta';
+  set local app.cuenta_id = :'cuenta_a';
+  set local app.identidad_id = :'ident_a';
+  set local app.anclajes_probados = :'anclaje_a';
+  set local app.nivel_garantia = 'bajo';
+
+  do $$
+  declare v int;
+  begin
+    if app.tiene_capacidad('facturacion','leer') then
+      raise exception 'FALLA T13: la semilla le dio la capacidad a Ana; el test no prueba nada';
+    end if;
+    select count(*) into v from factura_plataforma;
+      if v <> 0 then raise exception 'FALLA T13: sin capacidad ve la factura (%)', v; end if;
+    raise notice 'OK T13 — la capacidad de facturación se verifica en la capa de datos';
+  end $$;
+rollback;
