@@ -28,7 +28,7 @@
   var DATOS = null;       // respuesta de /operador/planes
   var PLAN_SEL = null;
 
-  var VISTAS = ['correo', 'twilio', 'planes'];
+  var VISTAS = ['correo', 'twilio', 'planes', 'bitacora'];
 
   var MONEDA_PAIS = { UY: 'UYU', PY: 'PYG', BR: 'BRL' };
 
@@ -212,6 +212,7 @@
     if (vista === 'correo') cargarCorreo();
     if (vista === 'twilio') cargarTwilio();
     if (vista === 'planes') cargarPlanes();
+    if (vista === 'bitacora') cargarBitacora();
   }
 
   // ===========================================================================
@@ -700,6 +701,60 @@
   }
 
   // ===========================================================================
+  // BITÁCORA
+  //
+  // El operador ve la actividad administrativa de TODAS las cuentas. Es una
+  // decisión tomada, no un descuido: sirve para dar soporte —"¿salieron los
+  // correos de este cliente?"— y tiene que estar dicho en el contrato.
+  //
+  // Lo que NO ve es el contenido: ni documentos, ni expedientes. Esa frontera la
+  // sostiene la ausencia de GRANT sobre esas tablas, no una política que se
+  // pueda pasar por alto, y la verifica el test C4.
+  // ===========================================================================
+  var ACCION_TEXTO = {
+    'correo.enviado': 'Salió un correo',
+    'correo.fallido': 'Un correo NO se pudo enviar',
+    'cuenta.creada': 'Se creó una cuenta',
+    'acceso.dado': 'Se dio un acceso',
+    'acceso.quitado': 'Se quitó un acceso',
+    'rol.creado': 'Se creó un rol',
+    'carpeta.creada': 'Se creó una carpeta',
+    'carpeta.permisos': 'Se cambiaron permisos de una carpeta',
+  };
+
+  async function cargarBitacora() {
+    var f = $('bFiltro').value;
+    $('tBitacora').innerHTML = '<tr><td colspan="4" class="vacio">Un momento…</td></tr>';
+    try {
+      var url = '/operador/bitacora?limit=300' + (f ? '&accion=' + encodeURIComponent(f) : '');
+      var j = await api(url);
+      var ev = j.eventos || j || [];
+      if (!Array.isArray(ev)) ev = [];
+      if (!ev.length) {
+        $('tBitacora').innerHTML = '<tr><td colspan="4" class="vacio">No hay actividad registrada.</td></tr>';
+        return;
+      }
+      $('tBitacora').innerHTML = ev.map(function (e) {
+        var cuando = '';
+        try { cuando = new Date(e.ocurrido_en).toLocaleString('es'); } catch (x) {}
+        var d = e.despues || e.antes || {};
+        var fallo = e.accion === 'correo.fallido';
+        var det = fallo
+          ? esc(d.destino || '') + ' — ' + esc(d.error || '')
+          : esc(d.destino || d.nombre || d.codigo || d.email || '');
+        return '<tr' + (fallo ? ' style="background:#fef3f2"' : '') + '>' +
+          '<td style="white-space:nowrap;font-size:13px;color:var(--mut)">' + esc(cuando) + '</td>' +
+          '<td>' + esc(e.cuenta_nombre || '—') + '</td>' +
+          '<td><b>' + esc(ACCION_TEXTO[e.accion] || e.accion) + '</b></td>' +
+          '<td style="font-size:13px;color:var(--mut)">' + det + '</td></tr>';
+      }).join('');
+      msg('msgBitacora', '', '');
+    } catch (e) {
+      $('tBitacora').innerHTML = '<tr><td colspan="4" class="vacio">' + esc(e.message) + '</td></tr>';
+    }
+  }
+
+  // ===========================================================================
   // Modal
   // ===========================================================================
   function abrirModal(html) {
@@ -737,6 +792,7 @@
   window.probarTwilio = probarTwilio;
   window.abrirPlan = abrirPlan;
   window.pintarPrecios = pintarPrecios;
+  window.cargarBitacora = cargarBitacora;
   window.cerrarModal = cerrarModal;
 
   arrancar();

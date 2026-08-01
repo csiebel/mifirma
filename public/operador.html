@@ -164,6 +164,10 @@
       <svg viewBox="0 0 24 24"><path d="M3 6a2 2 0 012-2h14a2 2 0 012 2v12a2 2 0 01-2 2H5a2 2 0 01-2-2z"/><path d="M3 10h18M8 15h4"/></svg>
       Planes y precios
     </button>
+    <button onclick="ir('bitacora')" data-v="bitacora">
+      <svg viewBox="0 0 24 24"><path d="M12 8v4l3 2"/><circle cx="12" cy="12" r="9"/></svg>
+      Bitácora
+    </button>
   </nav>
   <div class="pie">
     <b id="pieOperador">…</b>
@@ -315,6 +319,40 @@
         <tbody id="tPrecios"></tbody>
       </table>
       <div id="msgPrecios" style="padding:0 18px 18px"></div>
+    </div>
+  </section>
+
+  <!-- ============ Bitácora ============ -->
+  <section id="vBitacora" class="hidden">
+    <div class="cab">
+      <div>
+        <h1>Bitácora</h1>
+        <p>Actividad administrativa de todas las cuentas: accesos, permisos, configuración y
+           todo lo que la plataforma manda — correos, códigos de acceso por SMS o WhatsApp,
+           avisos push. No incluye el contenido de los documentos: eso vive en el expediente
+           de cada uno y el operador no lo ve.</p>
+        <p style="font-size:12.5px;opacity:.75">Los envíos de códigos de acceso aparecen sin
+           cuenta: se mandan antes de que la persona elija a cuál entrar.</p>
+      </div>
+      <div class="acc">
+        <select id="bFiltro" onchange="cargarBitacora()" style="width:auto">
+          <option value="">Todo</option>
+          <option value="fallidos">Sólo lo que falló</option>
+          <option value="mensajeria">Mensajería (correo, OTP, SMS, push)</option>
+          <option value="correos">Sólo correos</option>
+          <option value="correo.fallido">Sólo correos que fallaron</option>
+          <option value="otp.fallido">Códigos de acceso que no salieron</option>
+          <option value="ingresos">Accesos</option>
+        </select>
+        <button class="btn btn-s" onclick="cargarBitacora()">Actualizar</button>
+      </div>
+    </div>
+    <div class="panel">
+      <table>
+        <thead><tr><th>Cuándo</th><th>Cuenta</th><th>Qué pasó</th><th>Detalle</th></tr></thead>
+        <tbody id="tBitacora"></tbody>
+      </table>
+      <div id="msgBitacora" style="padding:0 18px 18px"></div>
     </div>
   </section>
 

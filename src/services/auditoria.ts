@@ -1,7 +1,7 @@
 import type { Transaction } from 'kysely';
 import type { DB } from '../db/schema';
 import { withUsuario, exigir } from '../auth/authz';
-import { withTenant, withOperador } from '../db/pool';
+import { withTenant, withOperador, sinCuenta } from '../db/pool';
 
 /**
  * Bitácora de plataforma: quién hizo qué en la aplicación.
@@ -51,7 +51,7 @@ export interface Evento {
 }
 
 function fila(
-  cuentaId: string,
+  cuentaId: string | null,
   identidadId: string | null,
   actorTipo: ActorTipo,
   ev: Evento,
@@ -112,6 +112,31 @@ export async function registrarSistema(
     await withTenant(cuentaId, (trx) => registrar(trx, cuentaId, identidadId, ev, actorTipo));
   } catch (e) {
     console.error('bitacora (sistema):', e);
+  }
+}
+
+/**
+ * Eventos de la PLATAFORMA, sin cuenta.
+ *
+ * El caso que lo obliga: el envío del código de acceso. Ocurre antes de que la
+ * persona elija a qué cuenta entra —el login de MiFirma pregunta primero quién
+ * sos— y una identidad puede pertenecer a varias. Escribir el evento en una de
+ * ellas sería inventar un dato; no escribirlo deja sin respuesta el reclamo más
+ * común que existe, "no me llegó el código".
+ *
+ * ⚠ Lo que se anota acá lo ve el operador y NINGUNA cuenta. Antes de usar esta
+ * función y no `registrarSistema`, preguntarse si el evento le pertenece a
+ * alguien: si le pertenece, va con su cuenta o desaparece de su consola sin que
+ * nadie se entere. La migración 027 pone un CHECK para que al menos no pueda
+ * pasar con actores que no sean 'sistema'.
+ */
+export async function registrarPlataforma(identidadId: string | null, ev: Evento) {
+  try {
+    await sinCuenta((trx) =>
+      trx.insertInto('bitacora_plataforma').values(fila(null, identidadId, 'sistema', ev)).execute(),
+    );
+  } catch (e) {
+    console.error('bitacora (plataforma):', e);
   }
 }
 
@@ -179,9 +204,21 @@ export async function listarBitacoraOperador(operadorId: string, opts: FiltroBit
   const limit = Math.min(Math.max(opts.limit ?? 150, 1), 500);
 
   return withOperador(operadorId, async (trx) => {
+    // ⚠ SIN unir `identidad`, y no por un problema técnico.
+    //
+    // `app_operador` no tiene GRANT sobre esa tabla, y está bien que no lo
+    // tenga: el operador ve QUÉ pasó y EN QUÉ CUENTA, no quién de la empresa
+    // del cliente lo hizo. "Juan Pérez cambió un permiso en Interfase S.A." es
+    // más de lo que hace falta para dar soporte, y es dato personal de alguien
+    // que no es cliente nuestro sino empleado de un cliente.
+    //
+    // Para el soporte que sí importa —"¿salieron los correos?"— el destino va
+    // enmascarado en `despues`, y eso alcanza.
+    //
+    // El id de la identidad sí queda: sirve para correlacionar dos eventos como
+    // hechos por la misma persona sin decir quién es.
     let qb = trx
       .selectFrom('bitacora_plataforma as b')
-      .leftJoin('identidad as i', 'i.id', 'b.identidad_id')
       .leftJoin('cuenta as c', 'c.id', 'b.cuenta_id')
       .select([
         'b.id',
@@ -190,16 +227,15 @@ export async function listarBitacoraOperador(operadorId: string, opts: FiltroBit
         'b.accion',
         'b.recurso_tipo',
         'b.recurso_id',
+        'b.identidad_id',
         'b.antes',
         'b.despues',
         'b.ip',
         'b.user_agent',
-        'i.email_mostrado as usuario_email',
-        'i.nombre_mostrado as usuario_nombre',
         'c.nombre_mostrado as cuenta_nombre',
       ]);
 
-    qb = aplicarFiltros(qb, opts);
+    qb = aplicarFiltros(qb, opts, false);
 
     const rows = await qb.orderBy('b.ocurrido_en', 'desc').limit(limit).execute();
     return rows.map((r: any) => ({ ...mapear(r), cuenta_nombre: r.cuenta_nombre ?? null }));
@@ -225,9 +261,44 @@ export const ACCIONES_INGRESO = [
   'dispositivo.revocado',
 ];
 
-function aplicarFiltros(qb: any, opts: FiltroBitacora) {
+/**
+ * Todo lo que sale de la plataforma hacia una persona, por cualquier canal.
+ *
+ * Se mantiene como lista explícita y no como `like '%.enviado'` porque acá lo
+ * que importa es la pregunta operativa —"¿le llegó algo a esta persona?"— y esa
+ * pregunta no incluye, por ejemplo, un `otorgamiento.enviado`.
+ */
+export const ACCIONES_MENSAJERIA = [
+  'correo.enviado',
+  'correo.fallido',
+  'otp.enviado',
+  'otp.fallido',
+  'sms.prueba',
+  'sms.prueba_fallida',
+  'push.enviado',
+  'push.fallido',
+];
+
+/**
+ * `conIdentidad` dice si la consulta unió la tabla `identidad`.
+ *
+ * La del operador NO la une —no tiene GRANT, y tampoco corresponde que vea el
+ * correo del empleado de un cliente— así que buscar por nombre o mail ahí
+ * rompería la consulta con "column i.email_mostrado does not exist". Un
+ * parámetro explícito es preferible a que el filtro adivine.
+ */
+function aplicarFiltros(qb: any, opts: FiltroBitacora, conIdentidad = true) {
   if (opts.accion === 'ingresos') {
     qb = qb.where('b.accion', 'in', ACCIONES_INGRESO);
+  } else if (opts.accion === 'correos') {
+    // Grupo, no una acción concreta: es lo que se quiere mirar cuando alguien
+    // dice "no me llegó el mail".
+    qb = qb.where('b.accion', 'in', ['correo.enviado', 'correo.fallido']);
+  } else if (opts.accion === 'mensajeria') {
+    qb = qb.where('b.accion', 'in', ACCIONES_MENSAJERIA);
+  } else if (opts.accion === 'fallidos') {
+    // Lo único que hace falta ver el 90% de las veces: qué NO salió.
+    qb = qb.where('b.accion', 'like', '%.fallido');
   } else if (opts.accion) {
     qb = qb.where('b.accion', '=', opts.accion);
   }
@@ -246,15 +317,17 @@ function aplicarFiltros(qb: any, opts: FiltroBitacora) {
   const term = (opts.q || '').trim();
   if (term) {
     const like = `%${term}%`;
-    qb = qb.where((eb: any) =>
-      eb.or([
-        eb('i.email_mostrado', 'ilike', like),
-        eb('i.nombre_mostrado', 'ilike', like),
+    qb = qb.where((eb: any) => {
+      const cond = [
         eb('b.accion', 'ilike', like),
         eb('b.recurso_tipo', 'ilike', like),
         eb(eb.cast(eb.ref('b.ip'), 'text'), 'ilike', like),
-      ]),
-    );
+      ];
+      if (conIdentidad) {
+        cond.unshift(eb('i.email_mostrado', 'ilike', like), eb('i.nombre_mostrado', 'ilike', like));
+      }
+      return eb.or(cond);
+    });
   }
   return qb;
 }

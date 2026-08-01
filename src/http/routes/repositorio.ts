@@ -1,8 +1,15 @@
 import type { FastifyInstance } from 'fastify';
 import { z } from 'zod';
 import { withUsuario } from '../../auth/authz';
-import { subirDocumento, listarDocumentos, bajarDocumento } from '../../services/repositorio';
+import {
+  subirDocumento,
+  listarDocumentos,
+  bajarDocumento,
+  verificarFirmas,
+  moverDocumento,
+} from '../../services/repositorio';
 import { expediente, verificarCadena } from '../../services/evidencia';
+import { listarBitacora } from '../../services/auditoria';
 import { HttpError } from '../errors';
 
 /**
@@ -43,9 +50,18 @@ export function registrarRutasRepositorio(app: FastifyInstance) {
   });
 
   app.get('/documentos', async (req) => {
-    const q = z.object({ carpeta_id: z.string().uuid() }).parse(req.query);
+    const q = z
+      .object({
+        carpeta_id: z.string().uuid(),
+        // `sub=1` incluye toda la rama. Se acepta como texto porque viene de un
+        // query string, donde no existen los booleanos.
+        sub: z.enum(['0', '1']).optional(),
+      })
+      .parse(req.query);
     const { cuentaId, identidadId } = req.identidad;
-    return { documentos: await listarDocumentos(cuentaId, identidadId, q.carpeta_id) };
+    return {
+      documentos: await listarDocumentos(cuentaId, identidadId, q.carpeta_id, q.sub === '1'),
+    };
   });
 
   app.get('/documentos/:id/archivo', async (req, reply) => {
@@ -82,6 +98,31 @@ export function registrarRutasRepositorio(app: FastifyInstance) {
   });
 
   /**
+   * Mover el documento a otra carpeta.
+   *
+   * PATCH y no POST: no crea nada, cambia un campo de algo que ya existe.
+   */
+  app.patch('/documentos/:id/carpeta', async (req) => {
+    const { id } = z.object({ id: z.string().uuid() }).parse(req.params);
+    const b = z.object({ carpeta_id: z.string().uuid() }).parse(req.body);
+    const { cuentaId, identidadId } = req.identidad;
+    return moverDocumento(cuentaId, identidadId, id, b.carpeta_id);
+  });
+
+  /**
+   * Las firmas criptográficas del PDF, verificadas abriendo el archivo.
+   *
+   * No consulta la base para decidir si son válidas: recalcula los digest sobre
+   * los bytes. Es la misma comprobación que haría un tercero con el PDF y sin
+   * acceso a nada nuestro.
+   */
+  app.get('/documentos/:id/firmas', async (req) => {
+    const { id } = z.object({ id: z.string().uuid() }).parse(req.params);
+    const { cuentaId, identidadId } = req.identidad;
+    return verificarFirmas(cuentaId, identidadId, id);
+  });
+
+  /**
    * El expediente de evidencias de un documento.
    *
    * Devuelve los eventos crudos más el resultado de verificar la cadena. Se
@@ -96,5 +137,31 @@ export function registrarRutasRepositorio(app: FastifyInstance) {
       if (!eventos.length) throw new HttpError(404, 'No hay expediente para ese documento.');
       return { eventos, cadena: await verificarCadena(trx, id) };
     });
+  });
+
+  /**
+   * La bitácora de la cuenta: quién hizo qué acá adentro.
+   *
+   * Exige la capacidad `bitacora.leer` —hoy sólo la tiene el rol
+   * administrador— y la política RLS la acota a esta cuenta. Una empresa no ve
+   * la actividad de otra, ni siquiera un renglón.
+   *
+   * ⚠ NO confundir con el expediente. Esto es administrativo —se dio un acceso,
+   * se cambió un permiso, salió o falló un correo— y se purga por política de
+   * retención. El expediente es del documento, es inmutable y se conserva por
+   * el plazo legal.
+   */
+  app.get('/bitacora', async (req) => {
+    const q = z
+      .object({
+        q: z.string().max(120).optional(),
+        accion: z.string().max(60).optional(),
+        desde: z.string().max(30).optional(),
+        hasta: z.string().max(30).optional(),
+        limit: z.coerce.number().int().min(1).max(500).optional(),
+      })
+      .parse(req.query);
+    const { cuentaId, identidadId } = req.identidad;
+    return { eventos: await listarBitacora(cuentaId, identidadId, q) };
   });
 }

@@ -1,3 +1,4 @@
+import { randomUUID } from 'node:crypto';
 import { sql, type Transaction } from 'kysely';
 import type { DB } from '../db/schema';
 import { withUsuario, exigir } from '../auth/authz';
@@ -193,15 +194,28 @@ export async function crearCarpeta(
       etq = etiqueta(n) + '_' + i;
     }
 
-    const r = await sql<{ id: string }>`
-      insert into carpeta (cuenta_id, padre_id, nombre_i18n, ruta, creada_por)
-      values (${cuentaId}::uuid, ${padreId}::uuid, ${JSON.stringify({ es: n })}::jsonb,
+    // ⚠ EL UUID SE GENERA ACÁ. NADA DE `RETURNING`.
+    //
+    // `INSERT ... RETURNING` dispara además la política de SELECT, y
+    // `carpeta_select` pregunta por `app.puede_en_carpeta(id, 'ver')`. Esa
+    // función está declarada STABLE, así que trabaja con el snapshot del inicio
+    // de la sentencia: NO VE la fila que esa misma sentencia está insertando.
+    // Devuelve falso, la política niega la lectura, y PostgreSQL reporta "new
+    // row violates row-level security policy" — un mensaje que apunta al INSERT
+    // y manda a revisar los permisos, que están perfectos.
+    //
+    // Es la trampa de la migración 018 con una vuelta más: allá el problema era
+    // que los permisos todavía no existían; acá existen y se heredan bien, pero
+    // la función no puede verlos porque no ve la carpeta.
+    //
+    // Generando el id antes, no hace falta leer nada de vuelta.
+    const id = randomUUID();
+    await sql`
+      insert into carpeta (id, cuenta_id, padre_id, nombre_i18n, ruta, creada_por)
+      values (${id}::uuid, ${cuentaId}::uuid, ${padreId}::uuid,
+              ${JSON.stringify({ es: n })}::jsonb,
               (${padre.ruta} || '.' || ${etq})::ltree, ${identidadId}::uuid)
-      returning id
     `.execute(trx);
-
-    const id = r.rows[0]?.id;
-    if (!id) throw new HttpError(500, 'No se pudo crear la carpeta.');
 
     await registrar(trx, cuentaId, identidadId, {
       accion: 'carpeta.creada',

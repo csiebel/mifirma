@@ -3,6 +3,8 @@ import { sql } from 'kysely';
 import { withUsuario, exigir } from '../auth/authz';
 import { almacen, nuevaClave } from '../almacenamiento/almacen';
 import { anotar } from './evidencia';
+import { verificar } from '../firma/pades';
+import { registrar } from './auditoria';
 import { HttpError } from '../http/errors';
 
 /**
@@ -209,8 +211,42 @@ export async function subirDocumento(cuentaId: string, identidadId: string, inpu
  * carpeta y las políticas de `circuito` e `instancia` exigen que la ubicación
  * los alcance. Si algo no aparece, es porque la base decidió que no se ve.
  */
-export async function listarDocumentos(cuentaId: string, identidadId: string, carpetaId: string) {
+/**
+ * Los documentos de una carpeta, y opcionalmente los de toda su rama.
+ *
+ * ═══ POR QUÉ ES UNA OPCIÓN Y NO EL COMPORTAMIENTO ═══
+ *
+ * Los permisos SÍ bajan por la rama —lo que das arriba vale para todo lo que
+ * cuelga— así que mostrar los documentos de las subcarpetas no abre nada que la
+ * persona no pudiera ver entrando una por una. Pero "puedo verlo" y "quiero
+ * verlo todo junto" no son lo mismo: con la rama incluida, la raíz muestra
+ * SIEMPRE todos los documentos de la cuenta, y las carpetas dejan de servir
+ * para lo que se hicieron, que es mirar menos cosas a la vez. Un envío masivo
+ * de tres mil copias vuelve esa lista inútil.
+ *
+ * Por eso es una casilla que el usuario prende cuando busca algo y apaga cuando
+ * trabaja.
+ *
+ * ═══ EL FILTRO SIGUE SIENDO DE LA BASE ═══
+ *
+ * La rama se resuelve con `ruta <@ ruta_del_padre` sobre `carpeta`, que tiene su
+ * propia RLS: una subcarpeta sobre la que no tenés `ver` no entra en el
+ * subconsulta, y sus documentos tampoco. No hay que acordarse de filtrar nada
+ * acá — si esta función se equivocara, la política seguiría alcanzando.
+ */
+export async function listarDocumentos(
+  cuentaId: string,
+  identidadId: string,
+  carpetaId: string,
+  incluirSubcarpetas = false,
+) {
   return withUsuario(cuentaId, identidadId, async (trx) => {
+    const alcance = incluirSubcarpetas
+      ? sql`u.carpeta_id in (
+              select c2.id from carpeta c2
+               where c2.ruta <@ (select ruta from carpeta where id = ${carpetaId}::uuid))`
+      : sql`u.carpeta_id = ${carpetaId}::uuid`;
+
     // Se listan las ubicaciones de CIRCUITO, que son las del repositorio del
     // emisor. Cuando exista la bandeja del firmante habrá una segunda consulta
     // para las ubicaciones de instancia: son dos vistas distintas del mismo
@@ -221,22 +257,33 @@ export async function listarDocumentos(cuentaId: string, identidadId: string, ca
     // fila —el envío— con su conteo, no tres mil filas: el emisor mandó una
     // cosa. `instancia_id` es la primera, que es la que se abre al hacer clic.
     const r = await sql<{
-      instancia_id: string; circuito_id: string; titulo: string;
+      instancia_id: string; circuito_id: string; titulo: string; carpeta_id: string;
       circuito_estado: string; modo: string; nivel_firma: string;
       bytes: string; paginas: number | null; creado_en: Date;
       instancias: string; firmas_total: string; firmas_hechas: string;
       sin_avisar: string; cadena_rota: boolean;
     }>`
-      select c.id as circuito_id, c.titulo,
+      select c.id as circuito_id, c.titulo, u.carpeta_id,
              c.estado as circuito_estado, c.modo, c.nivel_firma,
              a.bytes::text as bytes, a.paginas, c.creado_en,
 
              -- Despachado pero sin avisar: la notificación no salió. Sin esto,
              -- el emisor espera indefinidamente la firma de alguien que nunca
              -- se enteró — y el documento se ve idéntico a uno que sí avisó.
+             --
+             -- ⚠ SÓLO A QUIEN LE TOCA AHORA. En una firma en serie, el segundo
+             -- está en 'pendiente' porque todavía no es su turno, no porque el
+             -- aviso haya fallado. Contarlo como fallido convierte el
+             -- funcionamiento normal en una alarma roja, y una alarma que
+             -- aparece cuando todo está bien deja de mirarse.
              (select count(*) from participacion p
                where p.circuito_id = c.id and p.papel = 'firmante'
-                 and p.estado = 'pendiente')::text as sin_avisar,
+                 and p.estado = 'pendiente'
+                 and p.orden = (
+                   select min(p2.orden) from participacion p2
+                    where p2.circuito_id = c.id and p2.papel = 'firmante'
+                      and p2.estado not in ('firmada','no_requerida','delegada','rechazada')
+                 ))::text as sin_avisar,
 
              -- El expediente comprometido se marca en la LISTA, no sólo adentro
              -- del expediente: si hay que abrir cada documento para descubrirlo,
@@ -265,7 +312,7 @@ export async function listarDocumentos(cuentaId: string, identidadId: string, ca
         join circuito c on c.id = u.circuito_id
         join archivo a on a.id = c.archivo_base_id
        where u.cuenta_id = ${cuentaId}::uuid
-         and u.carpeta_id = ${carpetaId}::uuid
+         and ${alcance}
          and u.circuito_id is not null
          and not u.archivada
        order by c.creado_en desc
@@ -346,5 +393,135 @@ export async function bajarDocumento(
     contenido,
     mime: datos.mime,
     nombre: `${datos.titulo.replace(/[^\w\s.-]/g, '').trim() || 'documento'}.pdf`,
+  };
+}
+
+/**
+ * Las firmas criptográficas que tiene el PDF, verificadas.
+ *
+ * Esto NO lee la base de datos para responder: abre el archivo y comprueba, por
+ * cada firma, que el digest firmado coincida con los bytes que esa firma dice
+ * cubrir. Es a propósito — la pregunta que responde es "¿el documento cambió
+ * después de firmado?", y una respuesta que saliera de nuestras propias tablas
+ * no probaría nada: cualquiera puede escribir en su base que un documento es
+ * válido.
+ *
+ * Es la misma verificación que puede hacer un tercero con el PDF en la mano y
+ * sin acceso a nada nuestro. Ese es el punto de la firma electrónica.
+ */
+/**
+ * Cambia el documento de carpeta.
+ *
+ * ═══ ES UNA FILA, NO UNA COPIA ═══
+ *
+ * Mover no toca el archivo ni el circuito: mueve la `ubicacion`, que es
+ * justamente la fila que dice "este documento está acá, en esta carpeta de esta
+ * cuenta". El mismo circuito puede estar ubicado en la carpeta del emisor y en
+ * la bandeja de cada firmante sin que ninguno de esos movimientos afecte a los
+ * demás. Por eso el modelo tiene una tabla `ubicacion` en lugar de una columna
+ * `carpeta_id` en `circuito`.
+ *
+ * ═══ EL PERMISO YA ESTÁ ESCRITO, Y NO ACÁ ═══
+ *
+ * `ubicacion_update` exige `app.puede_en_carpeta(carpeta_id, 'mover')`, y como
+ * la política no declara WITH CHECK, PostgreSQL usa la misma expresión para la
+ * fila vieja y para la nueva. O sea: hace falta permiso de mover en el ORIGEN y
+ * en el DESTINO, sin que nadie tenga que acordarse de comprobar las dos cosas
+ * en el código. Es exactamente la clase de regla que no debe vivir acá.
+ *
+ * ═══ POR QUÉ SE LEE ANTES DE ESCRIBIR ═══
+ *
+ * Si el UPDATE no toca ninguna fila hay dos causas posibles —el documento no
+ * existe, o existe y no tenés permiso— y son dos mensajes distintos para el
+ * usuario. La RLS no las distingue: filtra en silencio. El SELECT previo separa
+ * los casos, para no volver a caer en un mensaje que tapa dos problemas.
+ *
+ * ⚠ Esto va a la BITÁCORA y no al expediente. Mover un documento de carpeta es
+ * administración del repositorio, no un hecho sobre la firma: el expediente
+ * responde qué le pasó al documento como prueba, y dónde lo guarda su dueño no
+ * es parte de eso.
+ */
+export async function moverDocumento(
+  cuentaId: string,
+  identidadId: string,
+  instanciaId: string,
+  carpetaDestinoId: string,
+) {
+  return withUsuario(cuentaId, identidadId, async (trx) => {
+    const actual = await sql<{ ubicacion_id: string; carpeta_id: string; titulo: string }>`
+      select u.id as ubicacion_id, u.carpeta_id, c.titulo
+        from instancia i
+        join circuito c on c.id = i.circuito_id
+        join ubicacion u on u.circuito_id = c.id and u.cuenta_id = ${cuentaId}::uuid
+       where i.id = ${instanciaId}::uuid
+    `.execute(trx);
+
+    const fila = actual.rows[0];
+    if (!fila) throw new HttpError(404, 'Ese documento no existe o no lo podés ver.');
+    if (fila.carpeta_id === carpetaDestinoId) {
+      return { ok: true, sin_cambios: true, titulo: fila.titulo };
+    }
+
+    const upd = await sql<{ id: string }>`
+      update ubicacion
+         set carpeta_id = ${carpetaDestinoId}::uuid,
+             movida_en  = now(),
+             movida_por = ${identidadId}::uuid
+       where id = ${fila.ubicacion_id}::uuid
+      returning id
+    `.execute(trx);
+
+    if (!upd.rows.length) {
+      throw new HttpError(
+        403,
+        'No tenés permiso para mover en la carpeta de origen o en la de destino.',
+      );
+    }
+
+    await registrar(trx, cuentaId, identidadId, {
+      accion: 'documento.movido',
+      recursoTipo: 'ubicacion',
+      recursoId: fila.ubicacion_id,
+      antes: { carpeta_id: fila.carpeta_id },
+      despues: { carpeta_id: carpetaDestinoId, titulo: fila.titulo },
+    });
+
+    return { ok: true, sin_cambios: false, titulo: fila.titulo };
+  });
+}
+
+export async function verificarFirmas(cuentaId: string, identidadId: string, instanciaId: string) {
+  const datos = await withUsuario(cuentaId, identidadId, async (trx) => {
+    const r = await sql<{ clave: string; firmado: boolean; titulo: string; origen: string }>`
+      select a.clave_almacenamiento as clave, c.titulo,
+             (i.archivo_firmado_id is not null) as firmado,
+             -- CUÁL de los tres archivos se está abriendo. Sin esto, un PDF sin
+             -- firmas produce el mismo mensaje esté el circuito completo o no, y
+             -- son dos situaciones distintas: una es "todavía no se firmó" y la
+             -- otra es "se firmó pero lo que guardamos es el original sin sellar".
+             case when i.archivo_firmado_id is not null then 'firmado'
+                  when i.archivo_vigente_id is not null then 'vigente'
+                  else 'base' end as origen
+        from instancia i
+        join circuito c on c.id = i.circuito_id
+        join archivo a on a.id = coalesce(i.archivo_firmado_id, i.archivo_vigente_id, c.archivo_base_id)
+       where i.id = ${instanciaId}::uuid
+    `.execute(trx);
+    const f = r.rows[0];
+    if (!f) throw new HttpError(404, 'Ese documento no existe o no lo podés ver.');
+    return f;
+  });
+
+  const contenido = await almacen().leer(datos.clave);
+
+  // El veredicto lo arma `verificar()` mirando el archivo entero, no este
+  // servicio firma por firma: si una firma cubre hasta el final o hasta la
+  // firma siguiente sólo se puede decidir conociendo a todas las demás.
+  return {
+    titulo: datos.titulo,
+    cerrado: datos.firmado,
+    origen: datos.origen,
+    tamano: contenido.length,
+    ...verificar(contenido),
   };
 }

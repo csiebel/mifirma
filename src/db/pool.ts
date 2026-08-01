@@ -51,6 +51,23 @@ export async function withTenant<T>(
 }
 
 /**
+ * Modo SISTEMA sin cuenta: lo que pasa antes de que exista una cuenta en la
+ * conversación —mandar un código de acceso— o lo que no pertenece a ninguna
+ * —una prueba de envío del operador—.
+ *
+ * No es `withTenant` con la cuenta en null: es otra cosa y por eso tiene otro
+ * nombre. `withTenant` sirve para operar SOBRE una cuenta sin usuario; esto
+ * sirve para operar sobre nada. Lo que se escriba acá va a ser invisible para
+ * todas las cuentas, y eso tiene que ser una decisión, no un descuido.
+ */
+export async function sinCuenta<T>(fn: (trx: Transaction<DB>) => Promise<T>): Promise<T> {
+  return db.transaction().execute(async (trx) => {
+    await fijarContexto(trx, { actor: 'sistema' });
+    return fn(trx);
+  });
+}
+
+/**
  * Contexto del FIRMANTE EXTERNO: alguien sin cuenta que llega por un enlace
  * firmado enviado a su correo.
  *

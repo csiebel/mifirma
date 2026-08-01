@@ -82,6 +82,33 @@
   .arbol{padding:12px}
   .nodo{display:flex;align-items:center;gap:8px;padding:8px 10px;border-radius:9px;cursor:pointer;font-size:14.5px}
   .nodo:hover{background:var(--soft)}
+
+  /* El chevron es un botón de verdad y no un span con onclick: se llega con
+     Tab, se activa con Enter y los lectores de pantalla anuncian si la rama
+     está abierta o cerrada. Ocupa lugar aunque la carpeta no tenga hijos, para
+     que los nombres queden alineados en la misma columna. */
+  .chev{width:18px;height:18px;flex:none;display:grid;place-items:center;border:0;background:none;
+        padding:0;cursor:pointer;border-radius:5px;color:var(--mut)}
+  .chev:hover{background:#e6ebf2}
+  .chev.hueco{cursor:default}
+  .chev svg{width:12px;height:12px;stroke:currentColor;fill:none;stroke-width:2.4;
+            stroke-linecap:round;stroke-linejoin:round;transition:transform .12s ease}
+  .chev.plegada svg{transform:rotate(-90deg)}
+  .nodo .nom{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+
+  /* Destino de arrastre. El borde punteado aparece sólo mientras algo está
+     encima: un contorno permanente convierte el árbol en un tablero de ajedrez. */
+  .nodo.destino{background:var(--acc-50);outline:2px dashed var(--acc-700);outline-offset:-2px}
+
+  /* Zona de soltar archivos. Se cubre el panel entero y no un rectángulo
+     chico: nadie apunta a un rectángulo chico con un archivo en la mano. */
+  .zona{position:relative}
+  .zona.encima::after{content:'Soltá acá para subir a esta carpeta';position:absolute;inset:0;
+        border:2px dashed var(--acc-700);border-radius:14px;background:rgba(255,255,255,.88);
+        display:grid;place-items:center;font-weight:600;color:var(--acc-700);font-size:15px;
+        pointer-events:none;z-index:5}
+  tr[draggable=true]{cursor:grab}
+  tr.arrastrando{opacity:.45}
   .nodo[aria-selected="true"]{background:var(--brand-50);color:var(--brand-600);font-weight:600}
   .nodo svg{width:16px;height:16px;stroke:var(--mut);fill:none;stroke-width:1.8;stroke-linecap:round;stroke-linejoin:round;flex:none}
   .nodo[aria-selected="true"] svg{stroke:var(--brand-600)}
@@ -146,6 +173,10 @@
       <svg viewBox="0 0 24 24"><path d="M12 3l8 3.5v5.8c0 4.9-3.3 8.8-8 10.2-4.7-1.4-8-5.3-8-10.2V6.5z"/><path d="M9 12l2 2 4.5-4.5"/></svg>
       Roles
     </button>
+    <button onclick="ir('actividad')" data-v="actividad">
+      <svg viewBox="0 0 24 24"><path d="M12 8v4l3 2"/><circle cx="12" cy="12" r="9"/></svg>
+      Actividad
+    </button>
     <button onclick="ir('cuenta')" data-v="cuenta">
       <svg viewBox="0 0 24 24"><path d="M4 20V9l8-5 8 5v11"/><path d="M9 20v-6h6v6"/></svg>
       Cuenta
@@ -171,16 +202,26 @@
       <button class="btn btn-p" onclick="abrirSubir()">Subir documento</button>
     </div>
 
-    <div class="panel">
-      <div class="cabPanel">
-        <div><b>Carpeta</b><span id="subDocs"></span></div>
-        <div class="acc"><select id="carpetaDocs" onchange="cargarDocumentos()" style="width:auto"></select></div>
+    <div class="doscol">
+      <div class="panel arbol" id="arbolDocs"></div>
+      <div class="panel zona" id="zonaDocs">
+        <div class="cabPanel">
+          <div><b id="nomCarpetaDocs">Documentos</b><span id="subDocs"></span></div>
+          <div class="acc">
+            <label style="display:inline-flex;align-items:center;gap:6px;font-size:13px;
+                          color:var(--mut);cursor:pointer">
+              <input type="checkbox" id="subcarpetas" onchange="cambiarAlcance()"
+                     style="width:16px;height:16px;accent-color:var(--acc-700);cursor:pointer" />
+              Incluir subcarpetas
+            </label>
+          </div>
+        </div>
+        <table>
+          <thead><tr><th>Documento</th><th>Estado</th><th>Firmas</th><th>Subido</th><th></th></tr></thead>
+          <tbody id="tDocumentos"></tbody>
+        </table>
+        <div id="msgDocs" style="padding:0 18px 18px"></div>
       </div>
-      <table>
-        <thead><tr><th>Documento</th><th>Estado</th><th>Firmas</th><th>Subido</th><th></th></tr></thead>
-        <tbody id="tDocumentos"></tbody>
-      </table>
-      <div id="msgDocs" style="padding:0 18px 18px"></div>
     </div>
   </section>
 
@@ -247,6 +288,31 @@
       <tbody id="tRoles"></tbody>
     </table></div>
     <div id="msgRoles"></div>
+  </section>
+
+  <!-- ============ Actividad ============ -->
+  <section id="vActividad" class="hidden">
+    <div class="cab"><div>
+      <h1>Actividad</h1>
+      <p>Quién hizo qué dentro de tu cuenta: accesos, permisos, envíos y avisos.
+         Es administrativo — lo que ocurrió alrededor de cada documento está en su expediente.</p>
+    </div>
+    <div class="acc">
+      <select id="filtroActividad" onchange="cargarActividad()" style="width:auto">
+        <option value="">Todo</option>
+        <option value="fallidos">Sólo lo que falló</option>
+        <option value="correos">Correos</option>
+        <option value="ingresos">Accesos</option>
+      </select>
+      <button class="btn btn-s" onclick="cargarActividad()">Actualizar</button>
+    </div></div>
+    <div class="panel">
+      <table>
+        <thead><tr><th>Cuándo</th><th>Qué pasó</th><th>Quién</th><th>Detalle</th></tr></thead>
+        <tbody id="tActividad"></tbody>
+      </table>
+      <div id="msgActividad" style="padding:0 18px 18px"></div>
+    </div>
   </section>
 
   <!-- ============ Cuenta ============ -->

@@ -1,10 +1,13 @@
-import { createHash } from 'node:crypto';
+import { createHash, randomUUID } from 'node:crypto';
 import { sql } from 'kysely';
 import { withExterno, db } from '../db/pool';
 import { fijarContexto } from '../db/contexto';
 import { verificarEnlaceFirma } from '../auth/enlace_firma';
-import { almacen } from '../almacenamiento/almacen';
+import { almacen, nuevaClave } from '../almacenamiento/almacen';
+import { normalizar, sellar, verificar } from '../firma/pades';
+import { selloDePlataforma } from '../firma/adaptadores/sello_plataforma';
 import { anotar } from './evidencia';
+import { avisarAlQueSigue } from './circuito';
 import { HttpError } from '../http/errors';
 
 /**
@@ -20,17 +23,26 @@ import { HttpError } from '../http/errors';
  *    enlace apunta a un otorgamiento revocado o vencido, las consultas no
  *    devuelven filas — no hay un `if` acá que se pueda olvidar.
  *
- * ═══ ⚠ LO QUE FALTA, Y NO ES UN DETALLE ═══
+ * ═══ EL ORDEN DE LOS PASOS NO ES CASUAL ═══
  *
- * Todavía NO se estampa el PDF. La firma se registra como actos en el
- * expediente —consentimiento, identidad, hash del documento firmado— pero el
- * archivo firmado con PAdES no se genera, porque el ensamblador PAdES no está
- * escrito (`pdf-lib`, que está en las dependencias, NO hace PAdES).
+ *   1. ¿Puede firmar? Lo decide la RLS. No escribe nada.
+ *   2. Sellar el PDF y verificar el resultado.
+ *   3. Recién entonces, anotar en el expediente.
  *
- * Es decir: hoy esto produce un expediente completo y un documento SIN firma
- * criptográfica. Sirve para probar el flujo entero; NO sirve para producción, y
- * `instancia.archivo_firmado_id` queda en null a propósito para que esa falta
- * sea visible en la base y no una suposición.
+ * Si se anotara primero y fallara el sellado, el expediente afirmaría una firma
+ * que no existe — y el expediente es inmutable, así que esa mentira quedaría
+ * para siempre. Al revés, un sellado que falla deja al firmante viendo un error
+ * y pudiendo reintentar.
+ *
+ * ═══ ⚠ LO QUE FALTA PARA PRODUCCIÓN ═══
+ *
+ * El sello usa el certificado de la PLATAFORMA, no uno del firmante: eso prueba
+ * integridad y fecha, no que la clave la haya controlado quien firma. Es firma
+ * simple y el producto no debe decir otra cosa.
+ *
+ * Y falta el SELLO DE TIEMPO (RFC 3161). Sin ancla externa, la fecha es una
+ * afirmación nuestra. Es el riesgo R1 de `auditoria-y-evidencias.md` y lo único
+ * que no se puede agregar con efecto retroactivo.
  */
 
 // ---------------------------------------------------------------------------
@@ -196,12 +208,17 @@ export async function firmar(token: string, input: FirmaInput) {
     throw new HttpError(400, 'Hay que aceptar firmar electrónicamente para poder firmar.');
   }
 
-  const resultado = await withExterno(e.otorgamientoId, e.identidadId, async (trx) => {
+  // ── PASO 1: ¿puede firmar? Lo decide la RLS, con el contexto del otorgamiento.
+  //
+  // Este paso no escribe nada. Si el enlace apunta a un otorgamiento revocado o
+  // vencido, la consulta no devuelve filas y acá se termina.
+  const ctx = await withExterno(e.otorgamientoId, e.identidadId, async (trx) => {
     const r = await sql<{
       participacion_id: string; instancia_id: string; circuito_id: string;
       cuenta_propietaria_id: string; estado: string; papel: string; orden: number;
       sha256: Buffer; titulo: string; nivel_firma: string; me_toca: boolean;
-      anclaje_email: string | null;
+      anclaje_email: string | null; clave: string; mime: string;
+      archivo_vigente_id: string | null; firmante: string | null; emisor: string | null;
     }>`
       select p.id as participacion_id, p.instancia_id, p.circuito_id,
              p.cuenta_propietaria_id, p.estado, p.papel, p.orden,
@@ -214,10 +231,19 @@ export async function firmar(token: string, input: FirmaInput) {
              ) as me_toca,
              (select an.id from anclaje_identidad an
                where an.identidad_id = p.identidad_id and an.tipo = 'email'
-                 and an.revocado_en is null order by an.probado_en limit 1) as anclaje_email
+                 and an.revocado_en is null order by an.probado_en limit 1) as anclaje_email,
+             -- El PDF tal como está AHORA, con las firmas anteriores aplicadas.
+             -- La firma se agrega SOBRE éste; hacerlo sobre el original borraría
+             -- las anteriores.
+             a.clave_almacenamiento as clave, a.mime,
+             i2.archivo_vigente_id,
+             ident.nombre_mostrado as firmante, cu.nombre_mostrado as emisor
         from participacion p
         join circuito c on c.id = p.circuito_id
-        join archivo a on a.id = c.archivo_base_id
+        join instancia i2 on i2.id = p.instancia_id
+        join archivo a on a.id = coalesce(i2.archivo_vigente_id, c.archivo_base_id)
+        left join identidad ident on ident.id = p.identidad_id
+        left join cuenta cu on cu.id = c.cuenta_propietaria_id
        where p.id = ${e.participacionId}::uuid
     `.execute(trx);
 
@@ -227,121 +253,208 @@ export async function firmar(token: string, input: FirmaInput) {
     if (f.estado === 'firmada') throw new HttpError(409, 'Ya firmaste este documento.');
     if (f.estado === 'rechazada') throw new HttpError(409, 'Ya rechazaste este documento.');
     if (!f.me_toca) throw new HttpError(409, 'Todavía no es tu turno: falta que firme alguien antes que vos.');
+    return f;
+  });
+
+  // ── PASO 2: sellar. ANTES de anotar nada.
+  //
+  // El orden importa. Si primero se anotara "firma aplicada" y después fallara
+  // el sellado, el expediente afirmaría una firma que no existe — y el
+  // expediente es inmutable, así que esa mentira quedaría para siempre. Al
+  // revés, un sellado que falla deja al firmante viendo un error y pudiendo
+  // reintentar, que es exactamente lo que corresponde.
+  const nombreFirmante = ctx.firmante || 'el firmante';
+  const original = await almacen().leer(ctx.clave);
+
+  // La normalización sólo hace falta la primera vez: deja el PDF con tabla xref
+  // clásica, que es lo que el placeholder sabe leer. Si ya hay una firma, el
+  // archivo NO se vuelve a serializar — hacerlo rompería esa firma.
+  const base = ctx.archivo_vigente_id ? original : await normalizar(original);
+
+  let firmado: Buffer;
+  try {
+    firmado = await sellar(
+      base,
+      {
+        // El motivo dice a nombre de quién se selló. Es lo que ve cualquiera en
+        // el panel de firmas de un lector de PDF, sin abrir el expediente.
+        razon: `Firmado electrónicamente por ${nombreFirmante} · ${ctx.titulo}`,
+        nombre: nombreFirmante,
+        lugar: ctx.emisor ?? '',
+        contacto: process.env.SOPORTE_EMAIL ?? '',
+      },
+      selloDePlataforma(),
+    );
+  } catch (err) {
+    if (err instanceof HttpError) throw err;
+    throw new HttpError(502, 'No se pudo aplicar la firma al documento. Probá de nuevo en un momento.');
+  }
+
+  // Verificar lo que acabamos de producir, antes de guardarlo. Entregar un
+  // documento cuya firma no cierra es peor que no firmarlo.
+  const comprobacion = verificar(firmado);
+  const firmas = comprobacion.firmas;
+  // `integro` y no "todas verifican": exige además que no queden bytes al final
+  // que ninguna firma cubra. Sobre un archivo que acabamos de producir nosotros
+  // mismos, cualquier byte suelto es un error nuestro.
+  if (!firmas.length || !comprobacion.integro) {
+    throw new HttpError(500, 'La firma generada no verifica. No se guardó nada.');
+  }
+
+  const sha256Firmado = createHash('sha256').update(firmado).digest();
+  const claveNueva = nuevaClave();
+  await almacen().guardar(claveNueva, firmado);
+
+  // ── PASO 3: registrar. Todo junto, en una transacción.
+  const resultado = await enSistema(async (trx) => {
+    const archivoId = randomUUID();
+    await sql`
+      insert into archivo (id, sha256, bytes, mime, clase, cuenta_custodia_id,
+                           region, clave_almacenamiento)
+      values (${archivoId}::uuid, ${sha256Firmado}, ${firmado.length}, ${ctx.mime},
+              'firmado', ${ctx.cuenta_propietaria_id}::uuid, ${almacen().region}, ${claveNueva})
+    `.execute(trx);
 
     const ahora = new Date();
+    const comun = {
+      instanciaId: ctx.instancia_id,
+      circuitoId: ctx.circuito_id,
+      cuentaPropietariaId: ctx.cuenta_propietaria_id,
+      identidadId: e.identidadId,
+      participacionId: ctx.participacion_id,
+      actorTipo: 'firmante' as const,
+      ocurridoEn: ahora,
+      ip: input.ip,
+      userAgent: input.userAgent,
+      huellaDispositivo: input.huellaDispositivo,
+      canal: 'web' as const,
+      zonaHorariaMostrada: input.zonaHoraria,
+    };
 
-    // Orden de los eventos: identidad, consentimiento, firma. No es cosmético —
-    // es la secuencia que un perito espera encontrar, y la cadena la congela.
+    // Orden: identidad, consentimiento, firma. No es cosmético — es la
+    // secuencia que un perito espera encontrar, y la cadena la congela.
     await anotar(trx, {
-      instanciaId: f.instancia_id, circuitoId: f.circuito_id,
-      cuentaPropietariaId: f.cuenta_propietaria_id,
-      tipo: 'identidad.probada', actorTipo: 'firmante',
-      identidadId: e.identidadId, participacionId: f.participacion_id,
+      ...comun,
+      tipo: 'identidad.probada',
       datos: { metodo: 'verificacion_email', nivel_garantia: 'bajo' },
-      ocurridoEn: ahora, ip: input.ip, userAgent: input.userAgent,
-      huellaDispositivo: input.huellaDispositivo, canal: 'web',
-      sha256Documento: f.sha256, zonaHorariaMostrada: input.zonaHoraria,
+      sha256Documento: ctx.sha256,
     });
 
     await anotar(trx, {
-      instanciaId: f.instancia_id, circuitoId: f.circuito_id,
-      cuentaPropietariaId: f.cuenta_propietaria_id,
-      tipo: 'consentimiento.dado', actorTipo: 'firmante',
-      identidadId: e.identidadId, participacionId: f.participacion_id,
+      ...comun,
+      tipo: 'consentimiento.dado',
       datos: {
-        texto_aceptado: 'Acepto firmar este documento electrónicamente y que mi firma ' +
-                        'electrónica tenga el mismo valor que una firma manuscrita.',
+        texto_aceptado:
+          'Acepto firmar este documento electrónicamente y que mi firma electrónica ' +
+          'tenga el mismo valor que una firma manuscrita.',
         version: 1,
       },
-      ocurridoEn: ahora, ip: input.ip, userAgent: input.userAgent,
-      huellaDispositivo: input.huellaDispositivo, canal: 'web',
-      sha256Documento: f.sha256, zonaHorariaMostrada: input.zonaHoraria,
+      sha256Documento: ctx.sha256,
     });
 
     await anotar(trx, {
-      instanciaId: f.instancia_id, circuitoId: f.circuito_id,
-      cuentaPropietariaId: f.cuenta_propietaria_id,
-      tipo: 'firma.aplicada', actorTipo: 'firmante',
-      identidadId: e.identidadId, participacionId: f.participacion_id,
+      ...comun,
+      tipo: 'firma.aplicada',
       datos: {
-        nivel_firma: f.nivel_firma,
+        nivel_firma: ctx.nivel_firma,
         // La representación visual, guardada como lo que es: un texto que la
-        // persona escribió. No es la firma y el expediente no la llama así.
+        // persona escribió. No es la firma, y el expediente no la llama así.
         representacion_visual: input.nombreEscrito ?? null,
-        // ⚠ Sin sello criptográfico todavía: falta el ensamblador PAdES.
-        sellado_pades: false,
+        sellado_pades: true,
+        subfiltro: 'ETSI.CAdES.detached',
+        sello: selloDePlataforma().codigo,
+        titular_certificado: selloDePlataforma().titular,
+        firmas_en_el_documento: firmas.length,
+        // La huella del documento ANTES y DESPUÉS de esta firma. Es lo que ata
+        // el evento al archivo concreto, sin depender de ninguna otra tabla.
+        sha256_previo: Buffer.from(ctx.sha256).toString('hex'),
+        sha256_resultante: sha256Firmado.toString('hex'),
+        archivo_id: archivoId,
       },
-      ocurridoEn: ahora, ip: input.ip, userAgent: input.userAgent,
-      huellaDispositivo: input.huellaDispositivo, canal: 'web',
-      sha256Documento: f.sha256, zonaHorariaMostrada: input.zonaHoraria,
+      // El evento apunta al documento QUE SE FIRMÓ, no al resultado: es el
+      // contenido sobre el que esta persona prestó su consentimiento.
+      sha256Documento: ctx.sha256,
     });
 
     await sql`
       update participacion
          set estado = 'firmada', firmada_en = ${ahora},
-             anclaje_usado_id = ${f.anclaje_email},
+             anclaje_usado_id = ${ctx.anclaje_email},
              nivel_garantia_obtenido = 'bajo'
-       where id = ${f.participacion_id}::uuid
+       where id = ${ctx.participacion_id}::uuid
     `.execute(trx);
 
-    // ¿Queda alguien?
-    const pend = await sql<{ n: string; siguiente: number | null }>`
-      select count(*)::text as n, min(orden) as siguiente
-        from participacion
-       where instancia_id = ${f.instancia_id}::uuid and papel = 'firmante'
+    const pend = await sql<{ n: string }>`
+      select count(*)::text as n from participacion
+       where instancia_id = ${ctx.instancia_id}::uuid and papel = 'firmante'
          and estado not in ('firmada','no_requerida','delegada','rechazada')
     `.execute(trx);
-
     const quedan = Number(pend.rows[0]?.n ?? 0);
-    return {
-      instanciaId: f.instancia_id,
-      circuitoId: f.circuito_id,
-      cuentaId: f.cuenta_propietaria_id,
-      titulo: f.titulo,
-      quedan,
-      siguienteOrden: pend.rows[0]?.siguiente ?? null,
-    };
-  });
 
-  // El cierre lo hace el sistema, no el firmante: cambiar el estado de la
-  // instancia y del circuito no es un derecho del externo, es una consecuencia.
-  if (resultado.quedan === 0) {
-    await enSistema(async (trx) => {
+    if (quedan > 0) {
+      // Quedan firmas: el documento sigue en curso y el próximo firma sobre
+      // ESTE archivo.
       await sql`
-        update instancia set estado = 'firmada', cerrada_en = now()
-         where id = ${resultado.instanciaId}::uuid and estado = 'en_curso'
+        update instancia
+           set archivo_vigente_id = ${archivoId}::uuid, sha256_vigente = ${sha256Firmado}
+         where id = ${ctx.instancia_id}::uuid
+      `.execute(trx);
+    } else {
+      // Firmó el último: recién ahora el archivo pasa a ser el definitivo, y
+      // `archivo_firmado_id` no se puede volver a tocar — lo impide un trigger.
+      await sql`
+        update instancia
+           set archivo_vigente_id = ${archivoId}::uuid,
+               archivo_firmado_id = ${archivoId}::uuid,
+               sha256_vigente = ${sha256Firmado},
+               estado = 'firmada', cerrada_en = now()
+         where id = ${ctx.instancia_id}::uuid
       `.execute(trx);
 
       const abiertas = await sql<{ n: string }>`
         select count(*)::text as n from instancia
-         where circuito_id = ${resultado.circuitoId}::uuid
-           and estado in ('pendiente','en_curso')
+         where circuito_id = ${ctx.circuito_id}::uuid and estado in ('pendiente','en_curso')
       `.execute(trx);
 
       if (Number(abiertas.rows[0]?.n ?? 0) === 0) {
         await sql`
           update circuito set estado = 'completo', cerrado_en = now()
-           where id = ${resultado.circuitoId}::uuid and estado = 'enviado'
+           where id = ${ctx.circuito_id}::uuid and estado = 'enviado'
         `.execute(trx);
         await anotar(trx, {
-          instanciaId: resultado.instanciaId,
-          circuitoId: resultado.circuitoId,
-          cuentaPropietariaId: resultado.cuentaId,
+          instanciaId: ctx.instancia_id,
+          circuitoId: ctx.circuito_id,
+          cuentaPropietariaId: ctx.cuenta_propietaria_id,
           tipo: 'circuito.completo',
           actorTipo: 'sistema',
-          datos: { titulo: resultado.titulo },
+          datos: { titulo: ctx.titulo, firmas: firmas.length },
           canal: 'sistema',
+          sha256Documento: sha256Firmado,
         });
       }
-    });
+    }
+
+    return { quedan };
+  });
+
+  // Firmó uno y quedan otros: le toca al siguiente, y hay que avisarle. Va
+  // FUERA de la transacción y sin bloquear la respuesta al que acaba de firmar:
+  // su firma ya está registrada y un correo lento no es su problema.
+  if (resultado.quedan > 0) {
+    try {
+      await avisarAlQueSigue(ctx.circuito_id);
+    } catch {
+      // Si el aviso falla, la lista lo va a mostrar como "no le llegó el aviso"
+      // y el emisor lo reintenta. Perder la firma por un SMTP caído sería peor.
+    }
   }
 
   return {
     ok: true,
     completo: resultado.quedan === 0,
     faltan: resultado.quedan,
-    // Honestidad hacia afuera: la pantalla lo dice con todas las letras.
-    sellado_pades: false,
+    sellado_pades: true,
+    firmas_en_el_documento: firmas.length,
   };
 }
 

@@ -4,6 +4,7 @@ import { withUsuario, exigir } from '../auth/authz';
 import { db } from '../db/pool';
 import { fijarContexto } from '../db/contexto';
 import { anotar } from './evidencia';
+import { registrarSistema } from './auditoria';
 import { emitirEnlaceFirma, urlDeFirma } from '../auth/enlace_firma';
 import { enviarCorreo } from './correo';
 import { HttpError } from '../http/errors';
@@ -615,6 +616,32 @@ async function notificar(
     }
   });
 
+  // Y además en la BITÁCORA de plataforma.
+  //
+  // No es duplicación por descuido: son dos registros distintos para dos
+  // preguntas distintas.
+  //
+  //   · El expediente responde "¿a este firmante se le avisó?" y vale en un
+  //     juicio. Es contenido del cliente y el operador NO puede leerlo — lo
+  //     verifica el test C4 y esa frontera no se mueve.
+  //   · La bitácora responde "¿el correo de la plataforma está funcionando?".
+  //     Es metadato operativo: sin esto, el operador no tiene forma de saber
+  //     que el SMTP viene fallando hasta que un cliente se queja.
+  //
+  // Va sin el destino completo: la bitácora la lee gente que no es parte de ese
+  // documento.
+  await registrarSistema(cuentaId, null, {
+    accion: error ? 'correo.fallido' : 'correo.enviado',
+    recursoTipo: 'participacion',
+    recursoId: e.participacionId,
+    despues: {
+      motivo: 'invitacion_a_firmar',
+      destino: enmascarar(e.email),
+      circuito_id: circuitoId,
+      error,
+    },
+  });
+
   return error ? { ok: false, email: e.email, error } : { ok: true, email: e.email };
 }
 
@@ -665,4 +692,80 @@ function enmascarar(email: string): string {
   const [u, d] = email.split('@');
   if (!d) return '***';
   return `${(u ?? '').slice(0, 2)}***@${d}`;
+}
+
+/**
+ * Le avisa a quien le toca ahora. Lo llama el motor, no una persona.
+ *
+ * ═══ ES LO QUE HACE AVANZAR LA SERIE ═══
+ *
+ * Sin esto, una firma en serie se traba en el primero: el segundo queda
+ * esperando un correo que nunca sale, y el emisor ve "1 de 2" sin entender por
+ * qué no avanza. El acto de firmar tiene una consecuencia —le toca al
+ * siguiente— y esa consecuencia la ejecuta el sistema, no el firmante.
+ *
+ * Corre como `sistema` y DESPUÉS de que la firma quedó registrada: si el correo
+ * falla, la firma ya está y el aviso se reintenta con "Reenviar aviso". Al
+ * revés, un SMTP caído impediría firmar.
+ *
+ * No emite otorgamientos: los emitió el despacho, para todos los participantes
+ * a la vez. Lo único que faltaba era avisar.
+ */
+export async function avisarAlQueSigue(circuitoId: string) {
+  const preparado = await enSistema(async (trx) => {
+    const c = await sql<{ titulo: string; idioma: string; cuenta_nombre: string; cuenta_id: string }>`
+      select c.titulo, c.idioma, cu.nombre_mostrado as cuenta_nombre, c.cuenta_propietaria_id as cuenta_id
+        from circuito c
+        join cuenta cu on cu.id = c.cuenta_propietaria_id
+       where c.id = ${circuitoId}::uuid and c.estado = 'enviado'
+    `.execute(trx);
+    if (!c.rows.length) return null;
+
+    // A quién le toca AHORA: los pendientes del orden más bajo que todavía no
+    // fueron notificados. Mismo criterio que el despacho.
+    const p = await sql<{
+      id: string; instancia_id: string; identidad_id: string; email: string;
+      nombre: string | null; otorgamiento_id: string | null;
+    }>`
+      select p.id, p.instancia_id, p.identidad_id,
+             i.email_mostrado as email, i.nombre_mostrado as nombre,
+             (select o.id from otorgamiento o
+               where o.instancia_id = p.instancia_id and o.identidad_id = p.identidad_id
+                 and o.revocado_en is null
+               order by o.creado_en desc limit 1) as otorgamiento_id
+        from participacion p
+        join identidad i on i.id = p.identidad_id
+       where p.circuito_id = ${circuitoId}::uuid
+         and p.estado = 'pendiente'
+         and p.orden = (
+           select min(p2.orden) from participacion p2
+            where p2.circuito_id = ${circuitoId}::uuid
+              and p2.estado not in ('firmada','no_requerida','delegada','rechazada'))
+    `.execute(trx);
+
+    if (!p.rows.length) return null;
+    return {
+      titulo: c.rows[0]!.titulo,
+      cuentaNombre: c.rows[0]!.cuenta_nombre,
+      idioma: c.rows[0]!.idioma,
+      cuentaId: c.rows[0]!.cuenta_id,
+      destinos: p.rows.filter((x) => x.otorgamiento_id),
+    };
+  });
+
+  if (!preparado || !preparado.destinos.length) return { notificados: 0 };
+
+  const r = await Promise.all(
+    preparado.destinos.map((d) =>
+      notificar(preparado.cuentaId, circuitoId, preparado, {
+        participacionId: d.id,
+        otorgamientoId: d.otorgamiento_id!,
+        identidadId: d.identidad_id,
+        instanciaId: d.instancia_id,
+        email: d.email,
+        nombre: d.nombre,
+      }),
+    ),
+  );
+  return { notificados: r.filter((x) => x.ok).length };
 }

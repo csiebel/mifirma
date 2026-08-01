@@ -3,7 +3,7 @@ import { z } from 'zod';
 import { HttpError } from '../errors';
 import { clearCookieSesion } from '../cookies_sesion';
 import { verificarTokenOperador, type SesionOperador } from '../../operador/sesion';
-import { listarBitacoraOperador } from '../../services/auditoria';
+import { listarBitacoraOperador, registrarPlataforma } from '../../services/auditoria';
 import {
   listarTarifasIa,
   guardarTarifaIa,
@@ -528,7 +528,32 @@ export function registrarRutasOperador(app: FastifyInstance) {
     const b = z
       .object({ canal: z.enum(['sms', 'whatsapp']), telefono: z.string().min(6) })
       .parse(req.body);
-    return enviarPruebaTwilio(b.canal, b.telefono);
+    // La prueba del operador se anota igual que un envío real. Es el evento que
+    // permite distinguir "Twilio está caído" de "el teléfono de esa persona
+    // está mal cargado", que son dos reclamos que llegan idénticos.
+    try {
+      const r = await enviarPruebaTwilio(b.canal, b.telefono);
+      await registrarPlataforma(null, {
+        accion: 'sms.prueba',
+        recursoTipo: 'twilio',
+        despues: { canal: b.canal, destino: r.telefono },
+        ip: req.ip,
+        userAgent: req.headers['user-agent'] ?? null,
+      });
+      return r;
+    } catch (err) {
+      await registrarPlataforma(null, {
+        accion: 'sms.prueba_fallida',
+        recursoTipo: 'twilio',
+        despues: {
+          canal: b.canal,
+          motivo: err instanceof Error ? err.message.slice(0, 300) : 'desconocido',
+        },
+        ip: req.ip,
+        userAgent: req.headers['user-agent'] ?? null,
+      });
+      throw err;
+    }
   });
 
 

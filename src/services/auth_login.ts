@@ -14,7 +14,7 @@ import type { NivelGarantia } from '../db/contexto';
 import { hashPassword, verifyPassword } from '../auth/password';
 import { enviarCorreo } from './correo';
 import { enviarOtpPorTwilio, twilioActivo } from './twilio';
-import { registrarSistema } from './auditoria';
+import { registrarSistema, registrarPlataforma } from './auditoria';
 import { HttpError } from '../http/errors';
 
 /**
@@ -299,19 +299,52 @@ async function crearYEnviarOtp(
       .execute();
   });
 
+  // El destino, enmascarado, para poder anotarlo. Se calcula acá arriba porque
+  // el `canal` puede cambiar más abajo si hay que caer al respaldo por correo, y
+  // entonces ya no se sabría a qué teléfono se intentó.
+  const intentado = canal === 'email' ? enmascararEmail(destino.email) : enmascararTel(tel);
+
   try {
     if (canal === 'sms' || canal === 'whatsapp') {
       await enviarOtpPorTwilio(canal, tel, codigo, OTP_TTL_MIN);
     } else {
       await enviarOtpPorCorreo(destino.email, codigo);
     }
-  } catch {
+    // ⚠ El código NO se anota, obviamente. Se anota que salió, por dónde y
+    // hacia dónde enmascarado: alcanza para responder "no me llegó" sin que la
+    // bitácora se convierta en una forma de entrar a las cuentas de nadie.
+    await registrarPlataforma(identidadId, {
+      accion: 'otp.enviado',
+      recursoTipo: 'otp',
+      despues: { canal, destino: intentado, device_id: deviceId },
+      ip,
+      userAgent,
+    });
+  } catch (err) {
+    await registrarPlataforma(identidadId, {
+      accion: 'otp.fallido',
+      recursoTipo: 'otp',
+      despues: {
+        canal,
+        destino: intentado,
+        motivo: err instanceof Error ? err.message.slice(0, 300) : 'desconocido',
+      },
+      ip,
+      userAgent,
+    });
     // Respaldo por correo antes de rendirse: dejar a alguien afuera por una
     // caída de Twilio es peor que mandarlo por otro canal.
     if (canal !== 'email') {
       try {
         await enviarOtpPorCorreo(destino.email, codigo);
         canal = 'email';
+        await registrarPlataforma(identidadId, {
+          accion: 'otp.enviado',
+          recursoTipo: 'otp',
+          despues: { canal: 'email', destino: enmascararEmail(destino.email), respaldo_de: intentado },
+          ip,
+          userAgent,
+        });
         await enSistema((trx) =>
           trx
             .updateTable('otp_login')

@@ -103,7 +103,8 @@ export interface BitacoraPlataforma {
   accion: string;
   actor_tipo: string;
   antes: Json | null;
-  cuenta_id: string;
+  /** Null = evento de plataforma, sin cuenta. Ver migración 027. */
+  cuenta_id: string | null;
   despues: Json | null;
   id: Generated<string>;
   identidad_id: string | null;

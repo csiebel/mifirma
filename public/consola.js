@@ -29,11 +29,33 @@
   var CUENTA = null;      // datos de /cuenta/datos
   var YO = null;          // /mi/quien-soy
   var ARBOL = [];         // árbol de carpetas
-  var SEL = null;         // carpeta seleccionada
+  var SEL = null;         // carpeta seleccionada en la pantalla Carpetas
+  var CARPETA = null;     // carpeta que se está mirando en Documentos
+
+  /**
+   * Ramas plegadas, por id.
+   *
+   * Va a localStorage porque es preferencia de vista, no dato ni credencial: si
+   * alguien la lee, se entera de que tenés una carpeta cerrada. Los tokens
+   * siguen sin pisar localStorage — ver el encabezado de este archivo.
+   */
+  var PLEGADAS = (function () {
+    try { return new Set(JSON.parse(localStorage.getItem('mifirma.plegadas') || '[]')); }
+    catch (e) { return new Set(); }
+  })();
+  /** Si la lista incluye toda la rama. Preferencia de vista, igual que el pliegue. */
+  var CON_SUB = (function () {
+    try { return localStorage.getItem('mifirma.sub') === '1'; } catch (e) { return false; }
+  })();
+
+  function guardarPlegadas() {
+    try { localStorage.setItem('mifirma.plegadas', JSON.stringify(Array.from(PLEGADAS))); }
+    catch (e) { /* modo privado: se pierde al recargar y no pasa nada */ }
+  }
   var ROLES = [];         // roles de la cuenta (para los selectores)
   var CATALOGO = null;    // catálogo de capacidades
 
-  var VISTAS = ['documentos', 'carpetas', 'accesos', 'roles', 'cuenta'];
+  var VISTAS = ['documentos', 'carpetas', 'accesos', 'roles', 'actividad', 'cuenta'];
 
   var ETIQUETA_ACCION = {
     ver: 'Ver que existe',
@@ -108,10 +130,11 @@
     if (location.hash.slice(1) !== vista) location.hash = vista;
     window.scrollTo(0, 0);
 
-    if (vista === 'documentos') cargarSelectorCarpetas();
+    if (vista === 'documentos') { armarZonaDeSoltar(); cargarArbolDocs(); }
     if (vista === 'carpetas') cargarCarpetas();
     if (vista === 'accesos') cargarUsuarios();
     if (vista === 'roles') cargarRoles();
+    if (vista === 'actividad') cargarActividad();
     if (vista === 'cuenta') pintarCuenta();
   }
 
@@ -157,29 +180,43 @@
     return salida;
   }
 
-  async function cargarSelectorCarpetas() {
+  async function cargarArbolDocs() {
     try {
       if (!ARBOL.length) ARBOL = (await api('/carpetas')).carpetas || [];
-      var lista = aplanar(ARBOL, [], 0);
-      var sel = $('carpetaDocs');
-      var previo = sel.value;
-      sel.innerHTML = lista
-        .map(function (c) { return '<option value="' + esc(c.id) + '">' + c.nombre + '</option>'; })
-        .join('');
-      if (previo) sel.value = previo;
-      cargarDocumentos();
+      // Si la carpeta que estaba abierta sigue existiendo se respeta; si no, la
+      // raíz. Volver a la raíz cada vez que se cambia de pantalla es la clase de
+      // detalle que hace que la gente deje de usar las carpetas.
+      var previa = CARPETA && buscarNodo(ARBOL, CARPETA.id);
+      elegirCarpetaDocs(previa || ARBOL[0] || null);
     } catch (e) {
       msg('msgDocs', e.message, 'err');
     }
   }
 
+  function elegirCarpetaDocs(nodo) {
+    CARPETA = nodo;
+    montarArbol('arbolDocs', nodo && nodo.id, elegirCarpetaDocs, true);
+    $('nomCarpetaDocs').textContent = nodo ? nodo.nombre : 'Sin carpetas';
+    $('subDocs').textContent = nodo && !nodo.sistema ? nodo.ruta : '';
+    cargarDocumentos();
+  }
+
+  function cambiarAlcance() {
+    CON_SUB = !!$('subcarpetas').checked;
+    try { localStorage.setItem('mifirma.sub', CON_SUB ? '1' : '0'); } catch (e) {}
+    cargarDocumentos();
+  }
+  window.cambiarAlcance = cambiarAlcance;
+
   async function cargarDocumentos() {
-    var carpetaId = $('carpetaDocs').value;
+    var carpetaId = CARPETA && CARPETA.id;
     if (!carpetaId) return;
+    if ($('subcarpetas')) $('subcarpetas').checked = CON_SUB;
     msg('msgDocs', '', '');
     $('tDocumentos').innerHTML = '<tr><td colspan="5" class="vacio">Un momento…</td></tr>';
     try {
-      var j = await api('/documentos?carpeta_id=' + encodeURIComponent(carpetaId));
+      var j = await api('/documentos?carpeta_id=' + encodeURIComponent(carpetaId) +
+        (CON_SUB ? '&sub=1' : ''));
       pintarDocumentos(j.documentos || []);
     } catch (e) {
       $('tDocumentos').innerHTML = '<tr><td colspan="5" class="vacio">' + esc(e.message) + '</td></tr>';
@@ -197,15 +234,28 @@
   function pintarDocumentos(docs) {
     if (!docs.length) {
       $('tDocumentos').innerHTML =
-        '<tr><td colspan="5" class="vacio">No hay documentos en esta carpeta.</td></tr>';
+        '<tr><td colspan="5" class="vacio">' +
+        (CON_SUB ? 'No hay documentos en esta carpeta ni en las que cuelgan de ella.'
+                 : 'No hay documentos en esta carpeta.') +
+        '</td></tr>';
       return;
     }
     $('tDocumentos').innerHTML = docs
       .map(function (d) {
+        // Con la rama incluida hay que decir DE DÓNDE es cada documento: una
+        // lista donde no se sabe en qué carpeta está cada fila convierte "mover"
+        // en una apuesta. El nombre sale del árbol que ya tenemos en memoria, no
+        // de una columna más en la consulta.
+        var otraCarpeta = '';
+        if (CON_SUB && CARPETA && d.carpeta_id && d.carpeta_id !== CARPETA.id) {
+          var nodo = buscarNodo(ARBOL, d.carpeta_id);
+          if (nodo) otraCarpeta = ' · en ' + esc(nodo.nombre);
+        }
         return (
-          '<tr><td><b>' + esc(d.titulo) + '</b><br>' +
+          '<tr draggable="true" data-doc="' + esc(d.instancia_id) + '">' +
+          '<td><b>' + esc(d.titulo) + '</b><br>' +
           '<span style="font-size:12.5px;color:var(--mut)">' + tamano(d.bytes) +
-          (d.paginas ? ' · ' + d.paginas + ' págs' : '') + '</span></td>' +
+          (d.paginas ? ' · ' + d.paginas + ' págs' : '') + otraCarpeta + '</span></td>' +
           '<td>' + (ESTADO_DOC[d.circuito_estado] || esc(d.circuito_estado)) +
           // Un documento despachado cuyo aviso no salió se ve idéntico a uno
           // que sí salió. Sin este cartel, el emisor espera para siempre la
@@ -232,7 +282,12 @@
             : '') +
           '<button class="btn btn-s chico" data-ver="' + esc(d.instancia_id) +
           '" data-tit="' + esc(d.titulo) + '">Ver</button>' +
+          (d.circuito_estado === 'completo'
+            ? '<button class="btn btn-s chico" data-firmas="' + esc(d.instancia_id) + '">Firmas</button>'
+            : '') +
           '<button class="btn btn-s chico" data-exp="' + esc(d.instancia_id) + '">Expediente</button>' +
+          '<button class="btn btn-s chico" data-mover="' + esc(d.instancia_id) +
+          '" data-tit="' + esc(d.titulo) + '">Mover</button>' +
           '</div></td></tr>'
         );
       })
@@ -261,6 +316,24 @@
     });
     $('tDocumentos').querySelectorAll('[data-exp]').forEach(function (b) {
       b.addEventListener('click', function () { verExpediente(b.dataset.exp); });
+    });
+    $('tDocumentos').querySelectorAll('[data-firmas]').forEach(function (b) {
+      b.addEventListener('click', function () { verFirmas(b.dataset.firmas); });
+    });
+    $('tDocumentos').querySelectorAll('tr[data-doc]').forEach(function (tr) {
+      tr.addEventListener('dragstart', function (ev) {
+        // Tipo propio y no 'text/plain': así una carpeta sabe que lo que le
+        // están soltando es un documento nuestro y no texto de otra ventana.
+        ev.dataTransfer.setData('text/x-mifirma-doc', tr.dataset.doc);
+        ev.dataTransfer.effectAllowed = 'move';
+        tr.classList.add('arrastrando');
+      });
+      tr.addEventListener('dragend', function () { tr.classList.remove('arrastrando'); });
+    });
+    $('tDocumentos').querySelectorAll('[data-mover]').forEach(function (b) {
+      b.addEventListener('click', function () {
+        moverDocumento(b.dataset.mover, b.dataset.tit, CARPETA && CARPETA.id);
+      });
     });
   }
 
@@ -316,26 +389,7 @@
       $('mOk').disabled = true;
       msg('msgModal', '', '');
       try {
-        var fd = new FormData();
-        fd.append('carpeta_id', $('carpetaDocs').value);
-        var tit = $('mTitulo').value.trim();
-        if (tit) fd.append('titulo', tit);
-        // El archivo va ÚLTIMO a propósito: el servidor lee el stream del
-        // archivo y recién después los campos de texto. Si el archivo fuera
-        // primero, `carpeta_id` no estaría disponible al procesarlo.
-        fd.append('archivo', f, f.name);
-
-        var c = csrf();
-        var r = await fetch('/documentos', {
-          method: 'POST',
-          credentials: 'same-origin',
-          headers: c ? { 'X-CSRF-Token': c } : {},
-          body: fd,   // sin Content-Type: lo pone el navegador con su boundary
-        });
-        var txt = await r.text();
-        var data; try { data = txt ? JSON.parse(txt) : {}; } catch (e2) { data = { error: txt }; }
-        if (!r.ok) throw new Error(data.error || ('HTTP ' + r.status));
-
+        var data = await subirUno(f, CARPETA.id, $('mTitulo').value.trim());
         cerrarModal();
         await cargarDocumentos();
         if (data.duplicado) {
@@ -345,6 +399,130 @@
         msg('msgModal', e.message, 'err');
         $('mOk').disabled = false;
       }
+    });
+  }
+
+  /**
+   * Sube UN archivo. Devuelve la respuesta del servidor o tira el error.
+   *
+   * No toca la pantalla a propósito: la usan el formulario y el arrastre, y
+   * cada uno informa distinto. Una función que sube y además pinta obliga a que
+   * los dos caminos se vean igual, y no se ven igual.
+   */
+  async function subirUno(archivo, carpetaId, titulo) {
+    var fd = new FormData();
+    fd.append('carpeta_id', carpetaId);
+    if (titulo) fd.append('titulo', titulo);
+    // El archivo va ÚLTIMO a propósito: el servidor lee el stream del archivo y
+    // recién después los campos de texto. Si el archivo fuera primero,
+    // `carpeta_id` no estaría disponible al procesarlo.
+    fd.append('archivo', archivo, archivo.name);
+
+    var c = csrf();
+    var r = await fetch('/documentos', {
+      method: 'POST',
+      credentials: 'same-origin',
+      headers: c ? { 'X-CSRF-Token': c } : {},
+      body: fd,   // sin Content-Type: lo pone el navegador con su boundary
+    });
+    var txt = await r.text();
+    var data; try { data = txt ? JSON.parse(txt) : {}; } catch (e2) { data = { error: txt }; }
+    if (!r.ok) throw new Error(data.error || ('HTTP ' + r.status));
+    return data;
+  }
+
+  function esPdf(f) {
+    return f.type === 'application/pdf' || /\.pdf$/i.test(f.name || '');
+  }
+
+  /**
+   * Sube varios archivos, uno por documento.
+   *
+   * ⚠ De a uno y en orden, no todos en paralelo. Diez PDF de veinte megas
+   * saliendo juntos saturan la conexión, y el servidor tiene que sellar y
+   * encadenar evidencia por cada uno. Además, en serie el contador de progreso
+   * dice algo cierto.
+   *
+   * Que uno falle NO cancela el resto: si en diez contratos hay uno protegido
+   * con contraseña, lo razonable es subir nueve y decir cuál falló, no perder
+   * las diez subidas.
+   */
+  async function subirVarios(lista, carpetaId) {
+    var archivos = Array.prototype.slice.call(lista);
+    var noPdf = archivos.filter(function (f) { return !esPdf(f); });
+    archivos = archivos.filter(esPdf);
+
+    if (!archivos.length) {
+      return msg('msgDocs', 'Por ahora sólo se aceptan PDF.', 'err');
+    }
+
+    var fallidos = [];
+    var duplicados = 0;
+    for (var i = 0; i < archivos.length; i++) {
+      msg('msgDocs', 'Subiendo ' + (i + 1) + ' de ' + archivos.length + ': ' + archivos[i].name + '…', '');
+      try {
+        var d = await subirUno(archivos[i], carpetaId, '');
+        if (d.duplicado) duplicados++;
+      } catch (e) {
+        fallidos.push(archivos[i].name + ': ' + e.message);
+      }
+    }
+    await cargarDocumentos();
+
+    var partes = [];
+    var ok = archivos.length - fallidos.length;
+    if (ok) partes.push(ok + (ok === 1 ? ' documento subido' : ' documentos subidos'));
+    if (duplicados) partes.push(duplicados + ' ya estaba(n) y se reusó el contenido');
+    if (noPdf.length) partes.push(noPdf.length + ' archivo(s) que no son PDF se ignoraron');
+    if (fallidos.length) partes.push('falló: ' + fallidos.join(' · '));
+    msg('msgDocs', partes.join('. ') + '.', fallidos.length ? 'err' : 'ok');
+  }
+
+  /**
+   * La zona de soltar archivos.
+   *
+   * El contador existe porque `dragleave` se dispara al pasar de un hijo a otro
+   * dentro de la misma zona. Sin contarlo, el resaltado parpadea mientras el
+   * usuario mueve el archivo por encima de la tabla.
+   */
+  function armarZonaDeSoltar() {
+    var z = $('zonaDocs');
+    if (!z || z.dataset.armada) return;
+    z.dataset.armada = '1';
+    var dentro = 0;
+
+    z.addEventListener('dragenter', function (ev) {
+      if (ev.dataTransfer.types.indexOf('Files') < 0) return;
+      ev.preventDefault();
+      dentro++;
+      z.classList.add('encima');
+    });
+    z.addEventListener('dragover', function (ev) {
+      if (ev.dataTransfer.types.indexOf('Files') < 0) return;
+      ev.preventDefault();
+      ev.dataTransfer.dropEffect = 'copy';
+    });
+    z.addEventListener('dragleave', function () {
+      dentro = Math.max(0, dentro - 1);
+      if (!dentro) z.classList.remove('encima');
+    });
+    z.addEventListener('drop', function (ev) {
+      if (!ev.dataTransfer.files || !ev.dataTransfer.files.length) return;
+      ev.preventDefault();
+      dentro = 0;
+      z.classList.remove('encima');
+      if (!CARPETA) return msg('msgDocs', 'Elegí una carpeta antes de subir.', 'err');
+      subirVarios(ev.dataTransfer.files, CARPETA.id);
+    });
+
+    // Fuera de la zona, soltar un PDF hace que el navegador lo abra y se pierda
+    // la sesión de la pantalla. Se descarta en silencio.
+    ['dragover', 'drop'].forEach(function (t) {
+      window.addEventListener(t, function (ev) {
+        if (ev.dataTransfer && ev.dataTransfer.types.indexOf('Files') >= 0 && !z.contains(ev.target)) {
+          ev.preventDefault();
+        }
+      });
     });
   }
 
@@ -529,11 +707,150 @@
           msg('msgDocs',
             'Enviado, pero no salió el aviso a: ' +
             r.fallidos.map(function (f) { return f.email; }).join(', '), 'err');
+        } else if ($('mModo') && $('mModo').value === 'serie' && parts.length > r.notificados) {
+          // En serie se avisa de a uno: decirlo evita que parezca que faltaron
+          // avisos. El resto recibe el suyo cuando le toque.
+          msg('msgDocs',
+            'Enviado. Le avisamos a ' + r.notificados + '; a los demás les llega cuando les toque firmar.',
+            'ok');
         } else {
           msg('msgDocs', 'Enviado. Le avisamos a ' + r.notificados + ' persona(s).', 'ok');
         }
       } catch (e) { msg('msgModal', e.message, 'err'); $('mEnviar').disabled = false; }
     });
+  }
+
+  /**
+   * Mover el documento a otra carpeta.
+   *
+   * El selector lista el mismo árbol que el de la pantalla, sangrado igual: la
+   * jerarquía tiene que verse, porque "Contratos" y "Contratos" pueden ser dos
+   * carpetas distintas colgando de ramas distintas.
+   */
+  async function moverDocumento(instanciaId, titulo, carpetaActual) {
+    if (!ARBOL.length) {
+      try { ARBOL = (await api('/carpetas')).carpetas || []; } catch (e) {}
+    }
+    var lista = aplanar(ARBOL, [], 0);
+    var opts = lista.map(function (c) {
+      return '<option value="' + esc(c.id) + '"' + (c.id === carpetaActual ? ' selected' : '') + '>' +
+        esc(c.nombre) + '</option>';
+    }).join('');
+
+    abrirModal(
+      '<h2>Mover documento</h2>' +
+      '<p class="sub">' + esc(titulo) + '</p>' +
+      '<label>Carpeta de destino</label>' +
+      '<select id="mCarpeta">' + opts + '</select>' +
+      '<div class="msg" style="background:var(--soft);color:var(--mut);border:1px solid var(--line)">' +
+      'Mover cambia dónde lo ves vos. No toca el documento, ni sus firmas, ni el enlace ' +
+      'que ya recibieron los firmantes.</div>' +
+      '<div id="mErr"></div>' +
+      '<div class="acc"><button class="btn" id="mCancel">Cancelar</button>' +
+      '<button class="btn btn-p" id="mOk">Mover</button></div>'
+    );
+    $('mCancel').addEventListener('click', cerrarModal);
+    $('mOk').addEventListener('click', async function () {
+      var destino = $('mCarpeta').value;
+      $('mOk').disabled = true;
+      try {
+        await api('/documentos/' + instanciaId + '/carpeta', 'PATCH', { carpeta_id: destino });
+        cerrarModal();
+        cargarDocumentos();
+      } catch (e) {
+        $('mOk').disabled = false;
+        $('mErr').innerHTML = '<div class="msg err">' + esc(e.message) + '</div>';
+      }
+    });
+  }
+  window.moverDocumento = moverDocumento;
+
+  /**
+   * Las firmas criptográficas del PDF.
+   *
+   * Es distinto del expediente, y la diferencia importa: el expediente cuenta lo
+   * que pasó según nosotros; esto comprueba el documento en sí. Un tercero con
+   * el PDF en la mano, sin acceso a nada nuestro, puede llegar al mismo
+   * resultado — y eso es lo que hace que la firma valga.
+   */
+  async function verFirmas(instanciaId) {
+    abrirModal('<h2>Firmas del documento</h2><p class="sub">Verificando…</p>');
+    try {
+      var j = await api('/documentos/' + instanciaId + '/firmas');
+      // Dos fallas distintas, dos mensajes distintos. Que una firma no verifique
+      // y que sobren bytes al final son problemas diferentes, y el que lee esto
+      // necesita saber cuál de los dos tiene.
+      var rotas = j.firmas.filter(function (f) { return !f.verifica; }).length;
+      var estado;
+      if (!j.firmas.length) {
+        // ⚠ Caso propio, y no un subcaso de "algo anda mal". Sin firmas no hay
+        // nada que verificar, y el mensaje de los bytes sin cubrir imprimía
+        // `null` porque ese número no significa nada cuando no verifica ninguna
+        // firma. Dos situaciones distintas no comparten mensaje.
+        estado = '<div class="msg err">Este PDF no tiene ninguna firma criptográfica.' +
+          (j.origen === 'base'
+            ? ' El circuito figura como firmado, pero lo que quedó guardado es el archivo ' +
+              'original sin sellar: se firmó antes de que existiera el sellado PAdES. ' +
+              'El expediente de ese documento sigue siendo válido; el PDF no prueba nada por sí solo.'
+            : '') + '</div>';
+      } else if (j.integro) {
+        estado = '<div class="msg ok">' + j.firmas.length + ' firma(s) válida(s). ' +
+          'El archivo es exactamente lo que se firmó.</div>';
+      } else if (rotas) {
+        estado = '<div class="msg err">' + rotas + ' de ' + j.firmas.length +
+          ' firma(s) no verifican: el archivo cambió después de firmarse. ' +
+          'No lo uses como prueba.</div>';
+      } else {
+        estado = '<div class="msg err">Quedan ' + j.bytes_sin_firmar +
+          ' byte(s) al final del archivo que ninguna firma cubre. ' +
+          'Alguien le agregó algo después de la última firma.</div>';
+      }
+
+      // ⚠ Que una firma no llegue al final del archivo NO es un problema: cada
+      // firma se agrega escribiendo bytes al final, así que la primera nunca
+      // puede cubrir a las que vinieron después. Decía "no cubre hasta el final"
+      // y se leía como "te modificaron el documento", que es falso y asusta.
+      var alcances = {
+        final: ['', 'Cubre el archivo completo'],
+        firma_posterior: ['', 'Cubre hasta el byte %B; lo que sigue son las firmas posteriores'],
+        sin_explicar: ['color:var(--mal,#c0392b);font-weight:600',
+                       'Después de esta firma hay bytes que ninguna firma cubre']
+      };
+      var filas = j.firmas.map(function (f) {
+        var cuando = '';
+        if (f.firmada_en) { try { cuando = new Date(f.firmada_en).toLocaleString('es'); } catch (e) {} }
+        var al = alcances[f.alcance] || ['', ''];
+        var quien = f.nombre_declarado || f.motivo || ('Firma ' + f.numero);
+        return '<div style="padding:12px 0;border-bottom:1px solid var(--line)">' +
+          '<b style="font-size:14px">' + (f.verifica ? '✓ ' : '✗ ') + esc(quien) + '</b>' +
+          (f.motivo && f.nombre_declarado ? '<div style="font-size:12.5px;color:var(--mut);margin-top:3px">' + esc(f.motivo) + '</div>' : '') +
+          '<div style="font-size:12.5px;color:var(--mut);margin-top:3px">' +
+          'Certificado: ' + esc(f.firmante || '—') +
+          (f.emisor ? ' · emitido por ' + esc(f.emisor) : '') + '</div>' +
+          (cuando ? '<div style="font-size:12.5px;color:var(--mut)">' + esc(cuando) + '</div>' : '') +
+          '<div style="font-size:12px;color:var(--mut);' + al[0] + '">' +
+          esc(al[1].replace('%B', f.cubre_hasta)) + ' · ' + f.bytes_cubiertos + ' bytes firmados</div>' +
+          '</div>';
+      }).join('');
+
+      abrirModal(
+        '<h2>Firmas del documento</h2>' +
+        '<p class="sub">Se comprueba el PDF en sí, no nuestra base de datos: por cada firma ' +
+        'se recalcula el resumen de los bytes que dice cubrir.</p>' +
+        estado +
+        '<div style="max-height:50vh;overflow:auto;margin-top:12px">' + filas + '</div>' +
+        '<div class="msg" style="background:var(--soft);color:var(--mut);border:1px solid var(--line)">' +
+        'El certificado de sello es de desarrollo y está autofirmado: prueba que el documento ' +
+        'no cambió, no la identidad de quien firmó. Tampoco se comprueba todavía DocMDP, ' +
+        'que es lo que detectaría un agregado posterior que altere lo que se ve de una página.</div>' +
+        '<div class="acc"><button class="btn btn-p" id="mCancel">Cerrar</button></div>'
+      );
+      $('mCancel').addEventListener('click', cerrarModal);
+    } catch (e) {
+      abrirModal('<h2>Firmas</h2><div class="msg err">' + esc(e.message) + '</div>' +
+        '<div class="acc"><button class="btn btn-p" id="mCancel">Cerrar</button></div>');
+      $('mCancel').addEventListener('click', cerrarModal);
+    }
   }
 
   /**
@@ -625,30 +942,142 @@
 
   var ICONO_CARPETA =
     '<svg viewBox="0 0 24 24"><path d="M3 7a2 2 0 012-2h4l2 2.5h8a2 2 0 012 2V18a2 2 0 01-2 2H5a2 2 0 01-2-2z"/></svg>';
+  var ICONO_CHEVRON = '<svg viewBox="0 0 24 24"><path d="M6 9l6 6 6-6"/></svg>';
+
+  /**
+   * El árbol de carpetas. UN renderizador para las dos pantallas.
+   *
+   * Documentos y Carpetas muestran el mismo árbol con distinto propósito —una
+   * navega, la otra administra permisos— pero si fueran dos funciones, el día
+   * que se arregle un detalle en una, la otra queda distinta. Lo que cambia es
+   * qué se hace al elegir un nodo y si acepta que le suelten cosas encima.
+   *
+   * El pliegue se guarda por id y no por posición: renombrar una carpeta o
+   * mover una rama no tiene que reordenar lo que el usuario dejó cerrado.
+   */
+  function arbolHTML(nodos, selId, nivel) {
+    var h = '';
+    nodos.forEach(function (n) {
+      var hijos = n.hijos || [];
+      var plegada = PLEGADAS.has(n.id);
+      h +=
+        '<div class="rama">' +
+        '<div class="nodo" data-id="' + esc(n.id) + '" role="treeitem"' +
+        ' aria-selected="' + (n.id === selId) + '"' +
+        ' style="padding-left:' + (8 + nivel * 15) + 'px">' +
+        (hijos.length
+          ? '<button type="button" class="chev' + (plegada ? ' plegada' : '') + '"' +
+            ' data-plegar="' + esc(n.id) + '" aria-expanded="' + (!plegada) + '"' +
+            ' aria-label="Plegar o desplegar ' + esc(n.nombre) + '">' + ICONO_CHEVRON + '</button>'
+          : '<span class="chev hueco"></span>') +
+        ICONO_CARPETA +
+        '<span class="nom">' + esc(n.nombre) + '</span>' +
+        (n.sistema ? '<span class="sis">del sistema</span>' : '') +
+        '</div>' +
+        (hijos.length
+          ? '<div class="hijos"' + (plegada ? ' hidden' : '') + '>' +
+            arbolHTML(hijos, selId, nivel + 1) + '</div>'
+          : '') +
+        '</div>';
+    });
+    return h;
+  }
+
+  /**
+   * Los ancestros de un nodo, de la raíz hacia abajo.
+   *
+   * Hace falta para no dejar seleccionada una carpeta escondida: si el usuario
+   * plegó "Contratos" y la carpeta abierta es "Contratos/2026", el árbol tiene
+   * que abrirse solo hasta ahí. Un elemento seleccionado que no se ve es peor
+   * que ninguno — la pantalla dice una cosa y muestra otra.
+   */
+  function ancestros(nodos, id, camino) {
+    for (var i = 0; i < nodos.length; i++) {
+      if (nodos[i].id === id) return camino;
+      var h = ancestros(nodos[i].hijos || [], id, camino.concat([nodos[i].id]));
+      if (h) return h;
+    }
+    return null;
+  }
+
+  function montarArbol(contenedorId, selId, alElegir, conDrop) {
+    var cont = $(contenedorId);
+    if (!cont) return;
+    cont.setAttribute('role', 'tree');
+
+    if (selId) {
+      var camino = ancestros(ARBOL, selId, []) || [];
+      var cambio = false;
+      camino.forEach(function (id) { if (PLEGADAS.delete(id)) cambio = true; });
+      if (cambio) guardarPlegadas();
+    }
+
+    cont.innerHTML = ARBOL.length
+      ? arbolHTML(ARBOL, selId, 0)
+      : '<div class="vacio">No hay carpetas visibles para vos.</div>';
+
+    cont.querySelectorAll('[data-plegar]').forEach(function (b) {
+      b.addEventListener('click', function (ev) {
+        // Sin esto, plegar también selecciona la carpeta: el clic sube al nodo.
+        ev.stopPropagation();
+        var id = b.dataset.plegar;
+        var rama = b.closest('.rama');
+        var hijos = rama && rama.querySelector(':scope > .hijos');
+        var plegada = !PLEGADAS.has(id);
+        if (plegada) PLEGADAS.add(id); else PLEGADAS.delete(id);
+        guardarPlegadas();
+        b.classList.toggle('plegada', plegada);
+        b.setAttribute('aria-expanded', String(!plegada));
+        if (hijos) hijos.hidden = plegada;
+      });
+    });
+
+    cont.querySelectorAll('.nodo').forEach(function (d) {
+      d.addEventListener('click', function () { alElegir(buscarNodo(ARBOL, d.dataset.id)); });
+      if (!conDrop) return;
+
+      // Dos cosas se pueden soltar sobre una carpeta: una fila de la lista
+      // (mover) o archivos del escritorio (subir ahí directamente). Se
+      // distinguen por lo que trae el dataTransfer, no por un modo previo.
+      d.addEventListener('dragover', function (ev) {
+        ev.preventDefault();
+        ev.dataTransfer.dropEffect = ev.dataTransfer.types.indexOf('Files') >= 0 ? 'copy' : 'move';
+        d.classList.add('destino');
+      });
+      d.addEventListener('dragleave', function () { d.classList.remove('destino'); });
+      d.addEventListener('drop', async function (ev) {
+        ev.preventDefault();
+        ev.stopPropagation();
+        d.classList.remove('destino');
+        var destino = d.dataset.id;
+
+        if (ev.dataTransfer.files && ev.dataTransfer.files.length) {
+          return subirVarios(ev.dataTransfer.files, destino);
+        }
+        var doc = ev.dataTransfer.getData('text/x-mifirma-doc');
+        if (!doc) return;
+        if (CARPETA && destino === CARPETA.id) return;   // ya está ahí
+        try {
+          await api('/documentos/' + doc + '/carpeta', 'PATCH', { carpeta_id: destino });
+          await cargarDocumentos();
+          msg('msgDocs', 'Documento movido.', 'ok');
+        } catch (e) {
+          // El permiso lo decide la base, no esta pantalla: acá sólo se cuenta
+          // lo que dijo. Adivinar antes de preguntar sería tener la regla en
+          // dos lugares, y uno de los dos siempre queda viejo.
+          msg('msgDocs', e.message, 'err');
+        }
+      });
+    });
+  }
 
   function pintarArbol() {
-    var html = '';
-    function fila(n, nivel) {
-      html +=
-        '<div class="nodo" data-id="' + esc(n.id) + '" role="option" aria-selected="false"' +
-        ' style="padding-left:' + (10 + nivel * 16) + 'px">' +
-        ICONO_CARPETA + '<span>' + esc(n.nombre) + '</span>' +
-        (n.sistema ? '<span class="sis">del sistema</span>' : '') +
-        '</div>';
-      (n.hijos || []).forEach(function (h) { fila(h, nivel + 1); });
-    }
-    ARBOL.forEach(function (n) { fila(n, 0); });
-    $('arbol').innerHTML = html || '<div class="vacio">No hay carpetas visibles para vos.</div>';
-    $('arbol').querySelectorAll('.nodo').forEach(function (d) {
-      d.addEventListener('click', function () { seleccionar(buscarNodo(ARBOL, d.dataset.id)); });
-    });
+    montarArbol('arbol', SEL && SEL.id, seleccionar, false);
   }
 
   function seleccionar(nodo) {
     SEL = nodo;
-    $('arbol').querySelectorAll('.nodo').forEach(function (d) {
-      d.setAttribute('aria-selected', String(!!nodo && d.dataset.id === nodo.id));
-    });
+    montarArbol('arbol', nodo && nodo.id, seleccionar, false);
     if (!nodo) {
       $('nomCarpeta').textContent = 'Elegí una carpeta';
       $('rutaCarpeta').textContent = '';
@@ -1165,6 +1594,69 @@
         cargarRoles();
       } catch (e) { msg('msgModal', e.message, 'err'); $('mOk').disabled = false; }
     });
+  }
+
+  // ===========================================================================
+  // ACTIVIDAD
+  //
+  // La bitácora de la cuenta. Distinta del expediente: acá va lo administrativo
+  // —se dio un acceso, se cambió un permiso, salió o falló un correo— y se
+  // purga por retención. El expediente es del documento, es inmutable y se
+  // guarda por el plazo legal.
+  // ===========================================================================
+  var ACCION_TEXTO = {
+    'correo.enviado': 'Salió un correo',
+    'correo.fallido': 'Un correo NO se pudo enviar',
+    'cuenta.creada': 'Se creó la cuenta',
+    'acceso.dado': 'Se le dio acceso a alguien',
+    'acceso.quitado': 'Se le quitó el acceso a alguien',
+    'rol.creado': 'Se creó un rol',
+    'rol.borrado': 'Se borró un rol',
+    'rol.renombrado': 'Se renombró un rol',
+    'rol.capacidad_agregada': 'Se le agregó una capacidad a un rol',
+    'rol.capacidad_quitada': 'Se le quitó una capacidad a un rol',
+    'carpeta.creada': 'Se creó una carpeta',
+    'carpeta.borrada': 'Se borró una carpeta',
+    'carpeta.renombrada': 'Se renombró una carpeta',
+    'carpeta.permisos': 'Se cambiaron permisos de una carpeta',
+  };
+
+  function detalle(e) {
+    var d = e.despues || e.antes || {};
+    if (e.accion === 'correo.fallido') return esc(d.destino || '') + ' — ' + esc(d.error || 'sin detalle');
+    if (e.accion === 'correo.enviado') return esc(d.destino || '');
+    var partes = [];
+    ['nombre', 'codigo', 'email', 'estado', 'ruta', 'rol_id'].forEach(function (k) {
+      if (d[k]) partes.push(k + ': ' + d[k]);
+    });
+    return esc(partes.join(' · '));
+  }
+
+  async function cargarActividad() {
+    $('tActividad').innerHTML = '<tr><td colspan="4" class="vacio">Un momento…</td></tr>';
+    try {
+      var f = ($('filtroActividad') || {}).value || '';
+      var j = await api('/bitacora?limit=200' + (f ? '&accion=' + encodeURIComponent(f) : ''));
+      var ev = j.eventos || [];
+      if (!ev.length) {
+        $('tActividad').innerHTML = '<tr><td colspan="4" class="vacio">Todavía no hay actividad registrada.</td></tr>';
+        return;
+      }
+      $('tActividad').innerHTML = ev.map(function (e) {
+        var cuando = '';
+        try { cuando = new Date(e.ocurrido_en).toLocaleString('es'); } catch (x) {}
+        var fallo = e.accion === 'correo.fallido';
+        return '<tr' + (fallo ? ' style="background:#fef3f2"' : '') + '>' +
+          '<td style="white-space:nowrap;font-size:13px;color:var(--mut)">' + esc(cuando) + '</td>' +
+          '<td><b>' + esc(ACCION_TEXTO[e.accion] || e.accion) + '</b></td>' +
+          '<td>' + esc(e.usuario_nombre || e.usuario_email ||
+            (e.actor_tipo === 'sistema' ? 'El sistema' : '—')) + '</td>' +
+          '<td style="font-size:13px;color:var(--mut)">' + detalle(e) + '</td></tr>';
+      }).join('');
+      msg('msgActividad', '', '');
+    } catch (e) {
+      $('tActividad').innerHTML = '<tr><td colspan="4" class="vacio">' + esc(e.message) + '</td></tr>';
+    }
   }
 
   // ===========================================================================

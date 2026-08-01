@@ -30,3 +30,9 @@ datos/
 
 # Puerto y credenciales del túnel, regenerado por db/tunel.sh
 db/.env.tunel
+
+# Certificados de sello: contienen la CLAVE PRIVADA con la que se firma.
+# Uno filtrado permite firmar documentos en nombre de MiFirma.
+db/*.p12
+db/*.pfx
+*.pem
