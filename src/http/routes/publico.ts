@@ -1,4 +1,5 @@
 import type { FastifyInstance } from 'fastify';
+import { z } from 'zod';
 import { sql } from 'kysely';
 import { db } from '../../db/pool';
 import { fijarContexto } from '../../db/contexto';
@@ -22,6 +23,12 @@ async function anonimo<T>(fn: (trx: any) => Promise<T>): Promise<T> {
     await fijarContexto(trx, { actor: 'anonimo' });
     return fn(trx);
   });
+}
+
+function listaI18n(v: unknown, idioma: string): string[] {
+  if (!v || typeof v !== 'object') return [];
+  const m = v as Record<string, string[]>;
+  return m[idioma] ?? m.es ?? m.en ?? Object.values(m)[0] ?? [];
 }
 
 function textoI18n(v: unknown, idioma: string): string | null {

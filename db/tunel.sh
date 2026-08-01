@@ -22,13 +22,13 @@ tunel_cerrar() {
   else
     echo "No hay túnel abierto en esta terminal."
   fi
-  unset MIFIRMA_TUNEL_PID MIFIRMA_DB
+  unset MIFIRMA_TUNEL_PID MIFIRMA_DB DATABASE_URL DATABASE_OPERADOR_URL
 }
 
 # Si ya hay uno vivo en esta terminal, no abrimos otro.
 if [ -n "$MIFIRMA_TUNEL_PID" ] && kill -0 "$MIFIRMA_TUNEL_PID" 2>/dev/null; then
   echo "Ya hay un túnel abierto (pid $MIFIRMA_TUNEL_PID)."
-  echo "MIFIRMA_DB=$MIFIRMA_DB"
+  echo "MIFIRMA_DB -> $(printf '%s' "$MIFIRMA_DB" | sed 's|://[^@]*@|://***@|')"
 else
   MIFIRMA_TUNEL_LOG="$(mktemp -t mifirma-tunel)"
   railway connect Postgres --tunnel-only >"$MIFIRMA_TUNEL_LOG" 2>&1 &
@@ -66,6 +66,41 @@ else
   # Sin la contraseña, para que no quede en el scrollback ni en capturas.
   echo "MIFIRMA_DB -> $(printf '%s' "$MIFIRMA_DB" | sed 's|://[^@]*@|://***@|')"
 fi
+
+
+# ---------------------------------------------------------------------------
+# Las tres conexiones
+#
+# `MIFIRMA_DB` es el superusuario `postgres`: sirve para migraciones y para
+# psql, y NADA MÁS. La aplicación NUNCA se conecta con él — PostgreSQL saltea
+# todas las políticas RLS para un superusuario, así que usarlo apaga el
+# aislamiento entre cuentas sin producir ningún síntoma.
+#
+# `DATABASE_URL` es con lo que corre la app y los scripts (`mifirma_app`), y
+# `DATABASE_OPERADOR_URL` la consola del proveedor (`mifirma_operador`). Las dos
+# se arman acá porque el puerto del túnel cambia en cada sesión.
+#
+# Las contraseñas salen de db/.env.local, que está en .gitignore. Si no existe,
+# la app no arranca — y eso es preferible a que arranque como superusuario.
+# ---------------------------------------------------------------------------
+[ -f "$(dirname "${BASH_SOURCE[0]:-db/tunel.sh}")/.env.local" ] \
+  && . "$(dirname "${BASH_SOURCE[0]:-db/tunel.sh}")/.env.local"
+
+_hostpuerto="${MIFIRMA_DB#*@}"; _hostpuerto="${_hostpuerto%%/*}"
+
+if [ -n "$MIFIRMA_APP_PASSWORD" ]; then
+  export DATABASE_URL="postgresql://mifirma_app:${MIFIRMA_APP_PASSWORD}@${_hostpuerto}/mifirma"
+  echo "DATABASE_URL          -> mifirma_app@${_hostpuerto}/mifirma"
+else
+  unset DATABASE_URL
+  echo "⚠ Falta MIFIRMA_APP_PASSWORD en db/.env.local: la app y los scripts no van a conectar."
+fi
+
+if [ -n "$MIFIRMA_OPERADOR_PASSWORD" ]; then
+  export DATABASE_OPERADOR_URL="postgresql://mifirma_operador:${MIFIRMA_OPERADOR_PASSWORD}@${_hostpuerto}/mifirma"
+  echo "DATABASE_OPERADOR_URL -> mifirma_operador@${_hostpuerto}/mifirma"
+fi
+unset _hostpuerto
 
 # Prueba de vida: si esto no dice `mifirma`, algo quedó mal.
 psql "$MIFIRMA_DB" -tAc "select 'conectado a ' || current_database()" 2>&1

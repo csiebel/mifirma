@@ -1,0 +1,296 @@
+(function(){
+  'use strict';
+
+  /* =========================================================================
+     Textos. Van acá, como los de la página comercial: son pocos, cambian con
+     el diseño de las pantallas y no con la configuración del producto. El
+     español vive en el HTML y hace de respaldo.
+     ========================================================================= */
+  var T = {
+    es: {},
+    pt: {
+      'volver':'Voltar ao site','volver2':'Voltar','correo':'E-mail','password':'Senha',
+      'login.h1':'Entrar no MiFirma','login.lead':'Com seu e-mail e sua senha.',
+      'btn.entrar':'Entrar','olvide':'Esqueceu sua senha?',
+      'sinCuenta':'Sua empresa ainda não tem conta?','crear':'Crie aqui',
+      'canal.h1':'Por onde mandamos o código?','canal.lead':'É um equipamento novo, então confirmamos que é você.',
+      'canal.correo':'Por e-mail','canal.sms':'Por SMS','canal.wa':'Por WhatsApp',
+      'otp.h1':'Digite o código','otp.codigo':'Código de 6 dígitos','btn.verificar':'Verificar',
+      'otp.reenviar':'Enviar outro código','otp.destino':'Enviamos para {destino}.',
+      'otp.enviado':'Pronto, enviamos outro para {destino}.',
+      'cuenta.h1':'Em qual conta você quer entrar?','cuenta.lead':'Você tem acesso a mais de uma.',
+      'crear.h1':'Crie a conta da sua empresa',
+      'crear.lead':'Você cria e depois adiciona sua equipe com o papel de cada um.',
+      'crear.nombre':'Nome da empresa','crear.nombre.p':'É o que seus signatários vão ver no e-mail.',
+      'crear.pais':'País','crear.fiscal':'CNPJ / RUC / RUT',
+      'crear.pais.p':'O país define qual lei e quais certificadores se aplicam. Não pode ser alterado depois.',
+      'crear.razon':'Razão social','crear.opcional':'(opcional)',
+      'crear.vos':'Seu usuário de administrador','crear.tuNombre':'Seu nome',
+      'crear.password':'Senha','crear.password.p':'Mínimo 12 caracteres.','crear.btn':'Criar a conta',
+      'crear.v1':'Adicione sua equipe com um e-mail e atribua um papel.',
+      'crear.v2':'Cada pasta define quem vê e quem pode enviar.',
+      'crear.v3':'Quem assina seus documentos não precisa de conta.',
+      'crear.ya':'Já tem conta?','crear.entrar':'Entre aqui',
+      'reset.h1':'Recuperar a senha','reset.lead':'Enviamos um link para escolher uma nova.',
+      'reset.enviar':'Enviar link',
+      'reset.ok':'Se esse e-mail tiver conta, o link chega em alguns minutos.',
+      'np.h1':'Escolha sua senha','np.h1.inv':'Bem-vindo: escolha sua senha','np.lead':'Mínimo 12 caracteres.',
+      'np.nueva':'Nova senha','np.repetir':'Repita','np.guardar':'Salvar e entrar',
+      'np.ok':'Pronto. Entre com sua nova senha.',
+      'footer':'Assinatura eletrônica com validade jurídica','esperando':'Um momento…',
+      'err.faltan':'Preencha o e-mail e a senha.','err.codigo':'O código tem 6 dígitos.',
+      'err.correo':'Escreva seu e-mail.','err.noCoinciden':'As duas senhas precisam ser iguais.',
+      'err.corta':'Mínimo 12 caracteres.','err.crear':'Preencha o nome da empresa, seu nome, e-mail e senha.'
+    },
+    en: {
+      'volver':'Back to site','volver2':'Back','correo':'Email','password':'Password',
+      'login.h1':'Sign in to MiFirma','login.lead':'With your email and password.',
+      'btn.entrar':'Sign in','olvide':'Forgot your password?',
+      'sinCuenta':'Your company doesn’t have an account yet?','crear':'Create one',
+      'canal.h1':'Where should we send the code?','canal.lead':'New device, so we check it’s really you.',
+      'canal.correo':'By email','canal.sms':'By SMS','canal.wa':'By WhatsApp',
+      'otp.h1':'Enter the code','otp.codigo':'6-digit code','btn.verificar':'Verify',
+      'otp.reenviar':'Send another code','otp.destino':'We sent it to {destino}.',
+      'otp.enviado':'Done, we sent another one to {destino}.',
+      'cuenta.h1':'Which account do you want to enter?','cuenta.lead':'You have access to more than one.',
+      'crear.h1':'Create your company account',
+      'crear.lead':'You create it, then add your team with the role each one needs.',
+      'crear.nombre':'Company name','crear.nombre.p':'This is what your signers will see in the email.',
+      'crear.pais':'Country','crear.fiscal':'Tax ID',
+      'crear.pais.p':'The country decides which law and which certifiers apply. It can’t be changed later.',
+      'crear.razon':'Legal name','crear.opcional':'(optional)',
+      'crear.vos':'Your administrator account','crear.tuNombre':'Your name',
+      'crear.password':'Password','crear.password.p':'At least 12 characters.','crear.btn':'Create the account',
+      'crear.v1':'Add your team with an email and give each one a role.',
+      'crear.v2':'Each folder decides who can see and who can send.',
+      'crear.v3':'People signing your documents don’t need an account.',
+      'crear.ya':'Already have an account?','crear.entrar':'Sign in',
+      'reset.h1':'Reset your password','reset.lead':'We’ll email you a link to choose a new one.',
+      'reset.enviar':'Send link',
+      'reset.ok':'If that email has an account, the link arrives in a few minutes.',
+      'np.h1':'Choose your password','np.h1.inv':'Welcome — choose your password','np.lead':'At least 12 characters.',
+      'np.nueva':'New password','np.repetir':'Repeat it','np.guardar':'Save and sign in',
+      'np.ok':'Done. Sign in with your new password.',
+      'footer':'Electronic signature with legal validity','esperando':'One moment…',
+      'err.faltan':'Fill in the email and password.','err.codigo':'The code has 6 digits.',
+      'err.correo':'Type your email.','err.noCoinciden':'Both passwords must match.',
+      'err.corta':'At least 12 characters.','err.crear':'Fill in the company name, your name, email and password.'
+    }
+  };
+
+  var BASE = {};
+  document.querySelectorAll('[data-t]').forEach(function(el){ BASE[el.dataset.t] = el.textContent; });
+  T.es = Object.assign({}, BASE, {
+    'canal.sms':'Por SMS','canal.wa':'Por WhatsApp','esperando':'Un momento…',
+    'otp.destino':'Te lo mandamos a {destino}.','otp.enviado':'Listo, te mandamos otro a {destino}.',
+    'np.h1.inv':'Bienvenido: elegí tu contraseña',
+    'reset.ok':'Si ese correo tiene cuenta, te llega un enlace en unos minutos.',
+    'np.ok':'Listo. Entrá con tu contraseña nueva.',
+    'err.faltan':'Completá el correo y la contraseña.','err.codigo':'El código tiene 6 dígitos.',
+    'err.correo':'Escribí tu correo.','err.noCoinciden':'Las dos contraseñas tienen que ser iguales.',
+    'err.corta':'Mínimo 12 caracteres.','err.crear':'Completá el nombre de la empresa, tu nombre, correo y contraseña.'
+  });
+
+  var LANG = 'es';
+  function t(k){ return (T[LANG] && T[LANG][k]) || BASE[k] || ''; }
+  function idioma(l){
+    LANG = T[l] ? l : 'es';
+    try{ localStorage.setItem('mf_lang', LANG); }catch(e){}
+    document.documentElement.lang = LANG;
+    document.querySelectorAll('[data-t]').forEach(function(el){
+      var v = t(el.dataset.t); if (v) el.textContent = v;
+    });
+    document.querySelectorAll('.lang button').forEach(function(b){
+      b.setAttribute('aria-pressed', String(b.dataset.l === LANG));
+    });
+  }
+
+  var VISTAS = ['vLogin','vCanal','vOtp','vCuenta','vCrear','vReset','vNuevaPassword'];
+  var DESAFIO_OTP = null, DESAFIO_CUENTA = null, TOKEN_RESET = null, CANAL_TEL = 'sms';
+
+  function $(id){ return document.getElementById(id); }
+  function esc(s){ return String(s==null?'':s).replace(/[&<>"]/g, function(c){
+    return {'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]; }); }
+  function ver(v){ VISTAS.forEach(function(x){ $(x).classList.toggle('hidden', x!==v); }); window.scrollTo(0,0); }
+  function msg(id, texto, clase){ $(id).innerHTML = texto ? '<div class="msg '+clase+'">'+esc(texto)+'</div>' : ''; }
+  function ocupado(btn, si){
+    var b = $(btn); b.disabled = si;
+    if (si){ b.dataset.txt = b.textContent; b.textContent = t('esperando'); }
+    else if (b.dataset.txt){ b.textContent = b.dataset.txt; }
+  }
+
+  // Identificador de equipo. Estable por navegador: es lo que permite no pedir
+  // código en cada ingreso. No identifica a la persona.
+  function deviceId(){
+    try{
+      var k='mf_device_id', v=localStorage.getItem(k);
+      if(!v){ v = crypto.randomUUID ? crypto.randomUUID() : 'd'+Date.now()+Math.random().toString(16).slice(2);
+              localStorage.setItem(k,v); }
+      return v;
+    }catch(e){ return ''; }
+  }
+
+  async function api(path, method, body){
+    var opt = { method: method||'GET', credentials:'same-origin', headers:{} };
+    if (body){ opt.headers['Content-Type']='application/json'; opt.body=JSON.stringify(body); }
+    var r = await fetch(path, opt);
+    var txt = await r.text();
+    var data; try{ data = txt ? JSON.parse(txt) : {}; }catch(e){ data = { error: txt }; }
+    if (!r.ok) throw new Error(data.error || data.message || ('HTTP '+r.status));
+    return data;
+  }
+
+  // El servidor responde con un `tipo` y esto elige la pantalla. Toda la lógica
+  // de qué falta vive en el backend: el cliente sólo obedece.
+  function seguir(j){
+    if (j.tipo === 'sesion')        return entrar(j);
+    if (j.tipo === 'otp')           return mostrarOtp(j);
+    if (j.tipo === 'otp_elegir')    return mostrarCanal(j);
+    if (j.tipo === 'elegir_cuenta') return mostrarCuentas(j);
+    throw new Error('Respuesta inesperada del servidor.');
+  }
+  function entrar(j){
+    try{ localStorage.setItem('mf_token', j.token); }catch(e){}
+    location.href = '/app';
+  }
+
+  async function login(){
+    var email = $('email').value.trim(), password = $('password').value;
+    if (!email || !password) return msg('msgLogin', t('err.faltan'), 'err');
+    msg('msgLogin','',''); ocupado('btnLogin', true);
+    try{ seguir(await api('/auth/login','POST',{ email:email, password:password, device_id:deviceId() })); }
+    catch(e){ msg('msgLogin', e.message, 'err'); }
+    finally{ ocupado('btnLogin', false); }
+  }
+
+  function mostrarCanal(j){
+    DESAFIO_OTP = j.challenge; CANAL_TEL = j.canal_tel || 'sms';
+    $('canalEmail').textContent = j.email_masked || '';
+    $('canalTel').textContent = j.tel_masked || '';
+    $('canalTelTitulo').textContent = t(CANAL_TEL === 'whatsapp' ? 'canal.wa' : 'canal.sms');
+    msg('msgCanal','',''); ver('vCanal');
+  }
+  async function enviarCodigo(canal){
+    msg('msgCanal','','');
+    try{
+      var j = await api('/auth/otp/elegir','POST',{ challenge:DESAFIO_OTP, canal:canal });
+      mostrarOtp({ challenge:DESAFIO_OTP, canal:j.canal, destino_masked:j.destino_masked });
+    }catch(e){ msg('msgCanal', e.message, 'err'); }
+  }
+  function mostrarOtp(j){
+    DESAFIO_OTP = j.challenge;
+    $('otpDestino').textContent = t('otp.destino').replace('{destino}', j.destino_masked || '');
+    $('codigo').value = ''; msg('msgOtp','',''); ver('vOtp');
+    setTimeout(function(){ $('codigo').focus(); }, 50);
+  }
+  async function verificarCodigo(){
+    var code = $('codigo').value.trim();
+    if (code.length !== 6) return msg('msgOtp', t('err.codigo'), 'err');
+    msg('msgOtp','',''); ocupado('btnOtp', true);
+    try{ seguir(await api('/auth/otp','POST',{ challenge:DESAFIO_OTP, code:code })); }
+    catch(e){ msg('msgOtp', e.message, 'err'); }
+    finally{ ocupado('btnOtp', false); }
+  }
+  async function reenviar(){
+    msg('msgOtp','','');
+    try{
+      var j = await api('/auth/otp/reenviar','POST',{ challenge:DESAFIO_OTP });
+      msg('msgOtp', t('otp.enviado').replace('{destino}', j.destino_masked || ''), 'ok');
+    }catch(e){ msg('msgOtp', e.message, 'err'); }
+  }
+
+  function mostrarCuentas(j){
+    DESAFIO_CUENTA = j.desafio;
+    $('listaCuentas').innerHTML = (j.opciones||[]).map(function(o){
+      return '<button class="opcion" data-c="'+esc(o.cuenta_id)+'"><b>'+esc(o.cuenta_nombre)+'</b></button>';
+    }).join('');
+    $('listaCuentas').querySelectorAll('[data-c]').forEach(function(b){
+      b.addEventListener('click', function(){ elegirCuenta(b.dataset.c); });
+    });
+    msg('msgCuenta','',''); ver('vCuenta');
+  }
+  async function elegirCuenta(id){
+    msg('msgCuenta','','');
+    try{ entrar(await api('/auth/login/elegir-cuenta','POST',{ desafio:DESAFIO_CUENTA, cuenta_id:id })); }
+    catch(e){ msg('msgCuenta', e.message, 'err'); }
+  }
+  function volverAlLogin(){ DESAFIO_OTP=null; DESAFIO_CUENTA=null; msg('msgLogin','',''); ver('vLogin'); }
+
+  // ---------------- Alta de empresa ----------------
+  async function crearCuenta(){
+    var nombre = $('cNombre').value.trim();
+    var admin  = { nombre: $('cAdminNombre').value.trim(), email: $('cAdminEmail').value.trim(), password: $('cPass').value };
+    if (!nombre || !admin.nombre || !admin.email || !admin.password) {
+      return msg('msgCrear', t('err.crear'), 'err');
+    }
+    if (admin.password.length < 12) return msg('msgCrear', t('err.corta'), 'err');
+
+    msg('msgCrear','',''); ocupado('btnCrear', true);
+    try{
+      var j = await api('/auth/registro','POST',{
+        nombre: nombre,
+        pais: $('cPais').value,
+        id_fiscal: $('cFiscal').value.trim() || undefined,
+        razon_social: $('cRazon').value.trim() || undefined,
+        admin: admin
+      });
+      entrar(j);
+    }catch(e){
+      msg('msgCrear', e.message, 'err');
+    }finally{ ocupado('btnCrear', false); }
+  }
+
+  // ---------------- Recupero ----------------
+  async function pedirReset(){
+    var email = $('resetEmail').value.trim();
+    if (!email) return msg('msgReset', t('err.correo'), 'err');
+    ocupado('btnReset', true);
+    try{
+      await api('/auth/reset/solicitar','POST',{ email:email });
+      // Respuesta idéntica exista o no la cuenta: decir "ese correo no está
+      // registrado" convertiría este formulario en una herramienta para
+      // averiguar quién usa MiFirma.
+      msg('msgReset', t('reset.ok'), 'ok');
+    }catch(e){ msg('msgReset', e.message, 'err'); }
+    finally{ ocupado('btnReset', false); }
+  }
+
+  async function guardarPassword(){
+    var a = $('np1').value, b = $('np2').value;
+    if (a !== b) return msg('msgNp', t('err.noCoinciden'), 'err');
+    if (a.length < 12) return msg('msgNp', t('err.corta'), 'err');
+    ocupado('btnNp', true);
+    try{
+      await api('/auth/reset/confirmar','POST',{ token:TOKEN_RESET, password:a });
+      msg('msgNp', t('np.ok'), 'ok');
+      setTimeout(function(){ location.hash=''; ver('vLogin'); }, 1200);
+    }catch(e){ msg('msgNp', e.message, 'err'); }
+    finally{ ocupado('btnNp', false); }
+  }
+
+  // El enlace del correo llega como /entrar#token=…&t=inv|reset. Va en el
+  // fragmento y no en la query a propósito: el fragmento no viaja al servidor,
+  // así que el token no queda en los logs ni se filtra por el Referer.
+  function leerHash(){
+    var h = new URLSearchParams((location.hash||'').replace(/^#/,''));
+    if (h.get('crear') !== null || (location.hash||'') === '#crear'){ ver('vCrear'); return true; }
+    var tk = h.get('token');
+    if (!tk) return false;
+    TOKEN_RESET = tk;
+    if (h.get('t') === 'inv') $('npTitulo').textContent = t('np.h1.inv');
+    ver('vNuevaPassword');
+    return true;
+  }
+
+  window.idioma = idioma; window.ver = ver;
+  window.login = login; window.enviarCodigo = enviarCodigo; window.verificarCodigo = verificarCodigo;
+  window.reenviar = reenviar; window.volverAlLogin = volverAlLogin;
+  window.pedirReset = pedirReset; window.guardarPassword = guardarPassword; window.crearCuenta = crearCuenta;
+  Object.defineProperty(window, 'CANAL_TEL', { get: function(){ return CANAL_TEL; } });
+
+  var guardado; try{ guardado = localStorage.getItem('mf_lang'); }catch(e){}
+  var nav = (navigator.language || 'es').slice(0,2);
+  idioma(guardado || (T[nav] ? nav : 'es'));
+  if (!leerHash()) ver('vLogin');
+  window.addEventListener('hashchange', function(){ if (!leerHash()) ver('vLogin'); });
+})();

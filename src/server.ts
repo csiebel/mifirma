@@ -126,43 +126,11 @@ export function construirServidor(): FastifyInstance {
     }
   });
 
-  // Consola de CONTADORES (estudio): página aparte, otra URL, otro realm de auth.
-  // La página es pública; las APIs /estudio/* son públicas (registro/login) o validan
-  // el token de estudio adentro (/estudio/yo).
-  app.get('/estudio', async (_req, reply) => {
-    try {
-      const html = readFileSync(new URL('../public/estudio.html', import.meta.url), 'utf8');
-      reply.header('Cache-Control', 'no-store').type('text/html').send(html);
-    } catch {
-      reply.type('text/html').send('<h1>Falta public/estudio.html</h1>');
-    }
-  });
 
-  // Consola de OFERENTE (banco, financiera, comercio, anunciante): página aparte, otra
-  // URL, otro realm de auth. La página es pública; las APIs /oferente/* son públicas
-  // (registro/login) o validan el token de oferente adentro (/oferente/yo).
-  app.get('/oferente', async (_req, reply) => {
-    try {
-      const html = readFileSync(new URL('../public/oferente.html', import.meta.url), 'utf8');
-      reply.header('Cache-Control', 'no-store').type('text/html').send(html);
-    } catch {
-      reply.type('text/html').send('<h1>Falta public/oferente.html</h1>');
-    }
-  });
 
-  // App del EMPLEADO (autoservicio móvil): página propia servida en /mi.
-  // Pública; las APIs /mi/* validan el token de empresa adentro.
-  app.get('/mi', async (_req, reply) => {
-    try {
-      const html = readFileSync(new URL('../public/mi.html', import.meta.url), 'utf8');
-      reply.header('Cache-Control', 'no-store').type('text/html').send(html);
-    } catch {
-      reply.type('text/html').send('<h1>Falta public/mi.html</h1>');
-    }
-  });
 
-  // Página de ACCESO unificada (login + alta, empresa o estudio contable).
-  // Pública; sus llamadas (/auth/*, /estudio/*, /industrias-publicas) validan adentro.
+  // Página de ACCESO: login y alta de empresa. Un solo realm.
+  // Pública; sus llamadas (/auth/*) validan adentro.
   app.get('/entrar', async (_req, reply) => {
     try {
       const html = readFileSync(new URL('../public/entrar.html', import.meta.url), 'utf8');
@@ -171,6 +139,19 @@ export function construirServidor(): FastifyInstance {
       reply.type('text/html').send('<h1>Falta public/entrar.html</h1>');
     }
   });
+
+  // JavaScript de las páginas públicas. Se sirve como archivo suelto, igual que
+  // el HTML: para dos archivos no vale la pena montar un servidor de estáticos.
+  for (const js of ['sitio.js', 'entrar.js']) {
+    app.get('/' + js, async (_req, reply) => {
+      try {
+        const body = readFileSync(new URL('../public/' + js, import.meta.url), 'utf8');
+        reply.type('text/javascript').header('Cache-Control', 'no-cache').send(body);
+      } catch {
+        reply.code(404).send('archivo no encontrado');
+      }
+    });
+  }
 
   // PWA: manifest, service worker e íconos. Públicos (sin token), servidos como
   // archivos sueltos igual que las páginas HTML.

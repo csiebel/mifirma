@@ -105,9 +105,9 @@ const CARPETAS = [
   { sistema: 'papelera' as const, ruta: 'raiz.papelera', nombre: { es: 'Papelera', pt: 'Lixeira', en: 'Trash' } },
 ];
 
-async function enSistema<T>(cuentaId: string, fn: (trx: Transaction<DB>) => Promise<T>): Promise<T> {
+async function enSistema<T>(fn: (trx: Transaction<DB>) => Promise<T>): Promise<T> {
   return db.transaction().execute(async (trx) => {
-    await fijarContexto(trx, { actor: 'sistema', cuentaId });
+    await fijarContexto(trx, { actor: 'sistema' });
     return fn(trx);
   });
 }
@@ -124,8 +124,22 @@ export async function provisionarCuenta(input: ProvisionInput): Promise<Provisio
   const cuentaId = randomUUID();
   const tipo = input.tipo ?? 'empresa';
 
-  return enSistema(cuentaId, async (trx) => {
+  return enSistema(async (trx) => {
+    // ⚠ ORDEN. La identidad se resuelve con el contexto SIN cuenta, y recién
+    // después se fija la cuenta.
+    //
+    // `app.resolver_identidad` estampa `creada_por_cuenta_id` con la cuenta del
+    // contexto. Si la fijáramos antes de insertarla, la identidad apuntaría a
+    // una cuenta que todavía no existe y la clave foránea rechaza el alta
+    // entera. Y no se puede invertir sin más: una cuenta de tipo persona exige
+    // titular, así que la identidad tiene que existir primero. La salida es
+    // esta: identidad sin cuenta, después cuenta, después el contexto.
+    //
+    // Que `creada_por_cuenta_id` quede en null es además lo correcto: en el
+    // alta, la identidad existe antes que la cuenta.
     const identidadAdmin = await resolverIdentidad(trx, email, input.admin.nombre);
+
+    await fijarContexto(trx, { actor: 'sistema', cuentaId });
 
     await trx
       .insertInto('cuenta')

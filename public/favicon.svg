@@ -1,6 +1,5 @@
-<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 76 76" role="img" aria-label="Payroll New Generation">
-  <rect width="76" height="76" rx="16" fill="#123a5e"/>
-  <rect x="20" y="27" width="36" height="6.5" rx="3.25" fill="#ffffff"/>
-  <rect x="20" y="38" width="23" height="6.5" rx="3.25" fill="#0aa2b0"/>
-  <rect x="20" y="49" width="31" height="6.5" rx="3.25" fill="#ffffff"/>
+<?xml version="1.0" encoding="UTF-8"?>
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 14 62 40" width="32" height="32" role="img" aria-label="MiFirma">
+  <path d="M4 43C9 24 15 24 18 34s6 10 9 2" fill="none" stroke="#0B2B4A" stroke-width="8" stroke-linecap="round" stroke-linejoin="round"/>
+  <path d="M27 36l8 11 23-29" fill="none" stroke="#0AA2B0" stroke-width="8" stroke-linecap="round" stroke-linejoin="round"/>
 </svg>

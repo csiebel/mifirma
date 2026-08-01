@@ -3,512 +3,530 @@
 <head>
 <meta charset="utf-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1" />
-<title>MiFirma · Nómina y RRHH</title>
-<meta name="theme-color" content="#123a5e" />
+<title>MiFirma · Firma electrónica con validez legal</title>
+<meta name="description" content="Subí un PDF, definí quién completa qué y quién firma en qué orden. Firma electrónica con validez legal en Uruguay, Paraguay y Brasil." />
+<meta name="theme-color" content="#0B2B4A" />
 <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
 <link rel="apple-touch-icon" href="/apple-touch-icon.png" />
 <link rel="preconnect" href="https://fonts.googleapis.com" />
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
-<link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700;800&display=swap" rel="stylesheet" />
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet" />
 <style>
-  /* ===========================================================
-     MARCA — valores PROVISORIOS. Reemplazar por los exactos de
-     Interfase (hex de color y nombre de la fuente). Cambiando estas
-     variables y el <link> de la fuente, se actualizan la web y la app.
-     =========================================================== */
-  :root {
-    --brand: #123a5e;
-    --brand-600: #1a5482;
-    --brand-50: #eaf2f8;
-    --accent: #0aa2b0;
-    --accent-50: #e6f6f7;
-    --ink: #16202e;
-    --muted: #5b6573;
-    --soft: #f3f6f9;
-    --line: #e4eaf0;
-    --paper: #ffffff;
-    --radius: 12px;
-    --shadow: 0 1px 2px rgba(18,32,46,.05), 0 12px 32px rgba(18,32,46,.08);
-    --font: 'Plus Jakarta Sans', system-ui, -apple-system, sans-serif;
+  :root{
+    --brand:#0B2B4A; --brand-700:#071e33; --brand-600:#14456f; --brand-50:#eef4fa;
+    --acc:#0AA2B0; --acc-50:#e4f7f8; --acc-700:#077b86;
+    --amber:#F5B544; --amber-50:#fef6e7;
+    --ink:#0f1e2c; --mut:#5a6878; --line:#e4ebf3; --soft:#f7fafc; --paper:#fff;
+    --r:16px;
+    --font:'Inter',system-ui,-apple-system,'Segoe UI',Roboto,sans-serif;
+    --s1:0 1px 2px rgba(11,43,74,.05);
+    --s2:0 2px 4px rgba(11,43,74,.04), 0 12px 28px rgba(11,43,74,.08);
+    --s3:0 4px 8px rgba(11,43,74,.05), 0 24px 60px rgba(11,43,74,.14);
   }
-  * { box-sizing: border-box; }
-  html { scroll-behavior: smooth; }
-  body { margin: 0; background: var(--paper); color: var(--ink); font-family: var(--font); line-height: 1.55; -webkit-font-smoothing: antialiased; }
-  a { color: var(--brand-600); text-decoration: none; }
-  h1, h2, h3 { line-height: 1.15; letter-spacing: -.01em; }
-  .wrap { max-width: 1140px; margin: 0 auto; padding: 0 24px; }
+  *{box-sizing:border-box}
+  html{scroll-behavior:smooth}
+  body{margin:0;font-family:var(--font);color:var(--ink);background:var(--paper);line-height:1.6;-webkit-font-smoothing:antialiased;overflow-x:hidden}
+  a{color:var(--brand-600);text-decoration:none}
+  h1,h2,h3,h4{line-height:1.12;letter-spacing:-.027em;margin:0}
+  p{margin:0}
+  .wrap{max-width:1160px;margin:0 auto;padding:0 24px}
+  .kicker{color:var(--acc-700);font-weight:700;font-size:12.5px;letter-spacing:.12em;text-transform:uppercase}
 
-  .btn { display: inline-block; font-family: inherit; font-size: 14px; font-weight: 600; cursor: pointer; border: 1px solid var(--brand); background: var(--brand); color: #fff; padding: 11px 20px; border-radius: 8px; transition: filter .15s, transform .12s; white-space: nowrap; line-height: 1.2; }
-  .btn:hover { filter: brightness(1.12); }
-  .btn:active { transform: translateY(1px); }
-  .btn.big { padding: 14px 28px; font-size: 15px; }
-  .btn.ghost { background: transparent; color: var(--brand); }
-  .btn.ghost:hover { background: var(--brand-50); filter: none; }
-  .btn.block { display: block; width: 100%; text-align: center; }
+  /* ============ nav ============ */
+  nav{position:sticky;top:0;z-index:60;background:rgba(255,255,255,.82);backdrop-filter:saturate(180%) blur(14px);border-bottom:1px solid var(--line)}
+  nav .wrap{display:flex;align-items:center;gap:22px;height:70px}
+  nav img{height:30px;display:block}
+  .menu{display:none;gap:28px;margin-left:14px;flex:1}
+  .menu a{color:var(--ink);font-size:14.5px;font-weight:500;padding:6px 0;border-bottom:2px solid transparent}
+  .menu a:hover{color:var(--brand-600);border-bottom-color:var(--acc)}
+  .navacc{display:flex;align-items:center;gap:10px;margin-left:auto}
+  .lang{display:flex;gap:1px;background:var(--soft);border:1px solid var(--line);border-radius:999px;padding:3px}
+  .lang button{border:0;background:none;font:inherit;font-size:12.5px;font-weight:600;color:var(--mut);padding:4px 11px;border-radius:999px;cursor:pointer;transition:.15s}
+  .lang button[aria-pressed="true"]{background:var(--brand);color:#fff}
+  .btn{display:inline-block;font-weight:600;font-size:15px;padding:11px 20px;border-radius:11px;border:1px solid transparent;cursor:pointer;font-family:inherit;transition:.16s;white-space:nowrap}
+  .btn-p{background:var(--brand);color:#fff;box-shadow:var(--s1)}
+  .btn-p:hover{background:var(--brand-600);transform:translateY(-1px);box-shadow:var(--s2)}
+  .btn-s{background:var(--paper);color:var(--brand);border-color:var(--line)}
+  .btn-s:hover{border-color:var(--brand);transform:translateY(-1px)}
+  .btn-a{background:var(--acc);color:#04252a}
+  .btn-a:hover{filter:brightness(1.07);transform:translateY(-1px)}
+  .grande{display:none}
+  @media(min-width:940px){.menu{display:flex}.grande{display:inline-block}}
 
-  header.top { position: sticky; top: 0; z-index: 30; background: rgba(255,255,255,.9); backdrop-filter: blur(8px); border-bottom: 1px solid var(--line); }
-  .top .wrap { display: flex; align-items: center; justify-content: space-between; gap: 18px; height: 66px; }
-  .brand { display: flex; align-items: center; gap: 10px; font-weight: 800; color: var(--ink); }
-  .logo-web { height: 56px; display: block; }
-  .brand .mark { width: 32px; height: 32px; border-radius: 8px; background: var(--brand); color: #fff; display: grid; place-items: center; font-size: 17px; font-weight: 800; }
-  .brand .name { font-size: 15.5px; }
-  .brand .name span { color: var(--brand-600); }
-  .top nav { display: flex; align-items: center; gap: 14px; flex-wrap: nowrap; }
-  .top nav .btn { flex-shrink: 0; }
-  .top nav a.link { color: var(--muted); font-size: 14px; font-weight: 500; }
-  .top nav a.link:hover { color: var(--ink); }
-  .langsel { font-family: inherit; font-size: 13px; color: var(--ink); border: 1px solid var(--line); background: #fff; border-radius: 8px; padding: 7px 8px; cursor: pointer; }
-  input.invalid, select.invalid { border-color: #d64545 !important; background: #fef5f5; }
-  @media (max-width: 980px) { .top nav a.link { display: none; } }
-  @media (max-width: 620px) {
-    .top .wrap { height: auto; flex-wrap: wrap; gap: 10px; padding-top: 10px; padding-bottom: 10px; }
-    .top nav { flex-basis: 100%; justify-content: flex-end; gap: 8px; flex-wrap: wrap; }
-    .top nav .btn { padding: 9px 14px; }
-    .langsel { padding: 6px 8px; }
-    .logo-web { height: 48px; }
+  /* ============ hero ============ */
+  .hero{position:relative;padding:70px 0 92px;overflow:hidden;
+    background:
+      radial-gradient(680px 420px at 88% 8%, var(--acc-50), transparent 62%),
+      radial-gradient(520px 400px at 4% 0%, #f0f6fd, transparent 60%),
+      linear-gradient(180deg,#fbfdff,var(--paper) 80%)}
+  .hero::after{content:"";position:absolute;inset:0;pointer-events:none;
+    background-image:radial-gradient(var(--line) 1px, transparent 1px);background-size:26px 26px;opacity:.5;
+    mask-image:linear-gradient(180deg,#000,transparent 65%)}
+  .hero .wrap{position:relative;z-index:1;display:grid;gap:52px;grid-template-columns:1fr}
+  @media(min-width:1000px){.hero .wrap{grid-template-columns:1fr 1.04fr;align-items:center;gap:56px}}
+  .hero h1{font-size:clamp(35px,4.9vw,57px);font-weight:800;max-width:15ch}
+  .hero h1 em{font-style:normal;position:relative;white-space:nowrap}
+  .hero h1 em::after{content:"";position:absolute;left:0;right:0;bottom:.06em;height:.34em;background:var(--acc);opacity:.22;border-radius:3px;z-index:-1}
+  .hero .lead{font-size:clamp(17px,1.6vw,19.5px);color:var(--mut);max-width:52ch;margin-top:22px}
+  .cta{display:flex;gap:12px;flex-wrap:wrap;margin-top:32px}
+  .nota{margin-top:18px;font-size:13.5px;color:var(--mut);display:flex;align-items:center;gap:8px}
+  .nota svg{width:16px;height:16px;stroke:var(--acc);fill:none;stroke-width:2.4;stroke-linecap:round;stroke-linejoin:round}
+
+  /* ============ maqueta ============ */
+  .maq{position:relative;perspective:1400px;padding:34px 10px 46px}
+  .doc{background:var(--paper);border:1px solid var(--line);border-radius:18px;box-shadow:var(--s3);
+       padding:26px 26px 30px;transform:rotateY(-7deg) rotateX(3deg);transform-origin:left center}
+  @media(max-width:999px){.doc{transform:none}}
+  .doc-top{display:flex;align-items:center;gap:9px;padding-bottom:16px;border-bottom:1px solid var(--line);margin-bottom:20px}
+  .dot{width:9px;height:9px;border-radius:50%;background:var(--line)}
+  .doc-top span{margin-left:6px;font-size:12.5px;color:var(--mut);font-weight:600}
+  .ln{height:9px;border-radius:5px;background:#eef2f7;margin-bottom:11px}
+  .campo{border:2px dashed var(--amber);background:var(--amber-50);border-radius:8px;padding:8px 11px;
+         font-size:13px;font-weight:600;color:#8a5c05;display:inline-flex;align-items:center;gap:8px;margin:3px 6px 9px 0}
+  .campo i{font-style:normal;font-size:10px;background:var(--amber);color:#4a3200;border-radius:4px;padding:1px 5px;font-weight:800;letter-spacing:.04em}
+  .rubrica{margin-top:18px;padding-top:16px;border-top:1px dashed var(--line);display:flex;align-items:center;gap:14px;justify-content:flex-end;text-align:right}
+  .rubrica svg{width:74px;height:34px;fill:none;stroke-width:5.4;stroke-linecap:round;stroke-linejoin:round}
+  .rubrica small{color:var(--mut);font-size:12px}
+
+  .flot{position:absolute;background:var(--paper);border:1px solid var(--line);border-radius:14px;
+        box-shadow:var(--s2);padding:14px 16px;font-size:13px}
+  .flot-firmantes{right:-8px;top:-28px;width:236px}
+  .flot-evid{left:-40px;bottom:-30px;width:230px}
+  @media(max-width:1180px){.flot-firmantes{right:0;top:-20px}.flot-evid{left:0}}
+  @media(max-width:560px){.flot{position:static;width:auto!important;margin-top:14px}}
+  .flot h4{font-size:11px;letter-spacing:.1em;text-transform:uppercase;color:var(--mut);font-weight:700;margin-bottom:11px}
+  .firm{display:flex;align-items:center;gap:10px;padding:5px 0}
+  .av{width:26px;height:26px;border-radius:50%;display:grid;place-items:center;font-size:11px;font-weight:700;color:#fff;flex:none}
+  .firm b{font-weight:600;font-size:13px;flex:1;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+  .est{font-size:10.5px;font-weight:700;padding:2px 8px;border-radius:999px;white-space:nowrap}
+  .est.ok{background:var(--acc-50);color:var(--acc-700)}
+  .est.esp{background:#f2f5f9;color:var(--mut)}
+  .ev{display:flex;gap:9px;padding:5px 0;font-size:12px;color:var(--mut);align-items:flex-start}
+  .ev b{color:var(--ink);font-weight:600;display:block;font-size:12.5px}
+  .ev .pt{width:7px;height:7px;border-radius:50%;background:var(--acc);margin-top:6px;flex:none}
+
+  /* ============ tira de acreditadores ============ */
+  .tira{border-top:1px solid var(--line);border-bottom:1px solid var(--line);background:var(--soft);padding:26px 0}
+  .tira .wrap{display:flex;align-items:center;gap:14px 30px;flex-wrap:wrap;justify-content:center}
+  .tira span.et{font-size:12.5px;color:var(--mut);font-weight:600}
+  .acr{display:inline-flex;align-items:center;gap:9px;font-weight:700;font-size:15px;color:var(--brand);opacity:.82}
+  .acr small{font-weight:500;color:var(--mut);font-size:12px}
+
+  /* ============ bandas ============ */
+  .band{padding:92px 0}
+  .band.soft{background:var(--soft);border-top:1px solid var(--line);border-bottom:1px solid var(--line)}
+  .sechead{max-width:62ch;margin-bottom:48px}
+  .sechead h2{font-size:clamp(27px,3.4vw,39px);font-weight:800;margin-top:12px}
+  .sechead p{color:var(--mut);margin-top:16px;font-size:17.5px}
+  .sechead.centro{margin-left:auto;margin-right:auto;text-align:center}
+
+  .cols{display:grid;gap:22px;grid-template-columns:repeat(auto-fit,minmax(282px,1fr))}
+  .card{background:var(--paper);border:1px solid var(--line);border-radius:var(--r);padding:30px;transition:.18s}
+  .card:hover{transform:translateY(-3px);box-shadow:var(--s2);border-color:#d6e2ee}
+  .card h3{font-size:19.5px;font-weight:700;margin-bottom:11px}
+  .card p{color:var(--mut);font-size:15px}
+  .ico{width:46px;height:46px;border-radius:13px;display:grid;place-items:center;margin-bottom:18px;background:var(--brand-50)}
+  .ico.t{background:var(--acc-50)} .ico.a{background:var(--amber-50)}
+  .ico svg{width:23px;height:23px;stroke:var(--brand);fill:none;stroke-width:1.9;stroke-linecap:round;stroke-linejoin:round}
+  .ico.t svg{stroke:var(--acc-700)} .ico.a svg{stroke:#b07d0a}
+
+  /* ============ split ============ */
+  .split{display:grid;gap:48px;align-items:center;grid-template-columns:1fr}
+  @media(min-width:940px){.split{grid-template-columns:1fr 1fr;gap:64px}.split.inv .txt{order:2}}
+  .split h2{font-size:clamp(25px,3vw,34px);font-weight:800;margin-top:12px}
+  .split p.d{color:var(--mut);margin-top:16px;font-size:16.5px}
+  .lista{list-style:none;padding:0;margin:26px 0 0}
+  .lista li{position:relative;padding-left:32px;margin-bottom:15px;color:var(--mut);font-size:15.5px}
+  .lista li b{color:var(--ink);font-weight:600}
+  .lista li::before{content:"";position:absolute;left:0;top:2px;width:20px;height:20px;border-radius:6px;background:var(--acc-50)}
+  .lista li::after{content:"";position:absolute;left:6px;top:8px;width:8px;height:4.5px;border-left:2px solid var(--acc-700);border-bottom:2px solid var(--acc-700);transform:rotate(-45deg)}
+
+  /* ============ camino ============ */
+  .camino{background:var(--paper);border:1px solid var(--line);border-radius:var(--r);padding:30px;box-shadow:var(--s2)}
+  .camino h4{font-size:12px;letter-spacing:.1em;text-transform:uppercase;color:var(--mut);font-weight:700;margin-bottom:20px}
+  .nodo{display:flex;align-items:center;gap:12px;margin-bottom:12px}
+  .nodo .av{width:30px;height:30px;font-size:12px}
+  .nodo b{font-size:14px;font-weight:600;flex:1}
+  .rama{margin-left:15px;padding-left:24px;border-left:2px dashed var(--line)}
+  .flechita{margin:2px 0 2px 14px;color:var(--line)}
+
+  /* ============ expediente ============ */
+  .exp{background:var(--brand);border-radius:var(--r);padding:26px;box-shadow:var(--s3);color:#cfe0ee}
+  .exp h4{color:#fff;font-size:13px;letter-spacing:.1em;text-transform:uppercase;font-weight:700;margin-bottom:20px;opacity:.7}
+  .expit{display:grid;grid-template-columns:14px 1fr;gap:12px;padding-bottom:18px;position:relative}
+  .expit:last-child{padding-bottom:0}
+  .expit .l{position:relative}
+  .expit .l::before{content:"";position:absolute;left:4px;top:5px;width:7px;height:7px;border-radius:50%;background:var(--acc)}
+  .expit:not(:last-child) .l::after{content:"";position:absolute;left:7px;top:14px;bottom:-10px;width:1.5px;background:rgba(255,255,255,.14)}
+  .expit b{display:block;color:#fff;font-size:13.5px;font-weight:600}
+  .expit span{font-size:12px;font-family:ui-monospace,'SF Mono',Menlo,monospace;opacity:.72}
+
+  /* ============ pasos ============ */
+  .pasos{display:grid;gap:20px;grid-template-columns:repeat(auto-fit,minmax(232px,1fr))}
+  .paso{position:relative;padding-top:22px}
+  .paso .n{position:absolute;top:0;left:0;font-size:52px;font-weight:800;color:var(--brand-50);line-height:.8;letter-spacing:-.05em}
+  .paso h3{font-size:17px;font-weight:700;margin-bottom:8px;position:relative}
+  .paso p{color:var(--mut);font-size:14.5px;position:relative}
+
+  /* ============ planes ============ */
+  .selpais{display:inline-flex;gap:2px;background:var(--paper);border:1px solid var(--line);border-radius:999px;padding:4px;margin-bottom:34px;box-shadow:var(--s1)}
+  .selpais button{border:0;background:none;font:inherit;font-size:14px;font-weight:600;color:var(--mut);padding:9px 19px;border-radius:999px;cursor:pointer;transition:.15s}
+  .selpais button[aria-pressed="true"]{background:var(--brand);color:#fff}
+  .planes{display:grid;gap:22px;grid-template-columns:repeat(auto-fit,minmax(272px,1fr));align-items:start}
+  .plan{background:var(--paper);border:1px solid var(--line);border-radius:var(--r);padding:32px;position:relative;transition:.18s}
+  .plan:hover{transform:translateY(-3px);box-shadow:var(--s2)}
+  .plan.destacado{border-color:var(--brand);box-shadow:var(--s2)}
+  .plan .tag{position:absolute;top:-12px;left:32px;background:var(--brand);color:#fff;font-size:11px;font-weight:700;letter-spacing:.07em;text-transform:uppercase;padding:5px 12px;border-radius:999px}
+  .plan h3{font-size:21px;font-weight:700}
+  .plan .desc{color:var(--mut);font-size:14.5px;margin-top:9px;min-height:44px}
+  .precio{margin:22px 0 6px;display:flex;align-items:baseline;gap:8px}
+  .precio .n{font-size:36px;font-weight:800;letter-spacing:-.035em}
+  .precio .u{color:var(--mut);font-size:14px}
+  .unit{border-top:1px solid var(--line);margin-top:20px;padding-top:16px}
+  .unit div{display:flex;justify-content:space-between;gap:12px;font-size:14px;padding:5px 0}
+  .unit span:last-child{font-weight:700;white-space:nowrap}
+  .incluye{list-style:none;padding:0;margin:20px 0 0}
+  .incluye li{position:relative;padding-left:27px;font-size:14.5px;color:var(--mut);margin-bottom:9px}
+  .incluye li::before{content:"";position:absolute;left:2px;top:7px;width:14px;height:8px;border-left:2.4px solid var(--acc);border-bottom:2.4px solid var(--acc);transform:rotate(-45deg)}
+  .plan .btn{width:100%;text-align:center;margin-top:26px}
+  .vacio{border:1px dashed var(--line);border-radius:var(--r);padding:48px;text-align:center;color:var(--mut);grid-column:1/-1}
+
+
+  /* ============ comparación ============ */
+  .comp{display:grid;gap:20px;grid-template-columns:1fr}
+  @media(min-width:900px){.comp{grid-template-columns:repeat(3,1fr)}}
+  .colcomp{border:1px solid var(--line);border-radius:var(--r);padding:28px;background:var(--paper)}
+  .colcomp.nuestra{border-color:var(--brand);box-shadow:var(--s2);position:relative}
+  .colcomp .quien{font-size:12px;letter-spacing:.09em;text-transform:uppercase;font-weight:700;color:var(--mut);margin-bottom:6px}
+  .colcomp.nuestra .quien{color:var(--acc-700)}
+  .colcomp h3{font-size:19px;font-weight:700;margin-bottom:18px}
+  .colcomp ul{list-style:none;padding:0;margin:0}
+  .colcomp li{position:relative;padding-left:28px;margin-bottom:13px;font-size:14.5px;color:var(--mut);line-height:1.5}
+  .colcomp li::before{position:absolute;left:0;top:1px;width:19px;height:19px;border-radius:6px;display:grid;place-items:center;font-size:12px;font-weight:800}
+  .colcomp li.si::before{content:"✓";background:var(--acc-50);color:var(--acc-700)}
+  .colcomp li.no::before{content:"–";background:#f2f5f9;color:#9aa8b8}
+  .comp-nota{margin-top:26px;font-size:13px;color:var(--mut);max-width:70ch}
+
+  /* ============ cierre ============ */
+  .cierre{position:relative;overflow:hidden;background:linear-gradient(135deg,var(--brand-700),var(--brand) 55%,#12578a);
+          color:#fff;border-radius:26px;padding:66px 40px;text-align:center}
+  .cierre::before{content:"";position:absolute;width:520px;height:520px;border-radius:50%;
+    background:radial-gradient(circle,rgba(10,162,176,.34),transparent 68%);top:-220px;right:-140px}
+  .cierre > *{position:relative}
+  .cierre h2{font-size:clamp(26px,3.3vw,37px);font-weight:800}
+  .cierre p{color:#b7cfe3;margin:16px auto 0;max-width:50ch;font-size:17.5px}
+  .cierre .cta{justify-content:center}
+
+  footer{border-top:1px solid var(--line);padding:46px 0;margin-top:92px;color:var(--mut);font-size:14px}
+  footer .wrap{display:flex;flex-wrap:wrap;gap:20px;justify-content:space-between;align-items:center}
+  footer img{height:26px;opacity:.8}
+
+  @media (prefers-reduced-motion:no-preference){
+    .js .rev{opacity:0;transform:translateY(16px);transition:opacity .55s ease,transform .55s ease}
+    .js .rev.on{opacity:1;transform:none}
   }
-
-  .lang-draft { display: none; background: #fff7e6; border-bottom: 1px solid #f0d9a8; color: #7a5a12; font-size: 12.5px; text-align: center; padding: 8px 16px; }
-
-  .hero { background: linear-gradient(180deg, var(--brand-50), #fff 75%); border-bottom: 1px solid var(--line); }
-  .hero .wrap { display: grid; grid-template-columns: 1.05fr .95fr; gap: 48px; align-items: center; padding: 76px 24px 72px; }
-  @media (max-width: 900px) { .hero .wrap { grid-template-columns: 1fr; gap: 36px; padding: 52px 24px; } }
-  .eyebrow { display: inline-block; font-size: 12px; font-weight: 700; letter-spacing: .12em; text-transform: uppercase; color: var(--brand-600); background: #fff; border: 1px solid var(--line); padding: 6px 12px; border-radius: 999px; margin: 0 0 20px; }
-  .hero h1 { font-size: clamp(34px, 5vw, 54px); font-weight: 800; margin: 0 0 18px; }
-  .hero p.lead { font-size: clamp(16px, 1.9vw, 19px); color: var(--muted); margin: 0 0 28px; max-width: 52ch; }
-  .cta-row { display: flex; flex-wrap: wrap; gap: 12px; align-items: center; }
-  .fineprint { margin: 18px 0 0; font-size: 13px; color: var(--muted); }
-  .rise { opacity: 0; transform: translateY(14px); animation: rise .6s cubic-bezier(.2,.7,.2,1) forwards; }
-  @keyframes rise { to { opacity: 1; transform: none; } }
-
-  .mock { background: #fff; border: 1px solid var(--line); border-radius: 14px; box-shadow: var(--shadow); overflow: hidden; }
-  .mock .bar { display: flex; align-items: center; gap: 7px; padding: 11px 14px; border-bottom: 1px solid var(--line); background: var(--soft); }
-  .mock .bar i { width: 9px; height: 9px; border-radius: 50%; background: #cdd6df; display: inline-block; }
-  .mock .body { padding: 18px; }
-  .mock .line { height: 10px; border-radius: 5px; background: var(--brand-50); margin: 0 0 12px; }
-  .mock .line.s { width: 55%; }
-  .mock .line.m { width: 78%; }
-  .mock .chip { display: inline-flex; align-items: center; gap: 8px; font-size: 13px; font-weight: 600; color: var(--brand); background: var(--brand-50); border-radius: 8px; padding: 8px 12px; margin: 2px 6px 2px 0; }
-  .mock .row { display: flex; justify-content: space-between; padding: 10px 0; border-top: 1px dashed var(--line); font-size: 13px; }
-  .mock .row b { color: var(--ink); }
-  .mock .row span { color: var(--muted); }
-  .mock .total { display: flex; justify-content: space-between; padding: 12px 0 2px; font-weight: 800; color: var(--brand); border-top: 2px solid var(--brand-50); margin-top: 4px; }
-
-  section.band { padding: 76px 0; }
-  section.soft { background: var(--soft); border-top: 1px solid var(--line); border-bottom: 1px solid var(--line); }
-  .sechead { max-width: 720px; margin: 0 auto 46px; text-align: center; }
-  .sechead h2 { font-size: clamp(26px, 3.6vw, 38px); font-weight: 800; margin: 0 0 12px; }
-  .sechead p { color: var(--muted); font-size: 16px; margin: 0; }
-
-  .benefits { display: grid; grid-template-columns: repeat(4, 1fr); gap: 16px; }
-  @media (max-width: 900px) { .benefits { grid-template-columns: repeat(2, 1fr); } }
-  @media (max-width: 540px) { .benefits { grid-template-columns: 1fr; } }
-  .benefit { background: #fff; border: 1px solid var(--line); border-radius: var(--radius); padding: 22px; transition: transform .15s, box-shadow .15s; }
-  .benefit:hover { transform: translateY(-2px); box-shadow: var(--shadow); }
-  .benefit .ico { width: 38px; height: 38px; border-radius: 9px; background: var(--accent-50); color: var(--accent); display: grid; place-items: center; margin-bottom: 14px; }
-  .benefit h3 { font-size: 15.5px; font-weight: 700; margin: 0; }
-
-  .feature-row { display: grid; grid-template-columns: 1fr 1fr; gap: 52px; align-items: center; padding: 30px 0; }
-  .feature-row.flip .ftext { order: 2; }
-  @media (max-width: 900px) { .feature-row { grid-template-columns: 1fr; gap: 28px; } .feature-row.flip .ftext { order: 0; } }
-  .ftext h3 { font-size: clamp(22px, 3vw, 30px); font-weight: 800; margin: 0 0 12px; }
-  .ftext > p { color: var(--muted); margin: 0 0 20px; font-size: 16px; }
-  .checks { list-style: none; padding: 0; margin: 0; }
-  .checks li { display: flex; gap: 12px; align-items: flex-start; padding: 9px 0; font-size: 15px; }
-  .checks li svg { flex: none; margin-top: 2px; color: var(--accent); }
-
-  .roadmap { display: grid; grid-template-columns: repeat(4, 1fr); gap: 16px; }
-  @media (max-width: 900px) { .roadmap { grid-template-columns: repeat(2, 1fr); } }
-  @media (max-width: 540px) { .roadmap { grid-template-columns: 1fr; } }
-  .rm { background: #fff; border: 1px dashed var(--line); border-radius: var(--radius); padding: 20px; }
-  .rm .tag { font-size: 11px; font-weight: 700; letter-spacing: .08em; text-transform: uppercase; color: var(--accent); }
-  .rm h3 { font-size: 16px; font-weight: 700; margin: 8px 0 4px; }
-  .rm p { color: var(--muted); font-size: 13.5px; margin: 0; }
-
-  section.band.novedades { background: var(--brand-50); }
-  .news-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 16px; }
-  @media (max-width: 900px) { .news-grid { grid-template-columns: repeat(2, 1fr); } }
-  @media (max-width: 540px) { .news-grid { grid-template-columns: 1fr; } }
-  .nw { background: #fff; border: 1px solid var(--line); border-radius: var(--radius); padding: 22px; box-shadow: 0 1px 2px rgba(18,32,46,.04); }
-  .nw .tag { display: inline-block; font-size: 11px; font-weight: 700; letter-spacing: .06em; text-transform: uppercase; color: var(--accent); background: var(--accent-50); padding: 3px 9px; border-radius: 999px; }
-  .nw h3 { font-size: 17px; font-weight: 700; margin: 12px 0 6px; }
-  .nw p { color: var(--muted); font-size: 14.5px; line-height: 1.5; margin: 0; }
-
-  .planes-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 18px; align-items: start; }
-  @media (max-width: 880px) { .planes-grid { grid-template-columns: 1fr; } }
-  .plan { background: #fff; border: 1px solid var(--line); border-radius: var(--radius); padding: 26px; display: flex; flex-direction: column; box-shadow: var(--shadow); }
-  .plan h3 { font-size: 21px; font-weight: 800; margin: 4px 0 0; }
-  .plan .moneda-tag { font-size: 11px; color: var(--muted); letter-spacing: .08em; text-transform: uppercase; font-weight: 600; }
-  .plan .precio { margin: 16px 0 4px; display: flex; align-items: baseline; gap: 8px; flex-wrap: wrap; }
-  .plan .precio .monto { font-size: 32px; font-weight: 800; line-height: 1; color: var(--brand); }
-  .plan .precio .per { color: var(--muted); font-size: 14px; }
-  .plan .detalle { color: var(--muted); font-size: 13.5px; margin: 10px 0 0; min-height: 20px; }
-  .plan .franjas { margin: 14px 0 0; padding: 0; list-style: none; font-size: 13px; }
-  .plan .franjas li { padding: 6px 0; border-top: 1px dashed var(--line); display: flex; justify-content: space-between; gap: 12px; }
-  .plan .franjas li:first-child { border-top: 0; }
-  .plan .franjas .val { color: var(--accent); font-weight: 700; }
-  .plan .sep { flex: 1; }
-  .plan .cta { margin-top: 22px; }
-
-  .form-card { background: #fff; border: 1px solid var(--line); border-radius: 16px; box-shadow: var(--shadow); padding: 36px; max-width: 760px; margin: 0 auto; }
-  .form-card h2 { font-size: 30px; font-weight: 800; margin: 0 0 8px; }
-  .form-card .sub { color: var(--muted); margin: 0 0 26px; font-size: 15px; }
-  .grid2 { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; }
-  @media (max-width: 620px) { .grid2 { grid-template-columns: 1fr; } }
-  .field { margin-bottom: 16px; }
-  .field.full { grid-column: 1 / -1; }
-  label { display: block; font-size: 12px; color: var(--muted); margin-bottom: 6px; font-weight: 600; letter-spacing: .02em; }
-  label .opt { color: #aeb8c2; font-weight: 400; }
-  input, select { width: 100%; font-family: inherit; font-size: 14px; color: var(--ink); border: 1px solid var(--line); background: var(--soft); border-radius: 9px; padding: 11px 12px; }
-  input:focus, select:focus { outline: 2px solid var(--brand-50); border-color: var(--brand); }
-  fieldset { border: 0; padding: 0; margin: 0 0 8px; }
-  legend { font-size: 15px; color: var(--ink); padding: 0; margin: 18px 0 12px; font-weight: 700; }
-  .msg { margin-top: 16px; padding: 12px 14px; border-radius: 9px; font-size: 14px; display: none; }
-  .msg.err { display: block; background: #fdecea; color: #a3372b; border: 1px solid #f3cfc9; }
-  .ok-card { text-align: center; padding: 14px 6px; }
-  .ok-card .check { width: 54px; height: 54px; border-radius: 50%; background: var(--accent-50); color: var(--accent); display: grid; place-items: center; margin: 0 auto 18px; }
-  .ok-card h3 { font-size: 26px; font-weight: 800; margin: 0 0 10px; }
-  .ok-card p { color: var(--muted); margin: 0 0 8px; }
-  .ok-card .acceso { background: var(--soft); border: 1px solid var(--line); border-radius: 10px; padding: 14px 16px; margin: 18px auto 22px; max-width: 380px; text-align: left; font-size: 14px; }
-  .ok-card .acceso b { color: var(--ink); }
-
-  footer.foot { background: var(--ink); color: #aeb8c2; padding: 40px 0; }
-  .foot .wrap { display: flex; justify-content: space-between; align-items: center; gap: 16px; flex-wrap: wrap; }
-  .foot .brand { color: #fff; }
-  .foot .brand .name span { color: #7fb0d8; }
-  .foot a { color: #aeb8c2; font-size: 14px; }
-  .foot a:hover { color: #fff; }
-  .foot .links { display: flex; gap: 18px; flex-wrap: wrap; }
 </style>
 </head>
 <body>
 
-<header class="top">
+<nav>
   <div class="wrap">
-    <a class="brand" href="/" aria-label="MiFirma" style="text-decoration:none">
-      <svg viewBox="0 0 272 60" class="logo-web" role="img" aria-label="MiFirma"><rect x="0" y="14" width="36" height="6.5" rx="3.25" fill="#123a5e"/><rect x="0" y="25" width="23" height="6.5" rx="3.25" fill="#0aa2b0"/><rect x="0" y="36" width="31" height="6.5" rx="3.25" fill="#123a5e"/><text x="52" y="26" font-family="'Plus Jakarta Sans',system-ui,sans-serif" font-size="25" font-weight="700" fill="#123a5e">MiFirma</text><text x="52" y="47" font-family="'Plus Jakarta Sans',system-ui,sans-serif" font-size="13.5" font-weight="500" fill="#0a7d88">New Generation</text></svg>
-    </a>
-    <nav>
-      <a class="link" href="#beneficios" data-i18n="web.nav.benefits">Beneficios</a>
-      <a class="link" href="#capacidades" data-i18n="web.nav.capabilities">Capacidades</a>
-      <a class="link" href="#planes" data-i18n="web.nav.plans">Planes</a>
-      <select id="selLang" class="langsel" aria-label="Idioma / Language"></select>
-      <a class="btn ghost" href="/entrar" data-i18n="web.nav.login">Ingresar</a>
-      <a class="btn" href="/entrar?modo=registro" data-i18n="web.nav.signup">Crear cuenta</a>
-    </nav>
+    <a href="/"><img src="/logo.svg" alt="MiFirma" /></a>
+    <div class="menu">
+      <a href="#como" data-t="nav.como">Cómo funciona</a>
+      <a href="#garantias" data-t="nav.garantias">Garantías</a>
+      <a href="#comparar" data-t="nav.comparar">Comparar</a>
+      <a href="#paises" data-t="nav.paises">Países</a>
+      <a href="#planes" data-t="nav.planes">Planes</a>
+    </div>
+    <div class="navacc">
+      <div class="lang" role="group">
+        <button onclick="idioma('es')" data-l="es">ES</button>
+        <button onclick="idioma('pt')" data-l="pt">PT</button>
+        <button onclick="idioma('en')" data-l="en">EN</button>
+      </div>
+      <a class="btn btn-s" href="/entrar" data-t="nav.entrar">Entrar</a>
+      <a class="btn btn-p grande" href="#planes" data-t="nav.probar">Probar</a>
+    </div>
   </div>
-</header>
-<div class="lang-draft" id="langDraft"></div>
+</nav>
 
-<section class="hero">
+<header class="hero">
   <div class="wrap">
     <div>
-      <span class="eyebrow rise" data-i18n="web.hero.eyebrow">Nómina y RRHH · Uruguay y Paraguay</span>
-      <h1 class="rise" style="animation-delay:.06s" data-i18n="web.hero.title">Gestión simplificada del capital humano.</h1>
-      <p class="lead rise" style="animation-delay:.12s" data-i18n="web.hero.lead">MiFirma potencia a tu equipo de RR. HH. con una nómina precisa y una gestión sólida para cada etapa del ciclo laboral. La cuenta la hace un motor; vos cargás las novedades.</p>
-      <div class="cta-row rise" style="animation-delay:.18s">
-        <a href="/entrar?modo=registro" class="btn big" data-i18n="web.hero.cta1">Crear cuenta</a>
-        <a href="#planes" class="btn ghost big" data-i18n="web.hero.cta2">Ver planes</a>
+      <h1><span data-t="hero.h1a">Firmá documentos con</span> <em data-t="hero.h1b">validez legal</em> <span data-t="hero.h1c">en tu país.</span></h1>
+      <p class="lead" data-t="hero.lead">Subí un PDF, marcá qué tiene que completar cada persona y en qué orden firma cada una. MiFirma se ocupa del resto: los avisos, la firma criptográfica y el expediente que prueba todo lo que pasó.</p>
+      <div class="cta">
+        <a class="btn btn-p" href="#planes" data-t="hero.cta1">Ver planes</a>
+        <a class="btn btn-s" href="#como" data-t="hero.cta2">Cómo funciona</a>
       </div>
-      <p class="fineprint rise" style="animation-delay:.24s" data-i18n="web.hero.fine">Sin tarjeta para empezar · Tu empresa arranca en modo prueba.</p>
+      <p class="nota">
+        <svg viewBox="0 0 24 24"><path d="M20 6L9 17l-5-5"/></svg>
+        <span data-t="hero.nota">Sin instalar nada. Quien firma no necesita crearse una cuenta.</span>
+      </p>
     </div>
-    <div class="mock rise" style="animation-delay:.2s" aria-hidden="true">
-      <div class="bar"><i></i><i></i><i></i></div>
-      <div class="body">
-        <div class="row"><span data-i18n="web.hero.m.base">Sueldo base</span><b>UYU 60.000</b></div>
-        <div class="row"><span data-i18n="web.hero.m.aportes">Aportes personales</span><b>− UYU 10.275</b></div>
-        <div class="row"><span data-i18n="web.hero.m.irpf">IRPF</span><b>− UYU 0</b></div>
-        <div class="total"><span data-i18n="web.hero.m.neto">Neto del mes</span><span>UYU 49.725</span></div>
-        <div style="margin-top:16px"><span class="chip" data-i18n="web.hero.m.recibo">Recibo emitido · inmutable</span></div>
+
+    <!-- Maqueta del producto. Es HTML, no una imagen: se traduce, se ajusta
+         al ancho y no pesa nada. -->
+    <div class="maq">
+      <div class="doc">
+        <div class="doc-top">
+          <span class="dot"></span><span class="dot"></span><span class="dot"></span>
+          <span data-t="maq.archivo">Contrato de alquiler.pdf</span>
+        </div>
+        <div class="ln" style="width:92%"></div>
+        <div class="ln" style="width:78%"></div>
+        <div style="margin:14px 0 4px">
+          <span class="campo"><i data-t="maq.tag1">COMPLETA</i> <span data-t="maq.campo1">Importe mensual</span></span>
+          <span class="campo"><i data-t="maq.tag1b">COMPLETA</i> <span data-t="maq.campo2">Fecha de entrega</span></span>
+        </div>
+        <div class="ln" style="width:88%"></div>
+        <div class="ln" style="width:74%"></div>
+        <div class="ln" style="width:82%"></div>
+        <div class="ln" style="width:64%"></div>
+        <div class="rubrica">
+          <svg viewBox="0 0 64 40">
+            <path d="M3 30c4-14 9-15 11-7s4 10 7 5 5-7 7-2" stroke="#0B2B4A"/>
+            <path d="M28 26l7 8 20-24" stroke="#0AA2B0"/>
+          </svg>
+          <small data-t="maq.firmado">Firmado · sellado de tiempo · LTV</small>
+        </div>
+      </div>
+
+      <div class="flot flot-firmantes">
+        <h4 data-t="maq.firmantes">Firmantes</h4>
+        <div class="firm"><span class="av" style="background:#0B2B4A">AL</span><b>Ana L.</b><span class="est ok" data-t="maq.firmo">Firmó</span></div>
+        <div class="firm"><span class="av" style="background:#0AA2B0">MP</span><b>Marcos P.</b><span class="est ok" data-t="maq.firmo2">Firmó</span></div>
+        <div class="firm"><span class="av" style="background:#8fa3b8">RS</span><b>Rita S.</b><span class="est esp" data-t="maq.espera">Su turno</span></div>
+      </div>
+
+      <div class="flot flot-evid">
+        <h4 data-t="maq.evidencia">Expediente</h4>
+        <div class="ev"><span class="pt"></span><span><b data-t="maq.ev1">Documento abierto</b>14:02 · Montevideo</span></div>
+        <div class="ev"><span class="pt"></span><span><b data-t="maq.ev2">Identidad probada</b>tuID · nivel alto</span></div>
+        <div class="ev"><span class="pt"></span><span><b data-t="maq.ev3">Firma aplicada</b>14:07 · sello TSA</span></div>
+      </div>
+    </div>
+  </div>
+</header>
+
+<div class="tira">
+  <div class="wrap">
+    <span class="et" data-t="tira.et">Certificados de firma avanzada de</span>
+    <span class="acr">tuID <small>Antel · Uruguay</small></span>
+    <span class="acr">e-Firma <small>Paraguay</small></span>
+    <span class="acr">ICP-Brasil <small>SERPRO · Brasil</small></span>
+  </div>
+</div>
+
+<!-- ===================== Garantías ===================== -->
+<section id="garantias" class="band">
+  <div class="wrap">
+    <div class="sechead rev">
+      <div class="kicker" data-t="gar.kicker">Lo que no se negocia</div>
+      <h2 data-t="gar.h2">Seguridad, integridad y validez legal.</h2>
+      <p data-t="gar.p">Tres cosas distintas, y las tres tienen que estar. Una firma que nadie puede verificar dentro de cinco años no sirve, por más linda que sea la pantalla donde se hizo.</p>
+    </div>
+    <div class="cols">
+      <div class="card rev">
+        <div class="ico"><svg viewBox="0 0 24 24"><path d="M12 3l8 3.5v5.8c0 4.9-3.3 8.8-8 10.2-4.7-1.4-8-5.3-8-10.2V6.5z"/><path d="M9 12.2l2.2 2.2L15.5 10"/></svg></div>
+        <h3 data-t="gar.1.h">Seguridad</h3>
+        <p data-t="gar.1.p">Cada documento se cifra y el acceso se decide en la base de datos, no en la aplicación. Un error de programación no alcanza para que alguien vea lo que no le corresponde. Nunca guardamos claves privadas de firma, ni siquiera las nuestras.</p>
+      </div>
+      <div class="card rev">
+        <div class="ico t"><svg viewBox="0 0 24 24"><rect x="3.5" y="3.5" width="17" height="17" rx="4"/><path d="M8 12.3l2.4 2.4L16.5 8.6"/><path d="M3.5 16.5h17"/></svg></div>
+        <h3 data-t="gar.2.h">Integridad</h3>
+        <p data-t="gar.2.p">Una vez firmado, el documento no se puede modificar sin que se note. Cada firma queda encadenada a la anterior y sellada con la hora de una autoridad externa, así que la fecha no depende de nuestro reloj ni de nuestra palabra.</p>
+      </div>
+      <div class="card rev">
+        <div class="ico a"><svg viewBox="0 0 24 24"><path d="M12 3.5v17M5 7.5h14"/><path d="M5 7.5l-2.2 6.2a3.1 3.1 0 006.4 0zM19 7.5l-2.2 6.2a3.1 3.1 0 006.4 0z"/><path d="M8.5 20.5h7"/></svg></div>
+        <h3 data-t="gar.3.h">Validez legal en tu país</h3>
+        <p data-t="gar.3.p">No es la misma ley en Montevideo, en Asunción y en São Paulo. Cada país tiene su marco y sus certificadores acreditados, y MiFirma trabaja con los de cada uno. La ley local la revisa un abogado local, no un algoritmo.</p>
       </div>
     </div>
   </div>
 </section>
 
-<section id="beneficios" class="band">
-  <div class="wrap">
-    <div class="sechead">
-      <h2 data-i18n="web.benefits.title">Todo lo que tu equipo de RR. HH. necesita, sin perder el control de la cuenta.</h2>
-      <p data-i18n="web.benefits.sub">Una base sólida y precisa para liquidar y gestionar personas, pensada para crecer país por país.</p>
+<!-- ===================== Campos ===================== -->
+<section class="band soft">
+  <div class="wrap split">
+    <div class="txt rev">
+      <div class="kicker" data-t="campos.kicker">Completar antes de firmar</div>
+      <h2 data-t="campos.h2">La mayoría de los documentos no se firman: primero se llenan.</h2>
+      <p class="d" data-t="campos.p">Un pagaré necesita el importe. Un alquiler, la fecha de entrega. Un consentimiento, el número de documento de quien lo firma. Mandar un PDF vacío y pedir que lo completen a mano antes de escanearlo es exactamente el trabajo que veníamos a sacarte.</p>
+      <ul class="lista">
+        <li><b data-t="campos.1.h">Cada uno ve lo suyo.</b> <span data-t="campos.1.p">Los campos se asignan por firmante. Nadie completa —ni ve— lo que le toca a otro.</span></li>
+        <li><b data-t="campos.2.h">Con reglas.</b> <span data-t="campos.2.p">Obligatorio u opcional, texto, número, fecha o selección. Se valida antes de que la firma se aplique, no después.</span></li>
+        <li><b data-t="campos.3.h">Y queda dentro del documento.</b> <span data-t="campos.3.p">Lo completado forma parte del PDF firmado. No es un anexo aparte que después nadie encuentra.</span></li>
+      </ul>
     </div>
-    <div class="benefits" id="benefits"></div>
+    <div class="rev">
+      <div class="camino">
+        <h4 data-t="camino.h">Camino de firmas</h4>
+        <div class="nodo"><span class="av" style="background:#0B2B4A">AL</span><b data-t="camino.1">Ana · Inquilina</b><span class="est ok" data-t="camino.ok">Firmó</span></div>
+        <div class="flechita">↓</div>
+        <div class="rama">
+          <div class="nodo"><span class="av" style="background:#0AA2B0">MP</span><b data-t="camino.2">Marcos · Garante</b><span class="est ok" data-t="camino.ok2">Firmó</span></div>
+          <div class="nodo"><span class="av" style="background:#0AA2B0">RS</span><b data-t="camino.3">Rita · Garante</b><span class="est esp" data-t="camino.esp">Su turno</span></div>
+        </div>
+        <div class="flechita">↓</div>
+        <div class="nodo"><span class="av" style="background:#8fa3b8">JI</span><b data-t="camino.4">Jorge · Propietario</b><span class="est esp" data-t="camino.esp2">Espera</span></div>
+        <div class="flechita">↓</div>
+        <div class="nodo"><span class="av" style="background:#dde5ee;color:#5a6878">CC</span><b data-t="camino.5">Inmobiliaria · Copia</b><span class="est esp" data-t="camino.copia">Sin firmar</span></div>
+      </div>
+    </div>
   </div>
 </section>
 
-<section id="capacidades" class="band soft">
-  <div class="wrap">
-
-    <div class="feature-row">
-      <div class="ftext">
-        <h3 data-i18n="web.cap.emp.title">Gestión de empleados</h3>
-        <p data-i18n="web.cap.emp.desc">Centralizá los datos de tu gente en un solo lugar: contratos, datos personales, historial laboral y aportes.</p>
-        <ul class="checks">
-          <li><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="9"/><path d="M8 12l3 3 5-6"/></svg> <span data-i18n="web.cap.emp.c1">Ciclo de vida del empleado y versiones del contrato</span></li>
-          <li><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="9"/><path d="M8 12l3 3 5-6"/></svg> <span data-i18n="web.cap.emp.c2">Cargos, unidades y organigrama</span></li>
-          <li><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="9"/><path d="M8 12l3 3 5-6"/></svg> <span data-i18n="web.cap.emp.c3">Legajo y documentación</span></li>
-          <li><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="9"/><path d="M8 12l3 3 5-6"/></svg> <span data-i18n="web.cap.emp.c4">Estudios y certificaciones con vencimiento</span></li>
-        </ul>
-      </div>
-      <div class="mock" aria-hidden="true"><div class="bar"><i></i><i></i><i></i></div><div class="body">
-        <div class="line m"></div><div class="line"></div><div class="line s"></div>
-      </div></div>
+<!-- ===================== Expediente ===================== -->
+<section class="band">
+  <div class="wrap split inv">
+    <div class="txt rev">
+      <div class="kicker" data-t="evid.kicker">La prueba</div>
+      <h2 data-t="evid.h2">Cada firma viene con su expediente.</h2>
+      <p class="d" data-t="evid.p">No alcanza con un PDF con un garabato. Lo que sostiene una firma en un juicio es poder mostrar quién la hizo, cuándo, desde dónde y cómo se probó que era esa persona. Eso se registra solo, paso por paso, y se entrega junto con el documento.</p>
+      <ul class="lista">
+        <li><b data-t="evid.1.h">Encadenado.</b> <span data-t="evid.1.p">Cada evento queda ligado al anterior: si alguien altera uno, la cadena se rompe y se nota.</span></li>
+        <li><b data-t="evid.2.h">Con hora de un tercero.</b> <span data-t="evid.2.p">El sello de tiempo lo pone una autoridad acreditada, no nuestro servidor.</span></li>
+        <li><b data-t="evid.3.h">Verificable sin nosotros.</b> <span data-t="evid.3.p">El certificado se comprueba con cualquier lector de PDF, aunque MiFirma no exista más.</span></li>
+      </ul>
     </div>
-
-    <div class="feature-row flip">
-      <div class="ftext">
-        <h3 data-i18n="web.cap.self.title">Autoservicio para empleados</h3>
-        <p data-i18n="web.cap.self.desc">Tu gente accede a lo suyo sin pasar cada consulta por RR. HH.</p>
-        <ul class="checks">
-          <li><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="9"/><path d="M8 12l3 3 5-6"/></svg> <span data-i18n="web.cap.self.c1">Ver y descargar recibos de sueldo</span></li>
-          <li><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="9"/><path d="M8 12l3 3 5-6"/></svg> <span data-i18n="web.cap.self.c2">Solicitar y seguir licencias</span></li>
-          <li><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="9"/><path d="M8 12l3 3 5-6"/></svg> <span data-i18n="web.cap.self.c3">Acceder a certificados y capacitaciones</span></li>
-          <li><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="9"/><path d="M8 12l3 3 5-6"/></svg> <span data-i18n="web.cap.self.c4">Apps para iOS y Android en camino</span></li>
-        </ul>
+    <div class="rev">
+      <div class="exp">
+        <h4 data-t="evid.tit">Expediente · Contrato de alquiler</h4>
+        <div class="expit"><span class="l"></span><span><b data-t="evid.e1">Circuito despachado</b><span>03/04 09:14 · 4 destinatarios</span></span></div>
+        <div class="expit"><span class="l"></span><span><b data-t="evid.e2">Documento abierto</b><span>03/04 14:02 · 190.64.x.x · Montevideo</span></span></div>
+        <div class="expit"><span class="l"></span><span><b data-t="evid.e3">Identidad probada</b><span>tuID · certificado · nivel alto</span></span></div>
+        <div class="expit"><span class="l"></span><span><b data-t="evid.e4">Campos completados</b><span>Importe · Fecha de entrega</span></span></div>
+        <div class="expit"><span class="l"></span><span><b data-t="evid.e5">Firma aplicada</b><span>PAdES · sello TSA 03/04 14:07:22Z</span></span></div>
+        <div class="expit"><span class="l"></span><span><b data-t="evid.e6">Certificado emitido</b><span>SHA-256 a1f3…9c2e</span></span></div>
       </div>
-      <div class="mock" aria-hidden="true"><div class="bar"><i></i><i></i><i></i></div><div class="body">
-        <div class="line s"></div><div class="line m"></div><div class="line"></div>
-      </div></div>
     </div>
-
-    <div class="feature-row">
-      <div class="ftext">
-        <h3 data-i18n="web.cap.pay.title">Procesamiento de nómina</h3>
-        <p data-i18n="web.cap.pay.desc">Automatizá y controlá todo el ciclo de la nómina, con precisión y según las reglas de cada país.</p>
-        <ul class="checks">
-          <li><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="9"/><path d="M8 12l3 3 5-6"/></svg> <span data-i18n="web.cap.pay.c1">Sueldos, aportes e impuestos por régimen</span></li>
-          <li><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="9"/><path d="M8 12l3 3 5-6"/></svg> <span data-i18n="web.cap.pay.c2">Aguinaldo, salario vacacional y liquidación final, según el país</span></li>
-          <li><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="9"/><path d="M8 12l3 3 5-6"/></svg> <span data-i18n="web.cap.pay.c3">Modalidades flexibles: mensual, jornal, hora, destajo, mixto</span></li>
-          <li><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="9"/><path d="M8 12l3 3 5-6"/></svg> <span data-i18n="web.cap.pay.c4">Multimoneda y recibos inmutables</span></li>
-          <li><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="9"/><path d="M8 12l3 3 5-6"/></svg> <span data-i18n="web.cap.pay.c5">Ajustes por liquidación: premios, viáticos, gratificaciones y descuentos</span></li>
-          <li><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="9"/><path d="M8 12l3 3 5-6"/></svg> <span data-i18n="web.cap.pay.c6">Empleados en relación de dependencia y proveedores unipersonales, con sus facturas</span></li>
-        </ul>
-      </div>
-      <div class="mock" aria-hidden="true"><div class="bar"><i></i><i></i><i></i></div><div class="body">
-        <div class="row"><span data-i18n="web.cap.pay.m.dev">Devengos</span><b>UYU 64.000</b></div>
-        <div class="row"><span data-i18n="web.cap.pay.m.ap">Aportes (BPS, FONASA, FRL)</span><b>− UYU 10.960</b></div>
-        <div class="row"><span data-i18n="web.cap.pay.m.irpf">IRPF</span><b>− UYU 0</b></div>
-        <div class="total"><span data-i18n="web.cap.pay.m.neto">Neto</span><span>UYU 53.040</span></div>
-      </div></div>
-    </div>
-
-    <div class="feature-row flip">
-      <div class="ftext">
-        <h3 data-i18n="web.cap.comm.title">Comunicación y capacitación</h3>
-        <p data-i18n="web.cap.comm.desc">Mantené al día la formación de tu equipo y avisá lo importante a tiempo.</p>
-        <ul class="checks">
-          <li><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="9"/><path d="M8 12l3 3 5-6"/></svg> <span data-i18n="web.cap.comm.c1">Catálogo de capacitaciones e inscripciones</span></li>
-          <li><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="9"/><path d="M8 12l3 3 5-6"/></svg> <span data-i18n="web.cap.comm.c2">Registro de quién completó qué</span></li>
-          <li><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="9"/><path d="M8 12l3 3 5-6"/></svg> <span data-i18n="web.cap.comm.c3">Alertas de vencimiento de certificaciones</span></li>
-          <li><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="9"/><path d="M8 12l3 3 5-6"/></svg> <span data-i18n="web.cap.comm.c4">Notificaciones internas (en el roadmap)</span></li>
-        </ul>
-      </div>
-      <div class="mock" aria-hidden="true"><div class="bar"><i></i><i></i><i></i></div><div class="body">
-        <div class="line s"></div><div class="line m"></div>
-      </div></div>
-    </div>
-
-    <div class="feature-row">
-      <div class="ftext">
-        <h3 data-i18n="web.cap.ai.title">Asistente con inteligencia artificial</h3>
-        <p data-i18n="web.cap.ai.desc">Preguntá en tu idioma y resolvé en segundos lo que antes era buscar en menús o esperar a RR. HH.</p>
-        <ul class="checks">
-          <li><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="9"/><path d="M8 12l3 3 5-6"/></svg> <span data-i18n="web.cap.ai.c1">Consultá recibos, saldos de licencia y vencimientos en lenguaje natural</span></li>
-          <li><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="9"/><path d="M8 12l3 3 5-6"/></svg> <span data-i18n="web.cap.ai.c2">Te guía en el uso del sistema: qué es cada cosa y dónde se hace</span></li>
-          <li><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="9"/><path d="M8 12l3 3 5-6"/></svg> <span data-i18n="web.cap.ai.c3">Responde en el idioma de cada usuario</span></li>
-          <li><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="9"/><path d="M8 12l3 3 5-6"/></svg> <span data-i18n="web.cap.ai.c4">Nunca inventa cifras: las trae del motor de liquidación</span></li>
-        </ul>
-      </div>
-      <div class="mock" aria-hidden="true"><div class="bar"><i></i><i></i><i></i></div><div class="body">
-        <div class="line m"></div><div class="line"></div><div class="line s"></div>
-      </div></div>
-    </div>
-
   </div>
 </section>
 
-<section id="novedades" class="band novedades">
+<!-- ===================== Cómo funciona ===================== -->
+<section id="como" class="band soft">
   <div class="wrap">
-    <div class="sechead">
-      <h2 data-i18n="web.news.title">Novedades</h2>
-      <p data-i18n="web.news.sub">Lo último que sumamos al producto desde tu última visita.</p>
+    <div class="sechead centro rev">
+      <div class="kicker" data-t="como.kicker">Cómo funciona</div>
+      <h2 data-t="como.h2">Cuatro pasos, y el cuarto lo hace el sistema.</h2>
+      <p data-t="como.p">Lo armás una vez y lo repetís cuantas veces quieras. Si mandás el mismo contrato a trescientas personas, se personaliza solo desde una planilla.</p>
     </div>
-    <div class="news-grid">
-      <div class="nw"><div class="tag" data-i18n="web.news.badge">Nuevo</div><h3 data-i18n="web.news.n1.title">Portal para estudios contables</h3><p data-i18n="web.news.n1.desc">Si liquidás para varias empresas, ahora administrás toda tu cartera de clientes desde un único acceso.</p></div>
-      <div class="nw"><div class="tag" data-i18n="web.news.badge">Nuevo</div><h3 data-i18n="web.news.n2.title">Recibos a tu medida</h3><p data-i18n="web.news.n2.desc">Diseñá el recibo con la identidad de cada empresa —logo, encabezado y secciones—. Lo emitido queda congelado e inalterable.</p></div>
-      <div class="nw"><div class="tag" data-i18n="web.news.badge">Nuevo</div><h3 data-i18n="web.news.n3.title">Beneficios al personal</h3><p data-i18n="web.news.n3.desc">Registrá y gestioná los beneficios que ofrecés a tu equipo, junto al resto del legajo.</p></div>
-      <div class="nw"><div class="tag" data-i18n="web.news.badge">Nuevo</div><h3 data-i18n="web.news.n4.title">Sueldo variable</h3><p data-i18n="web.news.n4.desc">Comisiones y productividad calculadas por el motor de liquidación, sin planillas aparte.</p></div>
-      <div class="nw"><div class="tag" data-i18n="web.news.badge">Nuevo</div><h3 data-i18n="web.news.n5.title">Avisos en tiempo real</h3><p data-i18n="web.news.n5.desc">Notificaciones push para que tu gente se entere de recibos, licencias y comunicados al instante.</p></div>
-      <div class="nw"><div class="tag" data-i18n="web.news.badge">Nuevo</div><h3 data-i18n="web.news.n6.title">Acceso renovado y más seguro</h3><p data-i18n="web.news.n6.desc">Nueva pantalla de ingreso, verificación en dos pasos y recuperación de contraseña por correo.</p></div>
+    <div class="pasos">
+      <div class="paso rev"><span class="n">1</span><h3 data-t="como.1.h">Subís el documento</h3><p data-t="como.1.p">Un PDF, como lo tenés.</p></div>
+      <div class="paso rev"><span class="n">2</span><h3 data-t="como.2.h">Marcás qué completa cada uno</h3><p data-t="como.2.p">Importe, fecha, número de documento, una cláusula. Cada firmante ve sólo sus campos.</p></div>
+      <div class="paso rev"><span class="n">3</span><h3 data-t="como.3.h">Definís el camino</h3><p data-t="como.3.p">En orden, todos a la vez, o mezclado. Con copias para quien tenga que enterarse sin firmar.</p></div>
+      <div class="paso rev"><span class="n">4</span><h3 data-t="como.4.h">Firman y recibís todo</h3><p data-t="como.4.p">El documento firmado, el certificado de finalización y el expediente completo.</p></div>
     </div>
+  </div>
+</section>
+
+<!-- ===================== Países ===================== -->
+<section id="paises" class="band">
+  <div class="wrap">
+    <div class="sechead rev">
+      <div class="kicker" data-t="pais.kicker">Dónde tiene valor</div>
+      <h2 data-t="pais.h2">Un producto, tres marcos legales.</h2>
+      <p data-t="pais.p">La diferencia entre una firma que se sostiene en un juicio y una que no suele estar en el país donde se firmó. MiFirma se integra con los certificadores acreditados de cada uno.</p>
+    </div>
+    <div class="cols" id="paisesDetalle"></div>
+  </div>
+</section>
+
+
+<!-- ===================== Comparación ===================== -->
+<!--
+  Sin nombres propios y sin precios ajenos, a propósito. La publicidad
+  comparativa con competidores nombrados tiene límites legales, y los precios
+  de terceros cambian: una tabla con sus números envejece sola y se vuelve un
+  argumento en contra. Acá se describe el MODELO, que es lo que de verdad
+  difiere y no cambia de un trimestre al otro.
+
+  Y no se dice que las plataformas globales no tengan campos ni auditoría,
+  porque sí los tienen. Afirmarlo sería regalarle la credibilidad al primer
+  cliente que lo verifique.
+-->
+<section class="band" id="comparar">
+  <div class="wrap">
+    <div class="sechead centro rev">
+      <div class="kicker" data-t="comp.kicker">Contra qué nos vas a comparar</div>
+      <h2 data-t="comp.h2">Hoy elegís entre una plataforma global o un certificador local.</h2>
+      <p data-t="comp.p">Las dos resuelven una parte. Las globales tienen el mejor producto y cobran por usuario en moneda extranjera, con la firma acreditada como recargo aparte. Los certificadores locales tienen el certificado que tu ley reconoce, pero trabajan en un solo país.</p>
+    </div>
+    <div class="comp">
+      <div class="colcomp rev">
+        <div class="quien" data-t="comp.a.q">Plataformas globales</div>
+        <h3 data-t="comp.a.h">Buen producto, modelo ajeno</h3>
+        <ul>
+          <li class="si" data-t="comp.a.1">Flujo, campos y registro de auditoría muy maduros</li>
+          <li class="no" data-t="comp.a.2">Se cobra por usuario y por mes, en moneda extranjera</li>
+          <li class="no" data-t="comp.a.3">Con tope de envíos por usuario, aunque no los uses</li>
+          <li class="no" data-t="comp.a.4">La firma acreditada es un recargo por destinatario</li>
+          <li class="no" data-t="comp.a.5">Factura del exterior y soporte en otro huso horario</li>
+        </ul>
+      </div>
+      <div class="colcomp rev">
+        <div class="quien" data-t="comp.b.q">Certificadores locales</div>
+        <h3 data-t="comp.b.h">El certificado correcto, un solo país</h3>
+        <ul>
+          <li class="si" data-t="comp.b.1">Certificado acreditado y reconocido por tu ley</li>
+          <li class="si" data-t="comp.b.2">Factura local y atención en tu idioma</li>
+          <li class="no" data-t="comp.b.3">Operan en un país: si firmás con Brasil, no te sirve</li>
+          <li class="no" data-t="comp.b.4">El producto es la firma, no el flujo de trabajo</li>
+          <li class="no" data-t="comp.b.5">Sin envío masivo desde planilla ni API para integrar</li>
+        </ul>
+      </div>
+      <div class="colcomp nuestra rev">
+        <div class="quien" data-t="comp.c.q">MiFirma</div>
+        <h3 data-t="comp.c.h">Las dos cosas</h3>
+        <ul>
+          <li class="si" data-t="comp.c.1">Flujo completo: campos, orden de firma, copias y lotes</li>
+          <li class="si" data-t="comp.c.2">Certificados acreditados de Uruguay, Paraguay y Brasil</li>
+          <li class="si" data-t="comp.c.3">Firma simple y avanzada en el mismo circuito, sin recargo por destinatario</li>
+          <li class="si" data-t="comp.c.4">Pagás por lo que firmás, en tu moneda y con factura local</li>
+          <li class="si" data-t="comp.c.5">Sin licencias por usuario ni topes de envío</li>
+        </ul>
+      </div>
+    </div>
+    <p class="comp-nota" data-t="comp.nota">Las plataformas globales resuelven muy bien el flujo de trabajo: campos, recordatorios y auditoría. La diferencia no está ahí, sino en cómo se cobra y en qué certificado se usa para que la firma valga donde vos operás.</p>
+  </div>
+</section>
+
+<!-- ===================== Planes ===================== -->
+<section class="band soft" id="planes">
+  <div class="wrap">
+    <div class="sechead rev">
+      <div class="kicker" data-t="planes.kicker">Planes</div>
+      <h2 data-t="planes.h2">Pagás por lo que firmás.</h2>
+      <p data-t="planes.p">En tu moneda y con factura local. Sin mínimos de usuarios ni licencias que sobran.</p>
+    </div>
+    <div class="selpais" id="selPais" role="group"></div>
+    <div class="planes" id="listaPlanes"></div>
   </div>
 </section>
 
 <section class="band">
   <div class="wrap">
-    <div class="sechead"><h2 data-i18n="web.roadmap.title">Lo que viene</h2><p data-i18n="web.roadmap.sub">Sobre el mismo núcleo, sin rehacer nada: el roadmap del producto.</p></div>
-    <div class="roadmap">
-      <div class="rm"><div class="tag" data-i18n="web.roadmap.tag">Próximamente</div><h3 data-i18n="web.roadmap.r1.title">Reclutamiento</h3><p data-i18n="web.roadmap.r1.desc">Vacantes, candidatos y seguimiento del proceso de selección.</p></div>
-      <div class="rm"><div class="tag" data-i18n="web.roadmap.tag">Próximamente</div><h3 data-i18n="web.roadmap.r2.title">Onboarding</h3><p data-i18n="web.roadmap.r2.desc">Alta guiada de nuevos ingresos sobre el legajo.</p></div>
-      <div class="rm"><div class="tag" data-i18n="web.roadmap.tag">Próximamente</div><h3 data-i18n="web.roadmap.r3.title">Beneficios</h3><p data-i18n="web.roadmap.r3.desc">Gestión de beneficios al personal.</p></div>
-      <div class="rm"><div class="tag" data-i18n="web.roadmap.tag">Próximamente</div><h3 data-i18n="web.roadmap.r4.title">Apps móviles</h3><p data-i18n="web.roadmap.r4.desc">Autoservicio del empleado en iOS y Android.</p></div>
+    <div class="cierre rev">
+      <h2 data-t="cierre.h2">Empezá con un documento.</h2>
+      <p data-t="cierre.p">Creá tu cuenta, subí un PDF y mandalo a firmar. Vas a ver el expediente completo del primero.</p>
+      <div class="cta">
+        <a class="btn btn-a" href="/entrar#crear" data-t="cierre.cta1">Crear cuenta</a>
+        <a class="btn btn-s" href="#planes" data-t="cierre.cta2">Ver planes</a>
+      </div>
     </div>
   </div>
 </section>
 
-<section id="planes" class="band soft">
+<footer>
   <div class="wrap">
-    <div class="sechead">
-      <h2 data-i18n="web.plans.title">Planes</h2>
-      <p data-i18n="web.plans.sub">Elegí cómo querés pagar: un precio fijo, o por cantidad de funcionarios. Las tarifas las define el plan; abajo ves las vigentes.</p>
-    </div>
-    <div id="grillaPlanes" class="planes-grid"><p style="color:var(--muted);text-align:center">…</p></div>
-  </div>
-</section>
-
-<section id="enrolar" class="band">
-  <div class="wrap" style="text-align:center;max-width:760px">
-    <h2 data-i18n="web.enroll.title">Creá tu cuenta</h2>
-    <p class="sub">Empezás en minutos. Elegí cómo vas a usar MiFirma: como empresa que liquida sus propios sueldos, o como estudio contable que gestiona varias empresas.</p>
-    <div style="display:flex;gap:12px;justify-content:center;flex-wrap:wrap;margin-top:24px">
-      <a class="btn big" href="/entrar?modo=registro" data-i18n="web.enroll.btn">Crear empresa</a>
-      <a class="btn big ghost" href="/entrar?tipo=estudio&amp;modo=registro">Soy un estudio contable</a>
-    </div>
-    <p class="sub" style="margin-top:20px">¿Ya tenés cuenta? <a href="/entrar" style="color:var(--brand);font-weight:600" data-i18n="web.nav.login">Ingresar</a></p>
-  </div>
-</section>
-
-<footer class="foot">
-  <div class="wrap">
-    <div class="brand"><svg viewBox="0 0 272 60" style="height:38px;display:block" role="img" aria-label="MiFirma"><rect x="0" y="14" width="36" height="6.5" rx="3.25" fill="#fff"/><rect x="0" y="25" width="23" height="6.5" rx="3.25" fill="#0aa2b0"/><rect x="0" y="36" width="31" height="6.5" rx="3.25" fill="#fff"/><text x="52" y="26" font-family="'Plus Jakarta Sans',system-ui,sans-serif" font-size="25" font-weight="700" fill="#fff">MiFirma</text><text x="52" y="47" font-family="'Plus Jakarta Sans',system-ui,sans-serif" font-size="13.5" font-weight="500" fill="#6fd2da">New Generation</text></svg></div>
-    <div class="links">
-      <a href="#beneficios" data-i18n="web.nav.benefits">Beneficios</a>
-      <a href="#capacidades" data-i18n="web.nav.capabilities">Capacidades</a>
-      <a href="#planes" data-i18n="web.nav.plans">Planes</a>
-      <a href="/entrar" data-i18n="web.nav.login">Ingresar</a>
-      <a href="/entrar?modo=registro" data-i18n="web.nav.signup">Crear cuenta</a>
-    </div>
+    <img src="/logo.svg" alt="MiFirma" />
+    <span data-t="footer.legal">Firma electrónica con validez legal · Uruguay · Paraguay · Brasil</span>
+    <span>mi-firma.digital</span>
   </div>
 </footer>
 
-<script>
-  const $ = (s) => document.querySelector(s);
-  const esc = (s) => String(s ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
-  const fmt = (v) => { const n = Number(v); return Number.isFinite(n) ? n.toFixed(2) : v; };
-  const ILIMITADO = 100000;
-
-  // ---- i18n ----
-  const IDIOMAS = [['es', 'Español'], ['gn', 'Guaraní'], ['en', 'English'], ['pt', 'Português']];
-  let LANG = localStorage.getItem('png_lang') || 'es';
-  let I18N = {};
-  const t = (k) => (I18N[k] != null ? I18N[k] : k);
-
-  // Textos del render de precios (autocontenidos; gn cae a es).
-  const PRECIO_I18N = {
-    es: { free: 'Gratis', freeDesc: 'Sin cargo mientras dure el plan.', fixed: 'Precio fijo, sin importar la cantidad de funcionarios.', perEmp: 'Por funcionario', perEmpDesc: 'Cada funcionario se cobra según el tramo en el que cae:', perEach: 'Por cada funcionario activo en el período.', firstFree: 'Los primeros {n} funcionarios, sin cargo.', func: 'func.', orMore: 'o más', noCharge: 'sin cargo', chooseEmpty: 'Elegí un plan…', choose: 'Elegir', none: 'Todavía no hay planes publicados.', loadErr: 'No se pudieron cargar los planes. ¿Está el servidor corriendo?', per_mensual: 'por mes', per_semestral: 'por semestre', per_anual: 'por año', s_mensual: 'mes', s_semestral: 'semestre', s_anual: 'año' },
-    en: { free: 'Free', freeDesc: 'No charge while the plan lasts.', fixed: 'Fixed price, regardless of headcount.', perEmp: 'Per employee', perEmpDesc: 'Each employee is charged by the tier they fall into:', perEach: 'Per active employee in the period.', firstFree: 'First {n} employees, free.', func: 'emp.', orMore: 'or more', noCharge: 'free', chooseEmpty: 'Choose a plan…', choose: 'Choose', none: 'No plans published yet.', loadErr: 'Could not load plans. Is the server running?', per_mensual: 'per month', per_semestral: 'per half-year', per_anual: 'per year', s_mensual: 'mo', s_semestral: 'half-yr', s_anual: 'yr' },
-    pt: { free: 'Grátis', freeDesc: 'Sem custo enquanto durar o plano.', fixed: 'Preço fixo, independente da quantidade de funcionários.', perEmp: 'Por funcionário', perEmpDesc: 'Cada funcionário é cobrado pela faixa em que se enquadra:', perEach: 'Por funcionário ativo no período.', firstFree: 'Os primeiros {n} funcionários, sem custo.', func: 'func.', orMore: 'ou mais', noCharge: 'sem custo', chooseEmpty: 'Escolha um plano…', choose: 'Escolher', none: 'Ainda não há planos publicados.', loadErr: 'Não foi possível carregar os planos. O servidor está rodando?', per_mensual: 'por mês', per_semestral: 'por semestre', per_anual: 'por ano', s_mensual: 'mês', s_semestral: 'semestre', s_anual: 'ano' },
-    gn: {},
-  };
-  const pr = (k) => (PRECIO_I18N[LANG] && PRECIO_I18N[LANG][k]) || PRECIO_I18N.es[k];
-
-
-  const BENEFICIOS = [
-    ['web.benefit.1', 'M4 3h16v18H4zM8 7h8M8 11h8M8 15h5'],
-    ['web.benefit.2', 'M12 3a9 9 0 100 18 9 9 0 000-18zM3 12h18M12 3c3 3.3 3 14.7 0 18M12 3c-3 3.3-3 14.7 0 18'],
-    ['web.benefit.3', 'M9 11a3 3 0 100-6 3 3 0 000 6zM17 11a3 3 0 100-6 3 3 0 000 6zM3 20c0-3 3-5 6-5s6 2 6 5M15 20c0-2 1-3.5 2.5-4.2'],
-    ['web.benefit.4', 'M12 3l8 4v5c0 5-3.5 7.5-8 9-4.5-1.5-8-4-8-9V7zM9 12l2 2 4-4'],
-    ['web.benefit.5', 'M4 5h16v11H8l-4 4zM8 9h8M8 12h5'],
-    ['web.benefit.6', 'M12 2l8 4v6c0 5-3.5 8-8 10-4.5-2-8-5-8-10V6z'],
-    ['web.benefit.7', 'M12 3a9 9 0 100 18 9 9 0 000-18zM9.5 9.5a2.5 2.5 0 015 0c0 2-2.5 1.5-2.5 3.5M12 16h.01'],
-    ['web.benefit.8', 'M4 20V10M10 20V4M16 20v-8M22 20H2'],
-  ];
-  function pintarBeneficios() {
-    $('#benefits').innerHTML = BENEFICIOS.map(([k, d]) =>
-      '<div class="benefit"><div class="ico"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="' + d + '"/></svg></div><h3>' + esc(t(k)) + '</h3></div>'
-    ).join('');
-  }
-
-  function bloquePrecio(p) {
-    const per = pr('per_' + p.periodo) || p.periodo;
-    const perCorto = pr('s_' + p.periodo) || p.periodo;
-    if (p.modo_precio === 'fijo') {
-      if (Number(p.precio_fijo) === 0) return { monto: pr('free'), per: '', detalle: pr('freeDesc'), franjas: '' };
-      return { monto: esc(p.moneda) + ' ' + fmt(p.precio_fijo), per: per, detalle: pr('fixed'), franjas: '' };
-    }
-    if (p.tramos && p.tramos.length) {
-      const items = p.tramos.map((tr) => {
-        const rango = tr.hasta == null ? (tr.desde + ' ' + pr('orMore')) : (tr.desde + '–' + tr.hasta);
-        const val = Number(tr.precio) === 0 ? pr('noCharge') : (esc(p.moneda) + ' ' + fmt(tr.precio));
-        return '<li><span>' + esc(rango) + ' ' + esc(pr('func')) + '</span><span class="val">' + val + '</span></li>';
-      }).join('');
-      return { monto: pr('perEmp'), per: per, detalle: pr('perEmpDesc'), franjas: '<ul class="franjas">' + items + '</ul>' };
-    }
-    let det = pr('perEach');
-    if (p.funcionarios_gratis > 0 && p.funcionarios_gratis < ILIMITADO) det = pr('firstFree').replace('{n}', p.funcionarios_gratis);
-    return { monto: esc(p.moneda) + ' ' + fmt(p.precio_por_funcionario), per: pr('func') + ' · ' + perCorto, detalle: det, franjas: '' };
-  }
-
-  let PLANES_CACHE = null;
-  async function cargarPlanes() {
-    const cont = $('#grillaPlanes');
-    const sel = $('#fPlan');
-    try {
-      if (!PLANES_CACHE) {
-        const r = await fetch('/planes-publicos');
-        if (!r.ok) throw new Error('no');
-        PLANES_CACHE = (await r.json()).planes || [];
-      }
-      if (!PLANES_CACHE.length) { cont.innerHTML = '<p style="color:var(--muted);text-align:center">' + esc(pr('none')) + '</p>'; return; }
-      cont.innerHTML = '';
-      if (sel) sel.innerHTML = '<option value="">' + esc(pr('chooseEmpty')) + '</option>';
-      for (const p of PLANES_CACHE) {
-        const b = bloquePrecio(p);
-        const card = document.createElement('div');
-        card.className = 'plan';
-        card.innerHTML =
-          '<div class="moneda-tag">' + esc(p.moneda) + '</div>' +
-          '<h3>' + esc(p.nombre) + '</h3>' +
-          '<div class="precio"><span class="monto">' + b.monto + '</span>' + (b.per ? '<span class="per">' + esc(b.per) + '</span>' : '') + '</div>' +
-          '<div class="detalle">' + esc(b.detalle) + '</div>' +
-          b.franjas +
-          '<div class="sep"></div>' +
-          '<div class="cta"><button class="btn block" data-plan="' + esc(p.codigo) + '">' + esc(pr('choose')) + ' ' + esc(p.nombre) + '</button></div>';
-        cont.appendChild(card);
-        if (sel) { const opt = document.createElement('option'); opt.value = p.codigo; opt.textContent = p.nombre; sel.appendChild(opt); }
-      }
-      cont.querySelectorAll('button[data-plan]').forEach((btn) => {
-        btn.addEventListener('click', () => { window.location.href = '/entrar?modo=registro'; });
-      });
-    } catch {
-      cont.innerHTML = '<p style="color:#a3372b;text-align:center">' + esc(pr('loadErr')) + '</p>';
-    }
-  }
-
-  function aplicarI18n() {
-    document.querySelectorAll('[data-i18n]').forEach((el) => { const k = el.dataset.i18n; if (I18N[k] != null) el.textContent = I18N[k]; });
-    document.documentElement.lang = LANG;
-    $('#langDraft').textContent = I18N['app.lang.draft'] || '';
-    $('#langDraft').style.display = LANG === 'gn' ? 'block' : 'none';
-  }
-
-  async function cambiarIdioma(lang) {
-    LANG = lang;
-    localStorage.setItem('png_lang', lang);
-    try { const r = await fetch('/i18n?idioma=' + encodeURIComponent(lang)); I18N = (await r.json()).ui || {}; } catch (e) { I18N = {}; }
-    aplicarI18n();
-    pintarBeneficios();
-    cargarPlanes();
-    const sel = $('#selLang'); if (sel) sel.value = lang;
-  }
-
-  // Init
-  (function initLang() {
-    const sel = $('#selLang');
-    sel.innerHTML = IDIOMAS.map(([c, n]) => '<option value="' + c + '">' + n + '</option>').join('');
-    sel.value = LANG;
-    sel.addEventListener('change', () => cambiarIdioma(sel.value));
-  })();
-  cambiarIdioma(LANG);
-</script>
+<script src="/sitio.js"></script>
 </body>
 </html>

@@ -1,761 +1,253 @@
 <!doctype html>
 <html lang="es">
 <head>
-  <meta charset="utf-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>Acceso · MiFirma</title>
-  <meta name="theme-color" content="#123a5e" />
-  <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
-  <link rel="preconnect" href="https://fonts.googleapis.com" />
-  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
-  <link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700;800&display=swap" rel="stylesheet" />
-  <style>
-    :root {
-      --brand:#123a5e; --brand-600:#1a5482; --brand-50:#eaf2f8;
-      --accent:#0aa2b0; --accent-50:#e6f6f7;
-      --ink:#16202e; --muted:#5b6573; --soft:#f3f6f9; --line:#e4eaf0; --paper:#ffffff;
-      --radius:12px; --shadow:0 1px 2px rgba(18,32,46,.05), 0 12px 32px rgba(18,32,46,.08);
-      --font:'Plus Jakarta Sans', system-ui, -apple-system, sans-serif; --danger:#d64545;
-    }
-    * { box-sizing:border-box; }
-    body { margin:0; background:linear-gradient(180deg, var(--brand-50), var(--soft) 55%); color:var(--ink); font-family:var(--font); line-height:1.55; -webkit-font-smoothing:antialiased; }
-    .wrap { min-height:100vh; display:flex; align-items:center; justify-content:center; padding:24px; }
-    .card { background:var(--paper); border:1px solid var(--line); border-radius:var(--radius); padding:30px; width:100%; max-width:460px; box-shadow:var(--shadow); }
-    .brand { margin-bottom:16px; }
-    .brand svg { height:64px; display:block; }
-    h1 { font-size:22px; margin:0 0 4px; letter-spacing:-.01em; }
-    p.lead { color:var(--muted); font-size:14px; margin:0 0 18px; }
-    label { display:block; font-size:13px; font-weight:600; margin:12px 0 4px; color:var(--ink); }
-    input, select { width:100%; padding:11px 12px; border:1px solid var(--line); border-radius:8px; font-size:14px; background:#fff; font-family:inherit; color:var(--ink); }
-    input:focus, select:focus { outline:none; border-color:var(--brand); box-shadow:0 0 0 3px var(--brand-50); }
-    button { font-family:inherit; cursor:pointer; border:none; border-radius:8px; font-size:14px; font-weight:600; padding:11px 16px; transition:filter .15s, transform .12s; }
-    button.primary { background:var(--brand); color:#fff; width:100%; margin-top:20px; padding:13px 16px; }
-    button.primary:hover { filter:brightness(1.12); }
-    button.primary:active { transform:translateY(1px); }
-    button.primary:disabled { opacity:.6; cursor:default; filter:none; }
-    button.ghost { background:var(--brand-50); color:var(--brand); width:100%; margin-top:10px; }
-    button.ghost:hover { filter:brightness(.98); }
-    .row2 { display:grid; grid-template-columns:1fr 1fr; gap:12px; }
-    .link { background:none; padding:0; color:var(--brand-600); font-weight:600; font-size:13px; }
-    .link:hover { text-decoration:underline; }
-    .foot { margin-top:18px; font-size:13px; color:var(--muted); text-align:center; }
-    .msg { font-size:13px; margin-top:12px; min-height:18px; }
-    .msg .ok { color:var(--accent); }
-    .msg .off { color:var(--danger); }
-    .hidden { display:none !important; }
-    .code { font-size:22px; letter-spacing:6px; text-align:center; font-weight:700; color:var(--ink); }
-    .sep { margin:20px 0 4px; font-size:12px; font-weight:700; letter-spacing:.06em; text-transform:uppercase; color:var(--muted); border-top:1px solid var(--line); padding-top:16px; }
-    .seg { display:flex; gap:6px; background:var(--soft); border:1px solid var(--line); border-radius:10px; padding:4px; margin-bottom:20px; }
-    .seg-b { flex:1; background:none; color:var(--muted); padding:9px; border-radius:7px; font-family:inherit; }
-    .seg-b.active { background:#fff; color:var(--brand); box-shadow:0 1px 2px rgba(18,32,46,.08); }
-    .home { text-align:center; margin-top:18px; }
-    .home a { color:var(--muted); font-size:12px; text-decoration:none; }
-    .home a:hover { color:var(--ink); }
-  </style>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Entrar · MiFirma</title>
+<meta name="theme-color" content="#0B2B4A" />
+<meta name="robots" content="noindex" />
+<link rel="icon" type="image/svg+xml" href="/favicon.svg" />
+<link rel="apple-touch-icon" href="/apple-touch-icon.png" />
+<link rel="preconnect" href="https://fonts.googleapis.com" />
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet" />
+<style>
+  :root{
+    --brand:#0B2B4A; --brand-600:#14456f; --brand-50:#eef4fa;
+    --acc:#0AA2B0; --acc-50:#e4f7f8; --acc-700:#077b86;
+    --ink:#0f1e2c; --mut:#5a6878; --line:#e4ebf3; --soft:#f7fafc; --paper:#fff;
+    --danger:#b42318; --ok:#067647; --r:11px;
+    --font:'Inter',system-ui,-apple-system,'Segoe UI',Roboto,sans-serif;
+  }
+  *{box-sizing:border-box}
+  body{margin:0;min-height:100dvh;font-family:var(--font);color:var(--ink);line-height:1.55;
+       -webkit-font-smoothing:antialiased;display:grid;grid-template-rows:auto 1fr auto;
+       background:radial-gradient(720px 420px at 82% -8%, var(--acc-50), transparent 62%),
+                  linear-gradient(180deg,#fbfdff,var(--soft) 60%)}
+  a{color:var(--brand-600);text-decoration:none}
+
+  header{padding:20px 24px;display:flex;align-items:center;gap:16px;flex-wrap:wrap}
+  .marca{display:flex;align-items:center;gap:14px}
+  .marca img{height:30px;display:block}
+  .volver{display:inline-flex;align-items:center;gap:6px;font-size:13.5px;font-weight:600;color:var(--mut);
+          border:1px solid var(--line);background:var(--paper);border-radius:999px;padding:6px 14px;transition:.15s}
+  .volver:hover{border-color:var(--brand);color:var(--brand)}
+  .lang{margin-left:auto;display:flex;gap:1px;background:var(--paper);border:1px solid var(--line);border-radius:999px;padding:3px}
+  .lang button{border:0;background:none;font:inherit;font-size:12.5px;font-weight:600;color:var(--mut);
+               padding:5px 12px;border-radius:999px;cursor:pointer;transition:.15s}
+  .lang button[aria-pressed="true"]{background:var(--brand);color:#fff}
+
+  main{display:grid;place-items:start center;padding:12px 24px 56px}
+  .card{width:100%;max-width:430px;background:var(--paper);border:1px solid var(--line);border-radius:18px;
+        padding:34px;box-shadow:0 1px 2px rgba(11,43,74,.04), 0 16px 44px rgba(11,43,74,.08)}
+  .card.ancha{max-width:520px}
+  h1{font-size:24.5px;margin:0 0 7px;letter-spacing:-.025em}
+  .lead{color:var(--mut);font-size:14.5px;margin:0 0 24px}
+
+  label{display:block;font-size:13px;font-weight:600;margin:15px 0 6px}
+  input,select{width:100%;font:inherit;padding:11px 12px;border:1px solid var(--line);border-radius:var(--r);
+               background:var(--paper);color:var(--ink)}
+  input:focus,select:focus{outline:2px solid var(--brand-600);outline-offset:-1px;border-color:var(--brand-600)}
+  input[inputmode="numeric"]{letter-spacing:.5em;font-size:23px;text-align:center;font-weight:700}
+  .dos{display:grid;gap:12px;grid-template-columns:1fr 1fr}
+  .pista{font-size:12.5px;color:var(--mut);margin-top:6px}
+
+  button.primary{width:100%;margin-top:22px;font:inherit;font-weight:600;color:#fff;background:var(--brand);
+                 border:0;border-radius:var(--r);padding:12.5px;cursor:pointer;transition:.15s}
+  button.primary:hover{background:var(--brand-600)}
+  button.primary:disabled{opacity:.55;cursor:default}
+  button.link{background:none;border:0;font:inherit;color:var(--brand-600);cursor:pointer;padding:0;font-weight:600}
+  button.link:hover{text-decoration:underline}
+
+  .opcion{width:100%;text-align:left;font:inherit;background:var(--paper);cursor:pointer;border:1px solid var(--line);
+          border-radius:var(--r);padding:14px 16px;margin-top:10px;transition:.15s}
+  .opcion:hover{border-color:var(--brand);background:var(--brand-50)}
+  .opcion b{display:block;font-size:15px}
+  .opcion span{color:var(--mut);font-size:13px}
+
+  .foot{margin-top:24px;padding-top:19px;border-top:1px solid var(--line);font-size:13.5px;color:var(--mut)}
+  .msg{margin-top:16px;font-size:13.5px;padding:11px 13px;border-radius:var(--r)}
+  .msg.err{background:#fef3f2;color:var(--danger);border:1px solid #fecdc9}
+  .msg.ok{background:#ecfdf3;color:var(--ok);border:1px solid #abefc6}
+  .hidden{display:none!important}
+  footer{text-align:center;padding:22px;font-size:12.5px;color:var(--mut)}
+
+  .venta{margin-top:22px;padding-top:20px;border-top:1px solid var(--line)}
+  .venta li{list-style:none;position:relative;padding-left:26px;font-size:13.5px;color:var(--mut);margin-bottom:9px}
+  .venta ul{padding:0;margin:0}
+  .venta li::before{content:"";position:absolute;left:2px;top:6px;width:13px;height:7px;
+    border-left:2.2px solid var(--acc);border-bottom:2.2px solid var(--acc);transform:rotate(-45deg)}
+</style>
 </head>
 <body>
-  <div class="wrap">
-    <div style="display:flex;justify-content:flex-end;margin-bottom:10px">
-      <select id="selLang" onchange="cambiarIdioma(this.value)" style="font-family:inherit;font-size:13px;color:var(--muted);background:#fff;border:1px solid var(--line);border-radius:8px;padding:6px 8px">
-        <option value="es">Español</option><option value="gn">Guaraní</option><option value="en">English</option><option value="pt">Português</option>
-      </select>
-    </div>
 
-    <!-- ===== EMPRESA · LOGIN ===== -->
-    <div class="card" id="vEmpLogin">
-      <div class="brand"><svg viewBox="0 0 272 60" role="img" aria-label="MiFirma"><rect x="0" y="14" width="36" height="6.5" rx="3.25" fill="#123a5e"/><rect x="0" y="25" width="23" height="6.5" rx="3.25" fill="#0aa2b0"/><rect x="0" y="36" width="31" height="6.5" rx="3.25" fill="#123a5e"/><text x="52" y="26" font-family="'Plus Jakarta Sans',system-ui,sans-serif" font-size="25" font-weight="700" fill="#123a5e">MiFirma</text><text x="52" y="47" font-family="'Plus Jakarta Sans',system-ui,sans-serif" font-size="13.5" font-weight="500" fill="#0aa2b0">New Generation</text></svg></div>
-      <div class="seg">
-        <button class="seg-b active" onclick="irTipo('empresa')" data-i18n="ent.seg.empresa">Empresa</button>
-        <button class="seg-b" onclick="irTipo('estudio')" data-i18n="ent.seg.estudio">Estudio</button>
-        <button class="seg-b" onclick="irTipo('oferente')" data-i18n="ent.seg.oferente">Oferente</button>
-      </div>
-      <h1 data-i18n="ent.emp.login.h1">Ingresá a tu empresa</h1>
-      <p class="lead" data-i18n="ent.emp.login.lead">Accedé a la consola para liquidar sueldos y gestionar tu personal.</p>
-      <label for="elEmail" data-i18n="ent.lbl.email">Email</label>
-      <input id="elEmail" type="email" autocomplete="username" placeholder="vos@empresa.com" data-i18n-ph="ent.ph.email">
-      <label for="elPass" data-i18n="ent.lbl.pass">Contraseña</label>
-      <input id="elPass" type="password" autocomplete="current-password" placeholder="••••••••">
-      <button class="primary" id="btnEmpLogin" onclick="loginEmpresa()" data-i18n="ent.btn.ingresar">Ingresar</button>
-      <div class="msg" id="empLoginMsg"></div>
-      <div class="foot"><button class="link" onclick="verEmpReset()" data-i18n="ent.olvide">¿Olvidaste tu contraseña?</button></div>
-      <div class="foot"><span data-i18n="ent.sinCuenta">¿No tenés cuenta?</span> <button class="link" onclick="verEmpRegistro()" data-i18n="ent.creaEmpresa">Creá tu empresa</button></div>
-      <div class="home"><a href="/" data-i18n="ent.volverInicio">← Volver al inicio</a></div>
-    </div>
-
-    <!-- ===== EMPRESA · OLVIDÉ CONTRASEÑA ===== -->
-    <div class="card hidden" id="vEmpElegirEmpresa">
-      <div class="brand"><svg viewBox="0 0 272 60" role="img" aria-label="MiFirma"><rect x="0" y="14" width="36" height="6.5" rx="3.25" fill="#123a5e"/><rect x="0" y="25" width="23" height="6.5" rx="3.25" fill="#0aa2b0"/><rect x="0" y="36" width="31" height="6.5" rx="3.25" fill="#123a5e"/><text x="52" y="26" font-family="'Plus Jakarta Sans',system-ui,sans-serif" font-size="25" font-weight="700" fill="#123a5e">MiFirma</text><text x="52" y="47" font-family="'Plus Jakarta Sans',system-ui,sans-serif" font-size="13.5" font-weight="500" fill="#0aa2b0">New Generation</text></svg></div>
-      <h1 data-i18n="ent.emp.elegir.h1">¿A qué empresa querés entrar?</h1>
-      <p class="lead" data-i18n="ent.emp.elegir.lead">Tu cuenta está en más de una empresa. Elegí con cuál iniciar sesión.</p>
-      <div id="empElegirEmpLista"></div>
-      <div class="msg" id="empElegirEmpMsg"></div>
-      <div class="foot"><button class="link" onclick="vista('vEmpLogin')" data-i18n="ent.volver">Volver</button></div>
-    </div>
-
-    <div class="card hidden" id="vEmpReset">
-      <div class="brand"><svg viewBox="0 0 272 60" role="img" aria-label="MiFirma"><rect x="0" y="14" width="36" height="6.5" rx="3.25" fill="#123a5e"/><rect x="0" y="25" width="23" height="6.5" rx="3.25" fill="#0aa2b0"/><rect x="0" y="36" width="31" height="6.5" rx="3.25" fill="#123a5e"/><text x="52" y="26" font-family="'Plus Jakarta Sans',system-ui,sans-serif" font-size="25" font-weight="700" fill="#123a5e">MiFirma</text><text x="52" y="47" font-family="'Plus Jakarta Sans',system-ui,sans-serif" font-size="13.5" font-weight="500" fill="#0aa2b0">New Generation</text></svg></div>
-      <h1 data-i18n="ent.olvide">¿Olvidaste tu contraseña?</h1>
-      <p class="lead" data-i18n="ent.resetLead">Te mandamos un enlace para elegir una nueva. Por seguridad, solo se envía si la cuenta existe.</p>
-      <label for="rsEmail" data-i18n="ent.lbl.email">Email</label>
-      <input id="rsEmail" type="email" autocomplete="username" placeholder="vos@empresa.com" data-i18n-ph="ent.ph.email">
-      <button class="primary" id="btnEmpReset" onclick="enviarResetEmpresa()" data-i18n="ent.enviarEnlace">Enviar enlace</button>
-      <div class="msg" id="empResetMsg"></div>
-      <div class="foot"><button class="link" onclick="verEmpLogin()" data-i18n="ent.volver">Volver</button></div>
-    </div>
-
-    <!-- ===== EMPRESA · OTP ===== -->
-    <div class="card hidden" id="vEmpOtp">
-      <div class="brand"><svg viewBox="0 0 272 60" role="img" aria-label="MiFirma"><rect x="0" y="14" width="36" height="6.5" rx="3.25" fill="#123a5e"/><rect x="0" y="25" width="23" height="6.5" rx="3.25" fill="#0aa2b0"/><rect x="0" y="36" width="31" height="6.5" rx="3.25" fill="#123a5e"/><text x="52" y="26" font-family="'Plus Jakarta Sans',system-ui,sans-serif" font-size="25" font-weight="700" fill="#123a5e">MiFirma</text><text x="52" y="47" font-family="'Plus Jakarta Sans',system-ui,sans-serif" font-size="13.5" font-weight="500" fill="#0aa2b0">New Generation</text></svg></div>
-      <h1 data-i18n="ent.otp.h1">Verificá que sos vos</h1>
-      <p class="lead" id="empOtpDestino">Te enviamos un código a tu correo.</p>
-      <label for="empOtpCode" data-i18n="ent.codigo">Código</label>
-      <input id="empOtpCode" class="code" inputmode="numeric" maxlength="8" placeholder="000000">
-      <button class="primary" id="btnEmpOtp" onclick="verificarOtpEmpresa()" data-i18n="ent.verificarEntrar">Verificar y entrar</button>
-      <div class="msg" id="empOtpMsg"></div>
-      <div class="foot"><button class="link" onclick="reenviarOtpEmpresa()" data-i18n="ent.reenviar">Reenviar código</button> · <button class="link" onclick="volverEmpLogin()" data-i18n="ent.volver">Volver</button></div>
-    </div>
-
-    <!-- ===== EMPRESA · ELEGIR CANAL ===== -->
-    <div class="card hidden" id="vEmpElegir">
-      <div class="brand"><svg viewBox="0 0 272 60" role="img" aria-label="MiFirma"><rect x="0" y="14" width="36" height="6.5" rx="3.25" fill="#123a5e"/><rect x="0" y="25" width="23" height="6.5" rx="3.25" fill="#0aa2b0"/><rect x="0" y="36" width="31" height="6.5" rx="3.25" fill="#123a5e"/><text x="52" y="26" font-family="'Plus Jakarta Sans',system-ui,sans-serif" font-size="25" font-weight="700" fill="#123a5e">MiFirma</text><text x="52" y="47" font-family="'Plus Jakarta Sans',system-ui,sans-serif" font-size="13.5" font-weight="500" fill="#0aa2b0">New Generation</text></svg></div>
-      <h1 data-i18n="ent.elegir.h1">¿Dónde te enviamos el código?</h1>
-      <p class="lead" data-i18n="ent.elegir.lead">Elegí por dónde recibir el código de verificación.</p>
-      <button class="ghost" id="btnCanalEmail" onclick="elegirCanalEmpresa('email')">—</button>
-      <button class="ghost" id="btnCanalTel" onclick="elegirCanalEmpresa(this.dataset.canal||'sms')">—</button>
-      <div class="msg" id="empElegirMsg"></div>
-      <div class="foot"><button class="link" onclick="volverEmpLogin()" data-i18n="ent.volver">Volver</button></div>
-    </div>
-
-    <!-- ===== EMPRESA · REGISTRO ===== -->
-    <div class="card hidden" id="vEmpRegistro">
-      <div class="brand"><svg viewBox="0 0 272 60" role="img" aria-label="MiFirma"><rect x="0" y="14" width="36" height="6.5" rx="3.25" fill="#123a5e"/><rect x="0" y="25" width="23" height="6.5" rx="3.25" fill="#0aa2b0"/><rect x="0" y="36" width="31" height="6.5" rx="3.25" fill="#123a5e"/><text x="52" y="26" font-family="'Plus Jakarta Sans',system-ui,sans-serif" font-size="25" font-weight="700" fill="#123a5e">MiFirma</text><text x="52" y="47" font-family="'Plus Jakarta Sans',system-ui,sans-serif" font-size="13.5" font-weight="500" fill="#0aa2b0">New Generation</text></svg></div>
-      <div class="seg">
-        <button class="seg-b active" onclick="irTipo('empresa')" data-i18n="ent.seg.empresa">Empresa</button>
-        <button class="seg-b" onclick="irTipo('estudio')" data-i18n="ent.seg.estudio">Estudio</button>
-        <button class="seg-b" onclick="irTipo('oferente')" data-i18n="ent.seg.oferente">Oferente</button>
-      </div>
-      <h1 data-i18n="ent.reg.h1">Creá tu empresa</h1>
-      <p class="lead" data-i18n="ent.reg.lead">Damos de alta tu empresa y tu usuario administrador. Entrás directo a la consola.</p>
-      <label for="erNombre" data-i18n="ent.reg.nombreEmpresa">Nombre de la empresa</label>
-      <input id="erNombre" placeholder="Mi Empresa S.A." data-i18n-ph="ent.ph.nombreEmpresa" autocomplete="organization">
-      <div class="row2">
-        <div><label for="erPais" data-i18n="ent.lbl.pais">País</label><select id="erPais"><option value="UY">Uruguay</option><option value="PY">Paraguay</option></select></div>
-        <div><label for="erRubro" data-i18n="ent.reg.rubro">Rubro</label><select id="erRubro"><option value="" data-i18n="ent.reg.rubroPh">Elegí un rubro…</option></select></div>
-      </div>
-      <label for="erRazon"><span data-i18n="ent.reg.razon">Razón social</span> <span style="color:var(--muted);font-weight:400" data-i18n="ent.opcional">(opcional)</span></label>
-      <input id="erRazon" placeholder="Razón social completa" data-i18n-ph="ent.reg.razonPh">
-      <div class="row2">
-        <div><label for="erIdFiscal"><span data-i18n="ent.reg.idFiscal">ID fiscal</span> <span style="color:var(--muted);font-weight:400" data-i18n="ent.reg.rutRuc">(RUT/RUC)</span></label><input id="erIdFiscal" placeholder="Opcional" data-i18n-ph="ent.reg.opcional"></div>
-        <div><label for="erSegSoc" data-i18n="ent.reg.segSoc">Nº seguridad social</label><input id="erSegSoc" placeholder="Opcional (BPS/IPS)" data-i18n-ph="ent.reg.segSocPh"></div>
-      </div>
-      <label for="erDomicilio"><span data-i18n="ent.reg.domicilio">Domicilio</span> <span style="color:var(--muted);font-weight:400" data-i18n="ent.opcional">(opcional)</span></label>
-      <input id="erDomicilio" placeholder="Dirección de la empresa" data-i18n-ph="ent.reg.domicilioPh">
-      <div class="sep" data-i18n="ent.reg.admin">Administrador</div>
-      <div class="row2">
-        <div><label for="erAdminNombre" data-i18n="ent.lbl.nombre">Nombre</label><input id="erAdminNombre" placeholder="Tu nombre" data-i18n-ph="ent.reg.nombrePh"></div>
-        <div><label for="erAdminDoc" data-i18n="ent.reg.documento">Documento</label><input id="erAdminDoc" placeholder="CI / Cédula" data-i18n-ph="ent.reg.documentoPh"></div>
-      </div>
-      <label for="erAdminEmail" data-i18n="ent.lbl.email">Email</label>
-      <input id="erAdminEmail" type="email" autocomplete="username" placeholder="vos@empresa.com" data-i18n-ph="ent.ph.email">
-      <label for="erAdminPass" data-i18n="ent.reg.pass">Contraseña (mínimo 8 caracteres)</label>
-      <input id="erAdminPass" type="password" autocomplete="new-password" placeholder="••••••••">
-      <label for="erAdminPass2" data-i18n="ent.reg.pass2">Repetir contraseña</label>
-      <input id="erAdminPass2" type="password" autocomplete="new-password" placeholder="••••••••">
-      <button class="primary" id="btnEmpRegistro" onclick="registrarEmpresa()" data-i18n="ent.reg.crearEntrar">Crear empresa y entrar</button>
-      <div class="msg" id="empRegMsg"></div>
-      <div class="foot"><span data-i18n="ent.yaCuenta">¿Ya tenés cuenta?</span> <button class="link" onclick="verEmpLogin()" data-i18n="ent.iniciaSesion">Iniciá sesión</button></div>
-      <div class="home"><a href="/" data-i18n="ent.volverInicio">← Volver al inicio</a></div>
-    </div>
-
-    <!-- ===== ESTUDIO · LOGIN ===== -->
-    <div class="card hidden" id="vEstLogin">
-      <div class="brand"><svg viewBox="0 0 272 60" role="img" aria-label="MiFirma"><rect x="0" y="14" width="36" height="6.5" rx="3.25" fill="#123a5e"/><rect x="0" y="25" width="23" height="6.5" rx="3.25" fill="#0aa2b0"/><rect x="0" y="36" width="31" height="6.5" rx="3.25" fill="#123a5e"/><text x="52" y="26" font-family="'Plus Jakarta Sans',system-ui,sans-serif" font-size="25" font-weight="700" fill="#123a5e">MiFirma</text><text x="52" y="47" font-family="'Plus Jakarta Sans',system-ui,sans-serif" font-size="13.5" font-weight="500" fill="#0aa2b0">New Generation</text></svg></div>
-      <div class="seg">
-        <button class="seg-b" onclick="irTipo('empresa')" data-i18n="ent.seg.empresa">Empresa</button>
-        <button class="seg-b active" onclick="irTipo('estudio')" data-i18n="ent.seg.estudio">Estudio</button>
-        <button class="seg-b" onclick="irTipo('oferente')" data-i18n="ent.seg.oferente">Oferente</button>
-      </div>
-      <h1 data-i18n="ent.est.login.h1">Ingresá a tu estudio</h1>
-      <p class="lead" data-i18n="ent.est.login.lead">Gestioná la liquidación de las empresas que te autorizaron.</p>
-      <label for="slEmail" data-i18n="ent.lbl.email">Email</label>
-      <input id="slEmail" type="email" autocomplete="username" placeholder="vos@estudio.uy" data-i18n-ph="ent.ph.emailEst">
-      <label for="slPass" data-i18n="ent.lbl.pass">Contraseña</label>
-      <input id="slPass" type="password" autocomplete="current-password" placeholder="••••••••">
-      <button class="primary" id="btnEstLogin" onclick="loginEstudio()" data-i18n="ent.btn.ingresar">Ingresar</button>
-      <div class="msg" id="estLoginMsg"></div>
-      <div class="foot"><button class="link" onclick="verEstReset()" data-i18n="ent.olvide">¿Olvidaste tu contraseña?</button></div>
-      <div class="foot"><span data-i18n="ent.sinCuenta">¿No tenés cuenta?</span> <button class="link" onclick="verEstRegistro()" data-i18n="ent.creaEstudio">Creá tu estudio</button></div>
-      <div class="home"><a href="/" data-i18n="ent.volverInicio">← Volver al inicio</a></div>
-    </div>
-
-    <!-- ===== ESTUDIO · OLVIDÉ CONTRASEÑA ===== -->
-    <div class="card hidden" id="vEstElegir">
-      <div class="brand"><svg viewBox="0 0 272 60" role="img" aria-label="MiFirma"><rect x="0" y="14" width="36" height="6.5" rx="3.25" fill="#123a5e"/><rect x="0" y="25" width="23" height="6.5" rx="3.25" fill="#0aa2b0"/><rect x="0" y="36" width="31" height="6.5" rx="3.25" fill="#123a5e"/><text x="52" y="26" font-family="'Plus Jakarta Sans',system-ui,sans-serif" font-size="25" font-weight="700" fill="#123a5e">MiFirma</text><text x="52" y="47" font-family="'Plus Jakarta Sans',system-ui,sans-serif" font-size="13.5" font-weight="500" fill="#0aa2b0">New Generation</text></svg></div>
-      <h1 data-i18n="ent.est.elegir.h1">¿A qué estudio querés entrar?</h1>
-      <p class="lead" data-i18n="ent.est.elegir.lead">Tu cuenta está en más de un estudio. Elegí con cuál iniciar sesión.</p>
-      <div id="estElegirLista"></div>
-      <div class="msg" id="estElegirMsg"></div>
-      <div class="foot"><button class="link" onclick="verEstLogin()" data-i18n="ent.volver">Volver</button></div>
-    </div>
-
-    <div class="card hidden" id="vEstReset">
-      <div class="brand"><svg viewBox="0 0 272 60" role="img" aria-label="MiFirma"><rect x="0" y="14" width="36" height="6.5" rx="3.25" fill="#123a5e"/><rect x="0" y="25" width="23" height="6.5" rx="3.25" fill="#0aa2b0"/><rect x="0" y="36" width="31" height="6.5" rx="3.25" fill="#123a5e"/><text x="52" y="26" font-family="'Plus Jakarta Sans',system-ui,sans-serif" font-size="25" font-weight="700" fill="#123a5e">MiFirma</text><text x="52" y="47" font-family="'Plus Jakarta Sans',system-ui,sans-serif" font-size="13.5" font-weight="500" fill="#0aa2b0">New Generation</text></svg></div>
-      <h1 data-i18n="ent.olvide">¿Olvidaste tu contraseña?</h1>
-      <p class="lead" data-i18n="ent.resetLead">Te mandamos un enlace para elegir una nueva. Por seguridad, solo se envía si la cuenta existe.</p>
-      <label for="esrEmail" data-i18n="ent.lbl.email">Email</label>
-      <input id="esrEmail" type="email" autocomplete="username" placeholder="vos@estudio.uy" data-i18n-ph="ent.ph.emailEst">
-      <button class="primary" id="btnEstReset" onclick="enviarResetEstudio()" data-i18n="ent.enviarEnlace">Enviar enlace</button>
-      <div class="msg" id="estResetMsg"></div>
-      <div class="foot"><button class="link" onclick="verEstLogin()" data-i18n="ent.volver">Volver</button></div>
-    </div>
-
-    <!-- ===== ESTUDIO · NUEVA CONTRASEÑA ===== -->
-    <div class="card hidden" id="vEstResetConfirm">
-      <div class="brand"><svg viewBox="0 0 272 60" role="img" aria-label="MiFirma"><rect x="0" y="14" width="36" height="6.5" rx="3.25" fill="#123a5e"/><rect x="0" y="25" width="23" height="6.5" rx="3.25" fill="#0aa2b0"/><rect x="0" y="36" width="31" height="6.5" rx="3.25" fill="#123a5e"/><text x="52" y="26" font-family="'Plus Jakarta Sans',system-ui,sans-serif" font-size="25" font-weight="700" fill="#123a5e">MiFirma</text><text x="52" y="47" font-family="'Plus Jakarta Sans',system-ui,sans-serif" font-size="13.5" font-weight="500" fill="#0aa2b0">New Generation</text></svg></div>
-      <h1 data-i18n="ent.est.rc.h1">Elegí una nueva contraseña</h1>
-      <p class="lead" data-i18n="ent.est.rc.lead">Para tu cuenta de estudio contable.</p>
-      <label for="escPass" data-i18n="ent.est.rc.pass">Nueva contraseña (mínimo 8 caracteres)</label>
-      <input id="escPass" type="password" autocomplete="new-password" placeholder="••••••••">
-      <label for="escPass2" data-i18n="ent.reg.pass2">Repetir contraseña</label>
-      <input id="escPass2" type="password" autocomplete="new-password" placeholder="••••••••">
-      <button class="primary" id="btnEstResetConfirm" onclick="confirmarResetEstudioUI()" data-i18n="ent.est.rc.guardar">Guardar y entrar</button>
-      <div class="msg" id="estResetConfirmMsg"></div>
-      <div class="foot"><button class="link" onclick="verEstLogin()" data-i18n="ent.volverLogin">Volver al login</button></div>
-    </div>
-
-    <!-- ===== ESTUDIO · REGISTRO ===== -->
-    <div class="card hidden" id="vEstRegistro">
-      <div class="brand"><svg viewBox="0 0 272 60" role="img" aria-label="MiFirma"><rect x="0" y="14" width="36" height="6.5" rx="3.25" fill="#123a5e"/><rect x="0" y="25" width="23" height="6.5" rx="3.25" fill="#0aa2b0"/><rect x="0" y="36" width="31" height="6.5" rx="3.25" fill="#123a5e"/><text x="52" y="26" font-family="'Plus Jakarta Sans',system-ui,sans-serif" font-size="25" font-weight="700" fill="#123a5e">MiFirma</text><text x="52" y="47" font-family="'Plus Jakarta Sans',system-ui,sans-serif" font-size="13.5" font-weight="500" fill="#0aa2b0">New Generation</text></svg></div>
-      <div class="seg">
-        <button class="seg-b" onclick="irTipo('empresa')" data-i18n="ent.seg.empresa">Empresa</button>
-        <button class="seg-b active" onclick="irTipo('estudio')" data-i18n="ent.seg.estudio">Estudio</button>
-        <button class="seg-b" onclick="irTipo('oferente')" data-i18n="ent.seg.oferente">Oferente</button>
-      </div>
-      <h1 data-i18n="ent.est.reg.h1">Creá tu estudio</h1>
-      <p class="lead" data-i18n="ent.est.reg.lead">Damos de alta tu estudio contable. Después verificamos tu email con un código.</p>
-      <label for="srEstudio" data-i18n="ent.est.reg.nombre">Nombre del estudio</label>
-      <input id="srEstudio" placeholder="Estudio Pérez & Asociados" data-i18n-ph="ent.est.reg.nombrePh">
-      <div class="row2">
-        <div><label for="srPais" data-i18n="ent.lbl.pais">País</label><select id="srPais"><option value="UY">Uruguay</option><option value="PY">Paraguay</option></select></div>
-        <div><label for="srNombre" data-i18n="ent.est.reg.tuNombre">Tu nombre</label><input id="srNombre" placeholder="Ana Pérez" data-i18n-ph="ent.est.reg.tuNombrePh"></div>
-      </div>
-      <label for="srEmail" data-i18n="ent.lbl.email">Email</label>
-      <input id="srEmail" type="email" autocomplete="username" placeholder="vos@estudio.uy" data-i18n-ph="ent.ph.emailEst">
-      <label for="srPass" data-i18n="ent.reg.pass">Contraseña (mínimo 8 caracteres)</label>
-      <input id="srPass" type="password" autocomplete="new-password" placeholder="••••••••">
-      <label for="srPass2" data-i18n="ent.reg.pass2">Repetir contraseña</label>
-      <input id="srPass2" type="password" autocomplete="new-password" placeholder="••••••••">
-      <button class="primary" id="btnEstRegistro" onclick="registrarEstudio()" data-i18n="ent.est.reg.crear">Crear estudio</button>
-      <div class="msg" id="estRegMsg"></div>
-      <div class="foot"><span data-i18n="ent.yaCuenta">¿Ya tenés cuenta?</span> <button class="link" onclick="verEstLogin()" data-i18n="ent.iniciaSesion">Iniciá sesión</button></div>
-      <div class="home"><a href="/" data-i18n="ent.volverInicio">← Volver al inicio</a></div>
-    </div>
-
-    <!-- ===== ESTUDIO · OTP ===== -->
-    <div class="card hidden" id="vEstOtp">
-      <div class="brand"><svg viewBox="0 0 272 60" role="img" aria-label="MiFirma"><rect x="0" y="14" width="36" height="6.5" rx="3.25" fill="#123a5e"/><rect x="0" y="25" width="23" height="6.5" rx="3.25" fill="#0aa2b0"/><rect x="0" y="36" width="31" height="6.5" rx="3.25" fill="#123a5e"/><text x="52" y="26" font-family="'Plus Jakarta Sans',system-ui,sans-serif" font-size="25" font-weight="700" fill="#123a5e">MiFirma</text><text x="52" y="47" font-family="'Plus Jakarta Sans',system-ui,sans-serif" font-size="13.5" font-weight="500" fill="#0aa2b0">New Generation</text></svg></div>
-      <h1 data-i18n="ent.est.otp.h1">Verificá tu email</h1>
-      <p class="lead" id="estOtpLead" data-i18n="ent.est.otp.lead">Te enviamos un código de 6 dígitos a tu correo.</p>
-      <label for="estOtpCode" data-i18n="ent.codigo">Código</label>
-      <input id="estOtpCode" class="code" inputmode="numeric" maxlength="6" placeholder="000000">
-      <button class="primary" id="btnEstOtp" onclick="verificarEstudio()" data-i18n="ent.verificarEntrar">Verificar y entrar</button>
-      <div class="msg" id="estOtpMsg"></div>
-      <div class="foot"><button class="link" onclick="reenviarEstudio()" data-i18n="ent.reenviar">Reenviar código</button> · <button class="link" onclick="verEstRegistro()" data-i18n="ent.volver">Volver</button></div>
-    </div>
-
-    <!-- ===== OFERENTE · LOGIN ===== -->
-    <div class="card hidden" id="vOfeLogin">
-      <div class="brand"><svg viewBox="0 0 272 60" role="img" aria-label="MiFirma"><rect x="0" y="14" width="36" height="6.5" rx="3.25" fill="#123a5e"/><rect x="0" y="25" width="23" height="6.5" rx="3.25" fill="#0aa2b0"/><rect x="0" y="36" width="31" height="6.5" rx="3.25" fill="#123a5e"/><text x="52" y="26" font-family="'Plus Jakarta Sans',system-ui,sans-serif" font-size="25" font-weight="700" fill="#123a5e">MiFirma</text><text x="52" y="47" font-family="'Plus Jakarta Sans',system-ui,sans-serif" font-size="13.5" font-weight="500" fill="#0aa2b0">New Generation</text></svg></div>
-      <div class="seg">
-        <button class="seg-b" onclick="irTipo('empresa')" data-i18n="ent.seg.empresa">Empresa</button>
-        <button class="seg-b" onclick="irTipo('estudio')" data-i18n="ent.seg.estudio">Estudio</button>
-        <button class="seg-b active" onclick="irTipo('oferente')" data-i18n="ent.seg.oferente">Oferente</button>
-      </div>
-      <h1 data-i18n="ent.ofe.login.h1">Ingresá como oferente</h1>
-      <p class="lead" data-i18n="ent.ofe.login.lead">Gestioná tus ofertas para los empleados: publicidad, ventas o productos financieros.</p>
-      <label for="olEmail" data-i18n="ent.lbl.email">Email</label>
-      <input id="olEmail" type="email" autocomplete="username" placeholder="vos@oferente.com" data-i18n-ph="ent.ph.emailOfe">
-      <label for="olPass" data-i18n="ent.lbl.pass">Contraseña</label>
-      <input id="olPass" type="password" autocomplete="current-password" placeholder="••••••••">
-      <button class="primary" id="btnOfeLogin" onclick="loginOfe()" data-i18n="ent.btn.ingresar">Ingresar</button>
-      <div class="msg" id="ofeLoginMsg"></div>
-      <div class="foot"><button class="link" onclick="verOfeReset()" data-i18n="ent.olvide">¿Olvidaste tu contraseña?</button></div>
-      <div class="foot"><span data-i18n="ent.sinCuenta">¿No tenés cuenta?</span> <button class="link" onclick="verOfeRegistro()" data-i18n="ent.creaOferente">Sumate como oferente</button></div>
-      <div class="home"><a href="/" data-i18n="ent.volverInicio">← Volver al inicio</a></div>
-    </div>
-
-    <!-- ===== OFERENTE · ELEGIR ===== -->
-    <div class="card hidden" id="vOfeElegir">
-      <div class="brand"><svg viewBox="0 0 272 60" role="img" aria-label="MiFirma"><rect x="0" y="14" width="36" height="6.5" rx="3.25" fill="#123a5e"/><rect x="0" y="25" width="23" height="6.5" rx="3.25" fill="#0aa2b0"/><rect x="0" y="36" width="31" height="6.5" rx="3.25" fill="#123a5e"/><text x="52" y="26" font-family="'Plus Jakarta Sans',system-ui,sans-serif" font-size="25" font-weight="700" fill="#123a5e">MiFirma</text><text x="52" y="47" font-family="'Plus Jakarta Sans',system-ui,sans-serif" font-size="13.5" font-weight="500" fill="#0aa2b0">New Generation</text></svg></div>
-      <h1 data-i18n="ent.ofe.elegir.h1">¿A qué cuenta querés entrar?</h1>
-      <p class="lead" data-i18n="ent.ofe.elegir.lead">Tu email está en más de un oferente. Elegí con cuál iniciar sesión.</p>
-      <div id="ofeElegirLista"></div>
-      <div class="msg" id="ofeElegirMsg"></div>
-      <div class="foot"><button class="link" onclick="verOfeLogin()" data-i18n="ent.volver">Volver</button></div>
-    </div>
-
-    <!-- ===== OFERENTE · REGISTRO ===== -->
-    <div class="card hidden" id="vOfeRegistro">
-      <div class="brand"><svg viewBox="0 0 272 60" role="img" aria-label="MiFirma"><rect x="0" y="14" width="36" height="6.5" rx="3.25" fill="#123a5e"/><rect x="0" y="25" width="23" height="6.5" rx="3.25" fill="#0aa2b0"/><rect x="0" y="36" width="31" height="6.5" rx="3.25" fill="#123a5e"/><text x="52" y="26" font-family="'Plus Jakarta Sans',system-ui,sans-serif" font-size="25" font-weight="700" fill="#123a5e">MiFirma</text><text x="52" y="47" font-family="'Plus Jakarta Sans',system-ui,sans-serif" font-size="13.5" font-weight="500" fill="#0aa2b0">New Generation</text></svg></div>
-      <div class="seg">
-        <button class="seg-b" onclick="irTipo('empresa')" data-i18n="ent.seg.empresa">Empresa</button>
-        <button class="seg-b" onclick="irTipo('estudio')" data-i18n="ent.seg.estudio">Estudio</button>
-        <button class="seg-b active" onclick="irTipo('oferente')" data-i18n="ent.seg.oferente">Oferente</button>
-      </div>
-      <h1 data-i18n="ent.ofe.reg.h1">Sumate como oferente</h1>
-      <p class="lead" data-i18n="ent.ofe.reg.lead">Damos de alta tu cuenta. Verificamos tu email con un código; el equipo la revisa antes de publicar.</p>
-      <label for="orNombre" data-i18n="ent.ofe.reg.nombre">Nombre del oferente</label>
-      <input id="orNombre" placeholder="Banco / Financiera / Comercio…" data-i18n-ph="ent.ofe.reg.nombrePh">
-      <div class="row2">
-        <div><label for="orTipo" data-i18n="ent.ofe.reg.tipo">Tipo</label><select id="orTipo"><option value="banco" data-i18n="ent.ofe.tipo.banco">Banco</option><option value="financiera" data-i18n="ent.ofe.tipo.financiera">Financiera</option><option value="comercio" data-i18n="ent.ofe.tipo.comercio">Comercio</option><option value="anunciante" data-i18n="ent.ofe.tipo.anunciante">Anunciante</option></select></div>
-        <div><label for="orPais" data-i18n="ent.lbl.pais">País</label><select id="orPais"><option value="UY">Uruguay</option><option value="PY">Paraguay</option></select></div>
-      </div>
-      <label for="orAdmin" data-i18n="ent.ofe.reg.tuNombre">Tu nombre</label>
-      <input id="orAdmin" placeholder="Nombre y apellido" data-i18n-ph="ent.ofe.reg.tuNombrePh">
-      <label for="orEmail" data-i18n="ent.lbl.email">Email</label>
-      <input id="orEmail" type="email" autocomplete="username" placeholder="vos@oferente.com" data-i18n-ph="ent.ph.emailOfe">
-      <label for="orPass" data-i18n="ent.reg.pass">Contraseña (mínimo 8 caracteres)</label>
-      <input id="orPass" type="password" autocomplete="new-password" placeholder="••••••••">
-      <label for="orPass2" data-i18n="ent.reg.pass2">Repetir contraseña</label>
-      <input id="orPass2" type="password" autocomplete="new-password" placeholder="••••••••">
-      <button class="primary" id="btnOfeRegistro" onclick="registrarOfe()" data-i18n="ent.ofe.reg.crear">Crear cuenta</button>
-      <div class="msg" id="ofeRegMsg"></div>
-      <div class="foot"><span data-i18n="ent.yaCuenta">¿Ya tenés cuenta?</span> <button class="link" onclick="verOfeLogin()" data-i18n="ent.iniciaSesion">Iniciá sesión</button></div>
-      <div class="home"><a href="/" data-i18n="ent.volverInicio">← Volver al inicio</a></div>
-    </div>
-
-    <!-- ===== OFERENTE · OTP ===== -->
-    <div class="card hidden" id="vOfeOtp">
-      <div class="brand"><svg viewBox="0 0 272 60" role="img" aria-label="MiFirma"><rect x="0" y="14" width="36" height="6.5" rx="3.25" fill="#123a5e"/><rect x="0" y="25" width="23" height="6.5" rx="3.25" fill="#0aa2b0"/><rect x="0" y="36" width="31" height="6.5" rx="3.25" fill="#123a5e"/><text x="52" y="26" font-family="'Plus Jakarta Sans',system-ui,sans-serif" font-size="25" font-weight="700" fill="#123a5e">MiFirma</text><text x="52" y="47" font-family="'Plus Jakarta Sans',system-ui,sans-serif" font-size="13.5" font-weight="500" fill="#0aa2b0">New Generation</text></svg></div>
-      <h1 data-i18n="ent.ofe.otp.h1">Verificá tu email</h1>
-      <p class="lead" id="ofeOtpLead" data-i18n="ent.ofe.otp.lead">Te enviamos un código de 6 dígitos a tu correo.</p>
-      <label for="ofeOtpCode" data-i18n="ent.codigo">Código</label>
-      <input id="ofeOtpCode" class="code" inputmode="numeric" maxlength="6" placeholder="000000">
-      <button class="primary" id="btnOfeOtp" onclick="verificarOfe()" data-i18n="ent.verificarEntrar">Verificar y entrar</button>
-      <div class="msg" id="ofeOtpMsg"></div>
-      <div class="foot"><button class="link" onclick="reenviarOfe()" data-i18n="ent.reenviar">Reenviar código</button> · <button class="link" onclick="verOfeRegistro()" data-i18n="ent.volver">Volver</button></div>
-    </div>
-
-    <!-- ===== OFERENTE · OLVIDÉ CONTRASEÑA ===== -->
-    <div class="card hidden" id="vOfeReset">
-      <div class="brand"><svg viewBox="0 0 272 60" role="img" aria-label="MiFirma"><rect x="0" y="14" width="36" height="6.5" rx="3.25" fill="#123a5e"/><rect x="0" y="25" width="23" height="6.5" rx="3.25" fill="#0aa2b0"/><rect x="0" y="36" width="31" height="6.5" rx="3.25" fill="#123a5e"/><text x="52" y="26" font-family="'Plus Jakarta Sans',system-ui,sans-serif" font-size="25" font-weight="700" fill="#123a5e">MiFirma</text><text x="52" y="47" font-family="'Plus Jakarta Sans',system-ui,sans-serif" font-size="13.5" font-weight="500" fill="#0aa2b0">New Generation</text></svg></div>
-      <h1 data-i18n="ent.olvide">¿Olvidaste tu contraseña?</h1>
-      <p class="lead" data-i18n="ent.resetLead">Te mandamos un enlace para elegir una nueva. Por seguridad, solo se envía si la cuenta existe.</p>
-      <label for="ofrEmail" data-i18n="ent.lbl.email">Email</label>
-      <input id="ofrEmail" type="email" autocomplete="username" placeholder="vos@oferente.com" data-i18n-ph="ent.ph.emailOfe">
-      <button class="primary" id="btnOfeReset" onclick="enviarResetOfe()" data-i18n="ent.enviarEnlace">Enviar enlace</button>
-      <div class="msg" id="ofeResetMsg"></div>
-      <div class="foot"><button class="link" onclick="verOfeLogin()" data-i18n="ent.volver">Volver</button></div>
-    </div>
-
-    <!-- ===== OFERENTE · NUEVA CONTRASEÑA ===== -->
-    <div class="card hidden" id="vOfeResetConfirm">
-      <div class="brand"><svg viewBox="0 0 272 60" role="img" aria-label="MiFirma"><rect x="0" y="14" width="36" height="6.5" rx="3.25" fill="#123a5e"/><rect x="0" y="25" width="23" height="6.5" rx="3.25" fill="#0aa2b0"/><rect x="0" y="36" width="31" height="6.5" rx="3.25" fill="#123a5e"/><text x="52" y="26" font-family="'Plus Jakarta Sans',system-ui,sans-serif" font-size="25" font-weight="700" fill="#123a5e">MiFirma</text><text x="52" y="47" font-family="'Plus Jakarta Sans',system-ui,sans-serif" font-size="13.5" font-weight="500" fill="#0aa2b0">New Generation</text></svg></div>
-      <h1 data-i18n="ent.ofe.rc.h1">Elegí una nueva contraseña</h1>
-      <p class="lead" data-i18n="ent.ofe.rc.lead">Para tu cuenta de oferente.</p>
-      <label for="ofcPass" data-i18n="ent.est.rc.pass">Nueva contraseña (mínimo 8 caracteres)</label>
-      <input id="ofcPass" type="password" autocomplete="new-password" placeholder="••••••••">
-      <label for="ofcPass2" data-i18n="ent.reg.pass2">Repetir contraseña</label>
-      <input id="ofcPass2" type="password" autocomplete="new-password" placeholder="••••••••">
-      <button class="primary" id="btnOfeResetConfirm" onclick="confirmarResetOfeUI()" data-i18n="ent.est.rc.guardar">Guardar y entrar</button>
-      <div class="msg" id="ofeResetConfirmMsg"></div>
-      <div class="foot"><button class="link" onclick="verOfeLogin()" data-i18n="ent.volverLogin">Volver al login</button></div>
-    </div>
-
+<header>
+  <div class="marca">
+    <a href="/"><img src="/logo.svg" alt="MiFirma" /></a>
+    <a class="volver" href="/">← <span data-t="volver">Volver al sitio</span></a>
   </div>
+  <div class="lang" role="group">
+    <button onclick="idioma('es')" data-l="es">ES</button>
+    <button onclick="idioma('pt')" data-l="pt">PT</button>
+    <button onclick="idioma('en')" data-l="en">EN</button>
+  </div>
+</header>
 
-  <script>
-    var VISTAS = ['vEmpLogin','vEmpElegirEmpresa','vEmpReset','vEmpOtp','vEmpElegir','vEmpRegistro','vEstLogin','vEstElegir','vEstReset','vEstResetConfirm','vEstRegistro','vEstOtp','vOfeLogin','vOfeElegir','vOfeRegistro','vOfeOtp','vOfeReset','vOfeResetConfirm'];
-    var DESAFIO_OTP = null;
-    var REG_EMAIL_EST = '';
-    var REG_EMAIL_OFE = '';
-    var RESET_TOKEN_EST = '';
-    var RESET_TOKEN_OFE = '';
-    function $(id){ return document.getElementById(id); }
-    function esc(s){ return String(s==null?'':s).replace(/[&<>"]/g, function(c){ return ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'})[c]; }); }
-    function vista(v){ VISTAS.forEach(function(x){ $(x).classList.toggle('hidden', x!==v); }); window.scrollTo(0,0); }
+<main>
 
-    // ---- i18n ----
-    var I18N = {};
-    function ti(k){ return (I18N && I18N[k] != null) ? I18N[k] : k; }
-    function aplicarI18n(){
-      document.querySelectorAll('[data-i18n]').forEach(function(el){ var k=el.dataset.i18n; if(I18N[k]!=null) el.textContent=I18N[k]; });
-      document.querySelectorAll('[data-i18n-ph]').forEach(function(el){ var k=el.dataset.i18nPh; if(I18N[k]!=null) el.placeholder=I18N[k]; });
-    }
-    function idiomaActual(){
-      try { return localStorage.getItem('png_lang') || (navigator.language||'es').slice(0,2); } catch(e){ return 'es'; }
-    }
-    async function cargarI18n(lang){
-      try { var r = await fetch('/i18n?idioma=' + encodeURIComponent(lang)); I18N = (await r.json()).ui || {}; } catch(e){ I18N = {}; }
-      aplicarI18n();
-    }
-    function cambiarIdioma(lang){
-      try { localStorage.setItem('png_lang', lang); } catch(e){}
-      cargarI18n(lang);
-    }
+  <!-- ============ 1. Contraseña ============ -->
+  <section id="vLogin" class="card">
+    <h1 data-t="login.h1">Entrar a MiFirma</h1>
+    <p class="lead" data-t="login.lead">Con tu correo y tu contraseña.</p>
 
-    function deviceId(){
-      try {
-        var k = 'png_device_id';
-        var v = localStorage.getItem(k);
-        if (!v){ v = (crypto.randomUUID ? crypto.randomUUID() : ('d'+Date.now()+Math.random().toString(16).slice(2))); localStorage.setItem(k, v); }
-        return v;
-      } catch(e){ return ''; }
-    }
+    <label for="email" data-t="correo">Correo</label>
+    <input id="email" type="email" autocomplete="username" placeholder="vos@empresa.com" />
 
-    async function api(path, method, body){
-      var opt = { method: method||'GET', credentials:'same-origin', headers:{} };
-      if (body){ opt.headers['Content-Type']='application/json'; opt.body=JSON.stringify(body); }
-      var r = await fetch(path, opt);
-      var txt = await r.text();
-      var data; try { data = txt ? JSON.parse(txt) : {}; } catch(e){ data = { error: txt }; }
-      if (!r.ok) throw new Error(data.error || data.message || ('HTTP '+r.status));
-      return data;
-    }
+    <label for="password" data-t="password">Contraseña</label>
+    <input id="password" type="password" autocomplete="current-password" onkeydown="if(event.key==='Enter')login()" />
 
-    // ---- Navegación entre tipos / modos ----
-    function irTipo(t){ DESAFIO_OTP=null; vista(t==='estudio' ? 'vEstLogin' : t==='oferente' ? 'vOfeLogin' : 'vEmpLogin'); }
-    function verEmpRegistro(){ $('empRegMsg').innerHTML=''; cargarRubros(); vista('vEmpRegistro'); }
-    function verEmpLogin(){ $('empLoginMsg').innerHTML=''; vista('vEmpLogin'); }
-    function volverEmpLogin(){ DESAFIO_OTP=null; $('empLoginMsg').innerHTML=''; vista('vEmpLogin'); }
-    function verEstRegistro(){ $('estRegMsg').innerHTML=''; vista('vEstRegistro'); }
-    function verEstLogin(){ $('estLoginMsg').innerHTML=''; vista('vEstLogin'); }
+    <button class="primary" id="btnLogin" onclick="login()" data-t="btn.entrar">Entrar</button>
+    <div id="msgLogin"></div>
 
-    // =================== EMPRESA ===================
-    function textoDestinoOtp(j){
-      var canal = j.canal === 'sms' ? 'SMS' : j.canal === 'whatsapp' ? 'WhatsApp' : 'email';
-      var destino = j.destino_masked || j.email_masked || '';
-      var t = destino ? ti('ent.otp.destinoCon') : ti('ent.otp.destinoSin');
-      return t.replace('{canal}', canal).replace('{destino}', destino);
-    }
-    function sesionEmpresa(j){
-      // La sesión ya quedó en la cookie httpOnly (sess_emp) que setea el endpoint de login;
-      // no guardamos el token en storage. /app resuelve la sesión por cookie con /me.
-      window.location.href = '/app';
-    }
-    function mostrarOtpEmpresa(j){
-      if (j.challenge) DESAFIO_OTP = j.challenge; // al elegir canal la respuesta no trae challenge: se mantiene el actual
-      $('empOtpDestino').textContent = textoDestinoOtp(j);
-      $('empOtpMsg').innerHTML=''; $('empOtpCode').value='';
-      vista('vEmpOtp'); $('empOtpCode').focus();
-    }
-    function mostrarElegirEmpresa(j){
-      DESAFIO_OTP = j.challenge;
-      var pref = ' (preferido)';
-      $('btnCanalEmail').textContent = 'Email · ' + (j.email_masked || '') + (j.canal_pref==='email' ? pref : '');
-      var telLabel = j.canal_tel === 'whatsapp' ? 'WhatsApp' : 'SMS';
-      var bt = $('btnCanalTel');
-      bt.textContent = telLabel + ' · ' + (j.tel_masked || '') + (j.canal_pref!=='email' ? pref : '');
-      bt.dataset.canal = j.canal_tel || 'sms';
-      $('empElegirMsg').innerHTML='';
-      vista('vEmpElegir');
-    }
-    async function loginEmpresa(){
-      var email = $('elEmail').value.trim(), password = $('elPass').value;
-      if (!email || !password){ $('empLoginMsg').innerHTML='<span class="off">'+ti('ent.val.emailPass')+'</span>'; return; }
-      $('btnEmpLogin').disabled=true; $('empLoginMsg').textContent=ti('ent.st.verificando');
-      try {
-        var j = await api('/auth/login','POST',{ email:email, password:password, device_id:deviceId() });
-        $('empLoginMsg').textContent=''; $('elPass').value='';
-        aplicarRespuestaLoginEmp(j);
-      } catch(e){ $('empLoginMsg').innerHTML='<span class="off">'+esc(e.message)+'</span>'; }
-      $('btnEmpLogin').disabled=false;
-    }
+    <div class="foot">
+      <button class="link" onclick="ver('vReset')" data-t="olvide">¿Olvidaste tu contraseña?</button>
+      <br /><br />
+      <span data-t="sinCuenta">¿Tu empresa todavía no tiene cuenta?</span>
+      <button class="link" onclick="ver('vCrear')" data-t="crear">Creala acá</button>
+    </div>
+  </section>
 
-    function aplicarRespuestaLoginEmp(j){
-      if (j.tipo === 'elegir_empresa'){ mostrarElegirEmpresaLogin(j); }
-      else if (j.tipo === 'otp_elegir'){ mostrarElegirEmpresa(j); }
-      else if (j.tipo === 'otp'){ mostrarOtpEmpresa(j); }
-      else { sesionEmpresa(j); }
-    }
+  <!-- ============ 2a. Elegir canal ============ -->
+  <section id="vCanal" class="card hidden">
+    <h1 data-t="canal.h1">¿Por dónde te mandamos el código?</h1>
+    <p class="lead" data-t="canal.lead">Es un equipo nuevo, así que verificamos que seas vos.</p>
+    <button class="opcion" onclick="enviarCodigo('email')">
+      <b data-t="canal.correo">Por correo</b><span id="canalEmail"></span>
+    </button>
+    <button class="opcion" onclick="enviarCodigo(CANAL_TEL)">
+      <b id="canalTelTitulo">Por SMS</b><span id="canalTel"></span>
+    </button>
+    <div id="msgCanal"></div>
+    <div class="foot"><button class="link" onclick="volverAlLogin()" data-t="volver2">Volver</button></div>
+  </section>
 
-    var DESAFIO_EMPRESA = null;
-    function mostrarElegirEmpresaLogin(j){
-      DESAFIO_EMPRESA = j.desafio;
-      var cont = $('empElegirEmpLista');
-      cont.innerHTML = (j.opciones||[]).map(function(o){
-        return '<button class="ghost" style="width:100%;text-align:left;margin-bottom:8px" onclick="elegirEmpresaUI(\''+esc(o.cuenta_id)+'\')">'+esc(o.empresa_nombre||'Empresa')+'</button>';
-      }).join('');
-      $('empElegirEmpMsg').innerHTML='';
-      vista('vEmpElegirEmpresa');
-    }
-    async function elegirEmpresaUI(cuentaId){
-      if (!DESAFIO_EMPRESA){ vista('vEmpLogin'); return; }
-      $('empElegirEmpMsg').textContent=ti('ent.st.entrando');
-      try { var j = await api('/auth/login/elegir-empresa','POST',{ desafio:DESAFIO_EMPRESA, cuenta_id:cuentaId, device_id:deviceId() }); $('empElegirEmpMsg').textContent=''; aplicarRespuestaLoginEmp(j); }
-      catch(e){ $('empElegirEmpMsg').innerHTML='<span class="off">'+esc(e.message)+'</span>'; }
-    }
-    async function verificarOtpEmpresa(){
-      var code = ($('empOtpCode').value||'').trim();
-      if (!/^[0-9]{4,8}$/.test(code)){ $('empOtpMsg').innerHTML='<span class="off">'+ti('ent.val.codigoInvalido')+'</span>'; return; }
-      $('btnEmpOtp').disabled=true; $('empOtpMsg').textContent=ti('ent.st.verificando');
-      try { var j = await api('/auth/otp','POST',{ challenge:DESAFIO_OTP, code:code }); $('empOtpMsg').textContent=''; sesionEmpresa(j); }
-      catch(e){ $('empOtpMsg').innerHTML='<span class="off">'+esc(e.message)+'</span>'; }
-      $('btnEmpOtp').disabled=false;
-    }
-    async function reenviarOtpEmpresa(){
-      $('empOtpMsg').textContent=ti('ent.st.reenviando');
-      try { var j = await api('/auth/otp/reenviar','POST',{ challenge:DESAFIO_OTP }); $('empOtpDestino').textContent=textoDestinoOtp(j); $('empOtpMsg').innerHTML='<span class="ok">'+ti('ent.st.codigoReenviado')+'</span>'; }
-      catch(e){ $('empOtpMsg').innerHTML='<span class="off">'+esc(e.message)+'</span>'; }
-    }
-    async function elegirCanalEmpresa(canal){
-      $('empElegirMsg').textContent=ti('ent.st.enviando');
-      try { var j = await api('/auth/otp/elegir','POST',{ challenge:DESAFIO_OTP, canal:canal }); mostrarOtpEmpresa(j); }
-      catch(e){ $('empElegirMsg').innerHTML='<span class="off">'+esc(e.message)+'</span>'; }
-    }
+  <!-- ============ 2b. Código ============ -->
+  <section id="vOtp" class="card hidden">
+    <h1 data-t="otp.h1">Escribí el código</h1>
+    <p class="lead" id="otpDestino"></p>
+    <label for="codigo" data-t="otp.codigo">Código de 6 dígitos</label>
+    <input id="codigo" inputmode="numeric" maxlength="6" autocomplete="one-time-code"
+           onkeydown="if(event.key==='Enter')verificarCodigo()" />
+    <button class="primary" id="btnOtp" onclick="verificarCodigo()" data-t="btn.verificar">Verificar</button>
+    <div id="msgOtp"></div>
+    <div class="foot">
+      <button class="link" onclick="reenviar()" data-t="otp.reenviar">Enviar otro código</button>
+      &nbsp;·&nbsp;
+      <button class="link" onclick="volverAlLogin()" data-t="volver2">Volver</button>
+    </div>
+  </section>
 
-    var RUBROS_CARGADOS = false;
-    async function cargarRubros(){
-      if (RUBROS_CARGADOS) return;
-      try {
-        var d = await api('/industrias-publicas');
-        var sel = $('erRubro'); var arr = d.industrias || [];
-        for (var i=0;i<arr.length;i++){ var o=document.createElement('option'); o.value=arr[i].id; o.textContent=arr[i].nombre; sel.appendChild(o); }
-        RUBROS_CARGADOS = true;
-      } catch(e){ /* si falla, el campo queda solo con el placeholder */ }
-    }
-    async function registrarEmpresa(){
-      var b = {
-        empresa: $('erNombre').value.trim(),
-        pais: $('erPais').value,
-        industria_id: $('erRubro').value,
-        razon_social: $('erRazon').value.trim() || undefined,
-        id_fiscal: $('erIdFiscal').value.trim() || undefined,
-        num_seguridad_social: $('erSegSoc').value.trim() || undefined,
-        domicilio: $('erDomicilio').value.trim() || undefined,
-        device_id: deviceId(),
-        admin: {
-          nombre: $('erAdminNombre').value.trim(),
-          email: $('erAdminEmail').value.trim(),
-          documento: $('erAdminDoc').value.trim(),
-          password: $('erAdminPass').value
-        }
-      };
-      if (!b.empresa){ $('empRegMsg').innerHTML='<span class="off">'+ti('ent.val.nombreEmpresa')+'</span>'; return; }
-      if (!b.industria_id){ $('empRegMsg').innerHTML='<span class="off">'+ti('ent.val.rubro')+'</span>'; return; }
-      if (!b.admin.nombre || !b.admin.email || !b.admin.documento || !b.admin.password){ $('empRegMsg').innerHTML='<span class="off">'+ti('ent.val.datosAdmin')+'</span>'; return; }
-      if (b.admin.password.length < 8){ $('empRegMsg').innerHTML='<span class="off">'+ti('ent.val.pass8')+'</span>'; return; }
-      if (b.admin.password !== $('erAdminPass2').value){ $('empRegMsg').innerHTML='<span class="off">'+ti('ent.val.passNoCoincide')+'</span>'; return; }
-      $('btnEmpRegistro').disabled=true; $('empRegMsg').textContent=ti('ent.st.creando');
-      try { var j = await api('/auth/registro-dev','POST',b); $('empRegMsg').textContent=''; sesionEmpresa(j); }
-      catch(e){ $('empRegMsg').innerHTML='<span class="off">'+esc(e.message)+'</span>'; }
-      $('btnEmpRegistro').disabled=false;
-    }
+  <!-- ============ 3. Elegir cuenta ============
+       Aparece DESPUÉS de probar la identidad, no antes: en MiFirma la identidad
+       es global, así que primero se prueba quién sos y después a dónde entrás. -->
+  <section id="vCuenta" class="card hidden">
+    <h1 data-t="cuenta.h1">¿A qué cuenta querés entrar?</h1>
+    <p class="lead" data-t="cuenta.lead">Tenés acceso a más de una.</p>
+    <div id="listaCuentas"></div>
+    <div id="msgCuenta"></div>
+  </section>
 
-    function verEmpReset(){ $('empResetMsg').innerHTML=''; vista('vEmpReset'); }
-    async function enviarResetEmpresa(){
-      var email = $('rsEmail').value.trim();
-      if (!email){ $('empResetMsg').innerHTML='<span class="off">'+ti('ent.val.email')+'</span>'; return; }
-      $('btnEmpReset').disabled=true; $('empResetMsg').textContent=ti('ent.st.enviando');
-      try { await api('/auth/reset/solicitar','POST',{ email:email }); $('empResetMsg').innerHTML='<span class="ok">'+ti('ent.st.resetEnviado')+'</span>'; }
-      catch(e){ $('empResetMsg').innerHTML='<span class="off">'+esc(e.message)+'</span>'; }
-      $('btnEmpReset').disabled=false;
-    }
+  <!-- ============ Crear cuenta de empresa ============ -->
+  <section id="vCrear" class="card ancha hidden">
+    <h1 data-t="crear.h1">Creá la cuenta de tu empresa</h1>
+    <p class="lead" data-t="crear.lead">La creás vos y después sumás a tu equipo con el rol que le corresponda a cada uno.</p>
 
-    // =================== ESTUDIO ===================
-    function sesionEstudio(d){
-      sessionStorage.setItem('estudio_token', d.token);
-      window.location.href = '/estudio';
-    }
+    <label for="cNombre" data-t="crear.nombre">Nombre de la empresa</label>
+    <input id="cNombre" placeholder="Ferretería del Centro" />
+    <p class="pista" data-t="crear.nombre.p">Es el que van a ver tus firmantes en el correo.</p>
 
-    var DESAFIO_ESTUDIO = null;
-    function mostrarElegirEstudio(d){
-      DESAFIO_ESTUDIO = d.desafio;
-      var cont = $('estElegirLista');
-      cont.innerHTML = (d.opciones||[]).map(function(o){
-        return '<button class="ghost" style="width:100%;text-align:left;margin-bottom:8px" onclick="elegirEstudioUI(\''+esc(o.usuarioEstudioId)+'\')">'+esc(o.estudioNombre||'Estudio')+'</button>';
-      }).join('');
-      $('estElegirMsg').innerHTML='';
-      vista('vEstElegir');
-    }
-    async function elegirEstudioUI(usuarioEstudioId){
-      if (!DESAFIO_ESTUDIO){ verEstLogin(); return; }
-      $('estElegirMsg').textContent=ti('ent.st.entrando');
-      try { var d = await api('/estudio/login/elegir','POST',{ desafio:DESAFIO_ESTUDIO, usuario_estudio_id:usuarioEstudioId }); sesionEstudio(d); }
-      catch(e){ $('estElegirMsg').innerHTML='<span class="off">'+esc(e.message)+'</span>'; }
-    }
-    async function loginEstudio(){
-      var email = $('slEmail').value.trim(), pass = $('slPass').value;
-      if (!email || !pass){ $('estLoginMsg').innerHTML='<span class="off">'+ti('ent.val.emailPass')+'</span>'; return; }
-      $('btnEstLogin').disabled=true; $('estLoginMsg').textContent=ti('ent.st.verificando');
-      try { var d = await api('/estudio/login','POST',{ email:email, password:pass }); $('estLoginMsg').textContent=''; $('slPass').value=''; if (d && d.tipo==='elegir'){ mostrarElegirEstudio(d); } else { sesionEstudio(d); } }
-      catch(e){ $('estLoginMsg').innerHTML='<span class="off">'+esc(e.message)+'</span>'; }
-      $('btnEstLogin').disabled=false;
-    }
-    async function registrarEstudio(){
-      var body = {
-        nombre_estudio: $('srEstudio').value.trim(),
-        pais: $('srPais').value,
-        nombre_admin: $('srNombre').value.trim(),
-        email: $('srEmail').value.trim(),
-        password: $('srPass').value
-      };
-      if (!body.nombre_estudio || !body.nombre_admin || !body.email || !body.password){ $('estRegMsg').innerHTML='<span class="off">'+ti('ent.val.todosCampos')+'</span>'; return; }
-      if (body.password.length < 8){ $('estRegMsg').innerHTML='<span class="off">'+ti('ent.val.pass8')+'</span>'; return; }
-      if (body.password !== $('srPass2').value){ $('estRegMsg').innerHTML='<span class="off">'+ti('ent.val.passNoCoincide')+'</span>'; return; }
-      $('btnEstRegistro').disabled=true; $('estRegMsg').textContent=ti('ent.st.creando');
-      try {
-        await api('/estudio/registro','POST',body);
-        REG_EMAIL_EST = body.email;
-        $('estRegMsg').textContent='';
-        $('estOtpLead').textContent = 'Te enviamos un código de 6 dígitos a '+REG_EMAIL_EST+'.';
-        $('estOtpCode').value=''; $('estOtpMsg').innerHTML='';
-        vista('vEstOtp'); $('estOtpCode').focus();
-      } catch(e){ $('estRegMsg').innerHTML='<span class="off">'+esc(e.message)+'</span>'; }
-      $('btnEstRegistro').disabled=false;
-    }
-    async function verificarEstudio(){
-      var codigo = $('estOtpCode').value.trim();
-      if (!codigo){ $('estOtpMsg').innerHTML='<span class="off">'+ti('ent.val.ingresaCodigo')+'</span>'; return; }
-      $('btnEstOtp').disabled=true; $('estOtpMsg').textContent=ti('ent.st.verificando');
-      try { var d = await api('/estudio/registro/verificar','POST',{ email:REG_EMAIL_EST, codigo:codigo }); $('estOtpMsg').textContent=''; sesionEstudio(d); }
-      catch(e){ $('estOtpMsg').innerHTML='<span class="off">'+esc(e.message)+'</span>'; }
-      $('btnEstOtp').disabled=false;
-    }
-    async function reenviarEstudio(){
-      if (!REG_EMAIL_EST) return;
-      $('estOtpMsg').textContent=ti('ent.st.reenviando');
-      try { await api('/estudio/registro/reenviar','POST',{ email:REG_EMAIL_EST }); $('estOtpMsg').innerHTML='<span class="ok">'+ti('ent.st.codigoReenviado')+'</span>'; }
-      catch(e){ $('estOtpMsg').innerHTML='<span class="off">'+esc(e.message)+'</span>'; }
-    }
+    <div class="dos">
+      <div>
+        <label for="cPais" data-t="crear.pais">País</label>
+        <select id="cPais">
+          <option value="UY">🇺🇾 Uruguay</option>
+          <option value="PY">🇵🇾 Paraguay</option>
+          <option value="BR">🇧🇷 Brasil</option>
+        </select>
+      </div>
+      <div>
+        <label for="cFiscal" data-t="crear.fiscal">RUT / RUC / CNPJ</label>
+        <input id="cFiscal" placeholder="21 555 3300 12" />
+      </div>
+    </div>
+    <p class="pista" data-t="crear.pais.p">El país define qué ley y qué certificadores se aplican. No se puede cambiar después.</p>
 
-    function verEstReset(){ $('estResetMsg').innerHTML=''; vista('vEstReset'); }
-    async function enviarResetEstudio(){
-      var email = $('esrEmail').value.trim();
-      if (!email){ $('estResetMsg').innerHTML='<span class="off">'+ti('ent.val.email')+'</span>'; return; }
-      $('btnEstReset').disabled=true; $('estResetMsg').textContent=ti('ent.st.enviando');
-      try { await api('/estudio/reset/solicitar','POST',{ email:email }); $('estResetMsg').innerHTML='<span class="ok">'+ti('ent.st.resetEnviado')+'</span>'; }
-      catch(e){ $('estResetMsg').innerHTML='<span class="off">'+esc(e.message)+'</span>'; }
-      $('btnEstReset').disabled=false;
-    }
-    async function confirmarResetEstudioUI(){
-      var p1 = $('escPass').value, p2 = $('escPass2').value;
-      if (p1.length < 8){ $('estResetConfirmMsg').innerHTML='<span class="off">'+ti('ent.val.pass8')+'</span>'; return; }
-      if (p1 !== p2){ $('estResetConfirmMsg').innerHTML='<span class="off">'+ti('ent.val.passNoCoincide')+'</span>'; return; }
-      $('btnEstResetConfirm').disabled=true; $('estResetConfirmMsg').textContent=ti('ent.st.guardando');
-      try {
-        await api('/estudio/reset/confirmar','POST',{ token:RESET_TOKEN_EST, password:p1 });
-        $('estResetConfirmMsg').innerHTML='<span class="ok">'+ti('ent.st.passActualizada')+'</span>';
-        try { history.replaceState(null,'','/entrar'); } catch(e){}
-        setTimeout(function(){ vista('vEstLogin'); }, 1200);
-      } catch(e){ $('estResetConfirmMsg').innerHTML='<span class="off">'+esc(e.message)+'</span>'; }
-      $('btnEstResetConfirm').disabled=false;
-    }
+    <label for="cRazon" data-t="crear.razon">Razón social <span style="font-weight:400;color:var(--mut)" data-t="crear.opcional">(opcional)</span></label>
+    <input id="cRazon" placeholder="COMERCIAL DEL CENTRO S.R.L." />
 
-    // =================== OFERENTE ===================
-    function verOfeLogin(){ $('ofeLoginMsg').innerHTML=''; vista('vOfeLogin'); }
-    function verOfeRegistro(){ $('ofeRegMsg').innerHTML=''; vista('vOfeRegistro'); }
-    function sesionOferente(d){
-      sessionStorage.setItem('oferente_token', d.token);
-      window.location.href = '/oferente';
-    }
+    <div class="foot" style="border:0;padding:0;margin-top:26px">
+      <b style="color:var(--ink);font-size:14px" data-t="crear.vos">Tu usuario de administrador</b>
+    </div>
 
-    var DESAFIO_OFERENTE = null;
-    function mostrarElegirOfe(d){
-      DESAFIO_OFERENTE = d.desafio;
-      var cont = $('ofeElegirLista');
-      cont.innerHTML = (d.opciones||[]).map(function(o){
-        return '<button class="ghost" style="width:100%;text-align:left;margin-bottom:8px" onclick="elegirOfeUI(\''+esc(o.usuarioOferenteId)+'\')">'+esc(o.oferenteNombre||'Oferente')+'</button>';
-      }).join('');
-      $('ofeElegirMsg').innerHTML='';
-      vista('vOfeElegir');
-    }
-    async function elegirOfeUI(usuarioOferenteId){
-      if (!DESAFIO_OFERENTE){ verOfeLogin(); return; }
-      $('ofeElegirMsg').textContent=ti('ent.st.entrando');
-      try { var d = await api('/oferente/login/elegir','POST',{ desafio:DESAFIO_OFERENTE, usuario_oferente_id:usuarioOferenteId }); sesionOferente(d); }
-      catch(e){ $('ofeElegirMsg').innerHTML='<span class="off">'+esc(e.message)+'</span>'; }
-    }
-    async function loginOfe(){
-      var email = $('olEmail').value.trim(), pass = $('olPass').value;
-      if (!email || !pass){ $('ofeLoginMsg').innerHTML='<span class="off">'+ti('ent.val.emailPass')+'</span>'; return; }
-      $('btnOfeLogin').disabled=true; $('ofeLoginMsg').textContent=ti('ent.st.verificando');
-      try { var d = await api('/oferente/login','POST',{ email:email, password:pass }); $('ofeLoginMsg').textContent=''; $('olPass').value=''; if (d && d.tipo==='elegir'){ mostrarElegirOfe(d); } else { sesionOferente(d); } }
-      catch(e){ $('ofeLoginMsg').innerHTML='<span class="off">'+esc(e.message)+'</span>'; }
-      $('btnOfeLogin').disabled=false;
-    }
-    async function registrarOfe(){
-      var body = {
-        nombre_oferente: $('orNombre').value.trim(),
-        tipo: $('orTipo').value,
-        pais: $('orPais').value,
-        nombre_admin: $('orAdmin').value.trim(),
-        email: $('orEmail').value.trim(),
-        password: $('orPass').value
-      };
-      if (!body.nombre_oferente || !body.nombre_admin || !body.email || !body.password){ $('ofeRegMsg').innerHTML='<span class="off">'+ti('ent.val.todosCampos')+'</span>'; return; }
-      if (body.password.length < 8){ $('ofeRegMsg').innerHTML='<span class="off">'+ti('ent.val.pass8')+'</span>'; return; }
-      if (body.password !== $('orPass2').value){ $('ofeRegMsg').innerHTML='<span class="off">'+ti('ent.val.passNoCoincide')+'</span>'; return; }
-      $('btnOfeRegistro').disabled=true; $('ofeRegMsg').textContent=ti('ent.st.creando');
-      try {
-        await api('/oferente/registro','POST',body);
-        REG_EMAIL_OFE = body.email;
-        $('ofeRegMsg').textContent='';
-        $('ofeOtpLead').textContent = ti('ent.ofe.otp.enviadoA').replace('{email}', REG_EMAIL_OFE);
-        $('ofeOtpCode').value=''; $('ofeOtpMsg').innerHTML='';
-        vista('vOfeOtp'); $('ofeOtpCode').focus();
-      } catch(e){ $('ofeRegMsg').innerHTML='<span class="off">'+esc(e.message)+'</span>'; }
-      $('btnOfeRegistro').disabled=false;
-    }
-    async function verificarOfe(){
-      var codigo = $('ofeOtpCode').value.trim();
-      if (!codigo){ $('ofeOtpMsg').innerHTML='<span class="off">'+ti('ent.val.ingresaCodigo')+'</span>'; return; }
-      $('btnOfeOtp').disabled=true; $('ofeOtpMsg').textContent=ti('ent.st.verificando');
-      try { var d = await api('/oferente/registro/verificar','POST',{ email:REG_EMAIL_OFE, codigo:codigo }); $('ofeOtpMsg').textContent=''; sesionOferente(d); }
-      catch(e){ $('ofeOtpMsg').innerHTML='<span class="off">'+esc(e.message)+'</span>'; }
-      $('btnOfeOtp').disabled=false;
-    }
-    async function reenviarOfe(){
-      if (!REG_EMAIL_OFE) return;
-      $('ofeOtpMsg').textContent=ti('ent.st.reenviando');
-      try { await api('/oferente/registro/reenviar','POST',{ email:REG_EMAIL_OFE }); $('ofeOtpMsg').innerHTML='<span class="ok">'+ti('ent.st.codigoReenviado')+'</span>'; }
-      catch(e){ $('ofeOtpMsg').innerHTML='<span class="off">'+esc(e.message)+'</span>'; }
-    }
+    <div class="dos">
+      <div>
+        <label for="cAdminNombre" data-t="crear.tuNombre">Tu nombre</label>
+        <input id="cAdminNombre" placeholder="Ana Pérez" />
+      </div>
+      <div>
+        <label for="cAdminEmail" data-t="correo">Correo</label>
+        <input id="cAdminEmail" type="email" autocomplete="username" placeholder="ana@empresa.com" />
+      </div>
+    </div>
 
-    function verOfeReset(){ $('ofeResetMsg').innerHTML=''; vista('vOfeReset'); }
-    async function enviarResetOfe(){
-      var email = $('ofrEmail').value.trim();
-      if (!email){ $('ofeResetMsg').innerHTML='<span class="off">'+ti('ent.val.email')+'</span>'; return; }
-      $('btnOfeReset').disabled=true; $('ofeResetMsg').textContent=ti('ent.st.enviando');
-      try { await api('/oferente/reset/solicitar','POST',{ email:email }); $('ofeResetMsg').innerHTML='<span class="ok">'+ti('ent.st.resetEnviado')+'</span>'; }
-      catch(e){ $('ofeResetMsg').innerHTML='<span class="off">'+esc(e.message)+'</span>'; }
-      $('btnOfeReset').disabled=false;
-    }
-    async function confirmarResetOfeUI(){
-      var p1 = $('ofcPass').value, p2 = $('ofcPass2').value;
-      if (p1.length < 8){ $('ofeResetConfirmMsg').innerHTML='<span class="off">'+ti('ent.val.pass8')+'</span>'; return; }
-      if (p1 !== p2){ $('ofeResetConfirmMsg').innerHTML='<span class="off">'+ti('ent.val.passNoCoincide')+'</span>'; return; }
-      $('btnOfeResetConfirm').disabled=true; $('ofeResetConfirmMsg').textContent=ti('ent.st.guardando');
-      try {
-        await api('/oferente/reset/confirmar','POST',{ token:RESET_TOKEN_OFE, password:p1 });
-        $('ofeResetConfirmMsg').innerHTML='<span class="ok">'+ti('ent.st.passActualizada')+'</span>';
-        try { history.replaceState(null,'','/entrar'); } catch(e){}
-        setTimeout(function(){ vista('vOfeLogin'); }, 1200);
-      } catch(e){ $('ofeResetConfirmMsg').innerHTML='<span class="off">'+esc(e.message)+'</span>'; }
-      $('btnOfeResetConfirm').disabled=false;
-    }
+    <label for="cPass" data-t="crear.password">Contraseña</label>
+    <input id="cPass" type="password" autocomplete="new-password" onkeydown="if(event.key==='Enter')crearCuenta()" />
+    <p class="pista" data-t="crear.password.p">Mínimo 12 caracteres.</p>
 
-    // ---- arranque ----
-    (function init(){
-      var l = idiomaActual(); var sel = $('selLang'); if (sel) sel.value = l; cargarI18n(l);
-      var hash = window.location.hash || '';
-      if (hash.indexOf('reset_estudio') >= 0) {
-        var hp = new URLSearchParams(hash.replace(/^#/, ''));
-        RESET_TOKEN_EST = hp.get('token') || '';
-        if (RESET_TOKEN_EST) { vista('vEstResetConfirm'); return; }
-      }
-      if (hash.indexOf('reset_oferente') >= 0) {
-        var hpo = new URLSearchParams(hash.replace(/^#/, ''));
-        RESET_TOKEN_OFE = hpo.get('token') || '';
-        if (RESET_TOKEN_OFE) { vista('vOfeResetConfirm'); return; }
-      }
-      var p = new URLSearchParams(window.location.search);
-      var tipo = p.get('tipo');
-      var modo = p.get('modo');
-      if (tipo === 'estudio'){ if (modo === 'registro'){ verEstRegistro(); } else { vista('vEstLogin'); } }
-      else if (tipo === 'oferente'){ if (modo === 'registro'){ verOfeRegistro(); } else { vista('vOfeLogin'); } }
-      else { if (modo === 'registro'){ verEmpRegistro(); } else { vista('vEmpLogin'); } }
-    })();
-  </script>
+    <button class="primary" id="btnCrear" onclick="crearCuenta()" data-t="crear.btn">Crear la cuenta</button>
+    <div id="msgCrear"></div>
+
+    <div class="venta">
+      <ul>
+        <li data-t="crear.v1">Sumás a tu equipo con un correo y le asignás un rol.</li>
+        <li data-t="crear.v2">Cada carpeta define quién ve y quién puede enviar.</li>
+        <li data-t="crear.v3">Quien firma tus documentos no necesita cuenta.</li>
+      </ul>
+    </div>
+
+    <div class="foot">
+      <span data-t="crear.ya">¿Ya tenés cuenta?</span>
+      <button class="link" onclick="ver('vLogin')" data-t="crear.entrar">Entrá acá</button>
+    </div>
+  </section>
+
+  <!-- ============ Recupero ============ -->
+  <section id="vReset" class="card hidden">
+    <h1 data-t="reset.h1">Recuperar la contraseña</h1>
+    <p class="lead" data-t="reset.lead">Te mandamos un enlace para elegir una nueva.</p>
+    <label for="resetEmail" data-t="correo">Correo</label>
+    <input id="resetEmail" type="email" autocomplete="username" placeholder="vos@empresa.com" />
+    <button class="primary" id="btnReset" onclick="pedirReset()" data-t="reset.enviar">Enviar enlace</button>
+    <div id="msgReset"></div>
+    <div class="foot"><button class="link" onclick="ver('vLogin')" data-t="volver2">Volver</button></div>
+  </section>
+
+  <!-- ============ Elegir contraseña (reset e invitación) ============ -->
+  <section id="vNuevaPassword" class="card hidden">
+    <h1 id="npTitulo" data-t="np.h1">Elegí tu contraseña</h1>
+    <p class="lead" data-t="np.lead">Mínimo 12 caracteres.</p>
+    <label for="np1" data-t="np.nueva">Contraseña nueva</label>
+    <input id="np1" type="password" autocomplete="new-password" />
+    <label for="np2" data-t="np.repetir">Repetila</label>
+    <input id="np2" type="password" autocomplete="new-password" onkeydown="if(event.key==='Enter')guardarPassword()" />
+    <button class="primary" id="btnNp" onclick="guardarPassword()" data-t="np.guardar">Guardar y entrar</button>
+    <div id="msgNp"></div>
+  </section>
+
+</main>
+
+<footer>MiFirma · <span data-t="footer">Firma electrónica con validez legal</span></footer>
+
+<script src="/entrar.js"></script>
 </body>
 </html>
