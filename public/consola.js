@@ -212,6 +212,9 @@
             : '<span style="color:var(--mut)">sin firmantes</span>') + '</td>' +
           '<td>' + esc(fecha(d.creado_en)) + '</td>' +
           '<td><div class="acc" style="justify-content:flex-end">' +
+          (d.circuito_estado === 'borrador'
+            ? '<button class="btn btn-p chico" data-prep="' + esc(d.circuito_id) + '">Enviar a firmar</button>'
+            : '') +
           '<button class="btn btn-s chico" data-ver="' + esc(d.instancia_id) +
           '" data-tit="' + esc(d.titulo) + '">Ver</button>' +
           '<button class="btn btn-s chico" data-exp="' + esc(d.instancia_id) + '">Expediente</button>' +
@@ -222,6 +225,9 @@
 
     $('tDocumentos').querySelectorAll('[data-ver]').forEach(function (b) {
       b.addEventListener('click', function () { abrirVisor(b.dataset.ver, b.dataset.tit); });
+    });
+    $('tDocumentos').querySelectorAll('[data-prep]').forEach(function (b) {
+      b.addEventListener('click', function () { abrirCircuito(b.dataset.prep); });
     });
     $('tDocumentos').querySelectorAll('[data-exp]').forEach(function (b) {
       b.addEventListener('click', function () { verExpediente(b.dataset.exp); });
@@ -309,6 +315,166 @@
         msg('msgModal', e.message, 'err');
         $('mOk').disabled = false;
       }
+    });
+  }
+
+  /**
+   * Preparar el circuito y despacharlo.
+   *
+   * Serie y paralelo no son dos pantallas ni dos caminos: es el mismo circuito
+   * con distinto contenido en el orden de cada participación. En serie el
+   * orden se autoincrementa; en paralelo son todos 1, y el servidor los aplana
+   * cuando se cambia de modo — si no, el despacho notificaría sólo al primero y
+   * el emisor creería que salió para todos.
+   */
+  var ESTADO_PART = {
+    pendiente:  '<span class="pill no">Sin notificar</span>',
+    notificada: '<span class="pill esp">Notificada</span>',
+    vista:      '<span class="pill esp">Lo abrió</span>',
+    firmada:    '<span class="pill ok">Firmó</span>',
+    rechazada:  '<span class="pill no">Rechazó</span>',
+    delegada:   '<span class="pill esp">Delegada</span>',
+    vencida:    '<span class="pill no">Vencida</span>',
+  };
+
+  async function abrirCircuito(circuitoId) {
+    try {
+      var j = await api('/circuitos/' + circuitoId);
+      pintarCircuito(circuitoId, j);
+    } catch (e) {
+      msg('msgDocs', e.message, 'err');
+    }
+  }
+
+  function pintarCircuito(circuitoId, j) {
+    var c = j.circuito;
+    var parts = j.participaciones || [];
+    var enviado = c.estado !== 'borrador';
+    var serie = c.modo === 'serie';
+
+    var filas = parts.length
+      ? parts.map(function (p) {
+          return (
+            '<tr><td style="padding:9px 0;border-bottom:1px solid var(--line)">' +
+            (serie ? '<b style="color:var(--mut)">' + p.orden + '.</b> ' : '') +
+            '<b>' + esc(p.nombre || p.email) + '</b>' +
+            (p.nombre ? '<br><span style="font-size:12.5px;color:var(--mut)">' + esc(p.email) + '</span>' : '') +
+            '</td><td style="padding:9px 0;border-bottom:1px solid var(--line)">' +
+            (p.papel === 'firmante' ? '' : '<span class="pill no">' + esc(p.papel) + '</span> ') +
+            (ESTADO_PART[p.estado] || esc(p.estado)) +
+            '</td><td style="padding:9px 0;border-bottom:1px solid var(--line);text-align:right">' +
+            (enviado ? '' : '<button class="btn btn-d chico" data-quitar="' + esc(p.id) + '">Quitar</button>') +
+            '</td></tr>'
+          );
+        }).join('')
+      : '<tr><td colspan="3" style="padding:18px 0;color:var(--mut);font-size:14px">' +
+        'Todavía no agregaste a nadie.</td></tr>';
+
+    abrirModal(
+      '<h2>' + esc(c.titulo) + '</h2>' +
+      '<p class="sub">' +
+      (enviado
+        ? 'Ya se envió. El camino de firmas no se puede cambiar: la base lo congela después del despacho.'
+        : 'Agregá a quién tiene que firmar y en qué orden. Ninguno necesita tener cuenta en MiFirma.') +
+      '</p>' +
+
+      (enviado ? '' :
+        '<div class="dos">' +
+        '<div><label class="campo" for="mModo">Orden de firma</label>' +
+        '<select id="mModo">' +
+        '<option value="serie"' + (serie ? ' selected' : '') + '>Uno después del otro</option>' +
+        '<option value="paralelo"' + (serie ? '' : ' selected') + '>Todos a la vez</option>' +
+        '</select></div>' +
+        '<div><label class="campo" for="mDias">Vence en</label>' +
+        '<select id="mDias">' +
+        [['', 'Sin vencimiento'], ['7', '7 días'], ['15', '15 días'], ['30', '30 días'], ['90', '90 días']]
+          .map(function (o) {
+            return '<option value="' + o[0] + '"' +
+              (String(c.dias_vigencia || '') === o[0] ? ' selected' : '') + '>' + o[1] + '</option>';
+          }).join('') +
+        '</select></div></div>' +
+        '<p class="pista">En serie, cada uno recibe el aviso cuando firma el anterior. ' +
+        'A la vez, les llega a todos junto.</p>') +
+
+      '<table style="width:100%;margin-top:18px"><tbody id="mParts">' + filas + '</tbody></table>' +
+
+      (enviado ? '' :
+        '<div class="dos" style="margin-top:16px">' +
+        '<div><label class="campo" for="mEmail">Correo de quien firma</label>' +
+        '<input id="mEmail" type="email" placeholder="persona@empresa.com" /></div>' +
+        '<div><label class="campo" for="mNombre">Nombre <span style="font-weight:400;color:var(--mut)">(opcional)</span></label>' +
+        '<input id="mNombre" maxlength="120" /></div></div>' +
+        '<button class="btn btn-s" id="mAgregar" style="margin-top:10px">Agregar</button>') +
+
+      '<div id="msgModal"></div>' +
+      '<div class="acc">' +
+      '<button class="btn btn-s" id="mCancel">' + (enviado ? 'Cerrar' : 'Después') + '</button>' +
+      (enviado ? '' : '<button class="btn btn-p" id="mEnviar">Enviar a firmar</button>') +
+      '</div>'
+    );
+
+    $('mCancel').addEventListener('click', function () { cerrarModal(); cargarDocumentos(); });
+
+    $('modal').querySelectorAll('[data-quitar]').forEach(function (b) {
+      b.addEventListener('click', async function () {
+        try {
+          await api('/circuitos/' + circuitoId + '/firmantes/' + b.dataset.quitar, 'DELETE');
+          abrirCircuito(circuitoId);
+        } catch (e) { msg('msgModal', e.message, 'err'); }
+      });
+    });
+
+    if (enviado) return;
+
+    async function guardarConfig() {
+      var dias = $('mDias').value;
+      await api('/circuitos/' + circuitoId, 'PATCH', {
+        modo: $('mModo').value,
+        dias_vigencia: dias === '' ? null : Number(dias),
+      });
+    }
+    $('mModo').addEventListener('change', function () {
+      guardarConfig().then(function () { abrirCircuito(circuitoId); })
+        .catch(function (e) { msg('msgModal', e.message, 'err'); });
+    });
+    $('mDias').addEventListener('change', function () {
+      guardarConfig().catch(function (e) { msg('msgModal', e.message, 'err'); });
+    });
+
+    $('mAgregar').addEventListener('click', async function () {
+      var email = $('mEmail').value.trim();
+      if (!email) return msg('msgModal', 'Falta el correo.', 'err');
+      $('mAgregar').disabled = true;
+      try {
+        await api('/circuitos/' + circuitoId + '/firmantes', 'POST', {
+          email: email,
+          nombre: $('mNombre').value.trim() || undefined,
+          // En serie cada uno va después del anterior; a la vez, todos en 1.
+          orden: $('mModo').value === 'serie' ? parts.length + 1 : 1,
+        });
+        abrirCircuito(circuitoId);
+      } catch (e) { msg('msgModal', e.message, 'err'); $('mAgregar').disabled = false; }
+    });
+
+    $('mEnviar').addEventListener('click', async function () {
+      if (!parts.length) return msg('msgModal', 'Agregá al menos un firmante.', 'err');
+      $('mEnviar').disabled = true;
+      msg('msgModal', '', '');
+      try {
+        await guardarConfig();
+        var r = await api('/circuitos/' + circuitoId + '/despachar', 'POST');
+        cerrarModal();
+        await cargarDocumentos();
+        if (r.fallidos && r.fallidos.length) {
+          // Se envió igual: el documento está despachado y los otorgamientos
+          // emitidos. Lo que falló es el aviso, y eso se reintenta.
+          msg('msgDocs',
+            'Enviado, pero no salió el aviso a: ' +
+            r.fallidos.map(function (f) { return f.email; }).join(', '), 'err');
+        } else {
+          msg('msgDocs', 'Enviado. Le avisamos a ' + r.notificados + ' persona(s).', 'ok');
+        }
+      } catch (e) { msg('msgModal', e.message, 'err'); $('mEnviar').disabled = false; }
     });
   }
 
@@ -997,6 +1163,7 @@
   window.ir = ir;
   window.salir = salir;
   window.abrirSubir = abrirSubir;
+  window.abrirCircuito = abrirCircuito;
   window.cargarDocumentos = cargarDocumentos;
   window.abrirNuevaCarpeta = abrirNuevaCarpeta;
   window.abrirNuevoAcceso = abrirNuevoAcceso;

@@ -19,6 +19,7 @@ import { registrarRutasPagosWebhook } from './http/routes/pagos_webhook';
 import { registrarRutasAyuda } from './http/routes/ayuda';
 import { registrarRutasDocumentos } from './http/routes/documentos';
 import { registrarRutasRepositorio } from './http/routes/repositorio';
+import { registrarRutasCircuitos } from './http/routes/circuitos';
 
 declare module 'fastify' {
   interface FastifyRequest {
@@ -379,6 +380,7 @@ export function construirServidor(): FastifyInstance {
   registrarRutasAyuda(app);
   registrarRutasDocumentos(app);
   registrarRutasRepositorio(app);
+  registrarRutasCircuitos(app);
 
   app.setErrorHandler((err, _req, reply) => {
     if (err instanceof ZodError) {
