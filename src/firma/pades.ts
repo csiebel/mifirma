@@ -4,6 +4,8 @@ import { plainAddPlaceholder } from '@signpdf/placeholder-plain';
 import { SignPdf } from '@signpdf/signpdf';
 import { SUBFILTER_ETSI_CADES_DETACHED } from '@signpdf/utils';
 import forge from 'node-forge';
+import { Signer } from '@signpdf/utils';
+import { insertarSelloEnFirma, loQueSeSella, leerSelloDeFirma, type SelloObtenido } from './tsa';
 import { HttpError } from '../http/errors';
 import type { Firmante } from './adaptadores/tipos';
 
@@ -42,9 +44,24 @@ import type { Firmante } from './adaptadores/tipos';
 
 const signpdf = new SignPdf();
 
-/** Espacio reservado para el PKCS#7. Un certificado con cadena larga y sello de
- *  tiempo embebido no entra en menos. Sobra espacio: se rellena con ceros. */
-const LARGO_FIRMA = 16384;
+/**
+ * Espacio reservado para el PKCS#7, en bytes.
+ *
+ * ⚠ El hueco se reserva ANTES de firmar y no se puede agrandar después: si la
+ * firma no entra, `signpdf` tira y el documento no se firma. Por eso el número
+ * se elige con margen y con datos, no a ojo.
+ *
+ * Medido el 1/8/2026 contra siete autoridades: el token RFC 3161 con
+ * certificado va de 4279 B (apple) a 7651 B (globalsign). Sumado a una cadena
+ * de certificados de firmante acreditada (~6 KB), una firma sellada puede
+ * rondar los 14 KB — el 83% de 16384, demasiado ajustado para enterarse en
+ * producción con un documento real. Con sello se reserva el doble.
+ *
+ * Sobra espacio y se rellena con ceros, así que el costo de pasarse es tamaño
+ * de archivo; el costo de quedarse corto es una firma que no se puede hacer.
+ */
+const LARGO_SIN_SELLO = 16384;
+const LARGO_CON_SELLO = 32768;
 
 export interface DatosSello {
   /** Qué se está firmando y quién. Aparece en el panel de firmas de Acrobat. */
@@ -81,22 +98,101 @@ export async function normalizar(pdf: Buffer): Promise<Buffer> {
  * esta firma se agrega al final. Eso es lo que permite que tres personas firmen
  * el mismo documento y que las tres firmas sigan verificando.
  */
+/**
+ * Envoltorio que le pide el sello de tiempo a quien sepa conseguirlo.
+ *
+ * ═══ POR QUÉ ACÁ ADENTRO Y NO ANTES NI DESPUÉS ═══
+ *
+ * El sello de una firma se calcula sobre el VALOR DE LA FIRMA, que recién
+ * existe cuando el adaptador firmó, y tiene que estar adentro del PKCS#7 antes
+ * de que ese PKCS#7 se escriba en el hueco del PDF. O sea: en el medio de una
+ * operación que `signpdf` maneja sola. La única costura disponible es el
+ * firmante, así que el sellado vive en un envoltorio del firmante.
+ *
+ * Extiende `Signer` porque signpdf comprueba `instanceof`. Probado.
+ *
+ * ⚠ Si el sello falla, se devuelve la firma SIN sello en vez de tirar. La
+ * decisión de degradar está tomada en la migración 028 y se ejecuta acá: perder
+ * la firma entera porque una autoridad ajena no contestó sería peor. Quien
+ * llama se entera mirando `this.sello`, que queda en null.
+ */
+class SignerSellado extends Signer {
+  sello: SelloObtenido | null = null;
+  errorSello: string | null = null;
+  bytesFirma = 0;
+
+  constructor(
+    private base: Signer,
+    private pedirSello: (datos: Buffer) => Promise<SelloObtenido | null>,
+  ) {
+    super();
+  }
+
+  async sign(data: Buffer, signingTime?: Date): Promise<Buffer> {
+    const cms = await this.base.sign(data, signingTime);
+    try {
+      this.sello = await this.pedirSello(loQueSeSella(cms));
+    } catch (e) {
+      this.errorSello = e instanceof Error ? e.message : 'error desconocido';
+      this.sello = null;
+    }
+    const salida = this.sello ? insertarSelloEnFirma(cms, this.sello.nodo) : cms;
+    this.bytesFirma = salida.length;
+    return salida;
+  }
+}
+
+export interface ResultadoSellado {
+  pdf: Buffer;
+  sello: SelloObtenido | null;
+  errorSello: string | null;
+  /** Qué fracción del hueco reservado ocupó la firma, de 0 a 1.
+   *  Se registra en el expediente para que el tamaño del hueco lo decidan los
+   *  documentos reales y no mi estimación. Si esto se acerca a 1, hay que
+   *  agrandarlo ANTES de que un documento no se pueda firmar. */
+  huecoUsado: number;
+}
+
+/**
+ * Aplica UNA firma sobre el PDF, con sello de tiempo si se puede conseguir.
+ *
+ * `conSello` es opcional: sin él se firma como antes y `sello` vuelve null.
+ */
 export async function sellar(
   pdf: Buffer,
   datos: DatosSello,
   firmante: Firmante,
-): Promise<Buffer> {
+  conSello?: (datos: Buffer) => Promise<SelloObtenido | null>,
+): Promise<ResultadoSellado> {
+  const largo = conSello ? LARGO_CON_SELLO : LARGO_SIN_SELLO;
+
   const conHueco = plainAddPlaceholder({
     pdfBuffer: pdf,
     reason: datos.razon,
     name: datos.nombre,
     location: datos.lugar ?? '',
     contactInfo: datos.contacto ?? '',
-    signatureLength: LARGO_FIRMA,
+    signatureLength: largo,
     subFilter: SUBFILTER_ETSI_CADES_DETACHED,
   });
 
-  return signpdf.sign(conHueco, firmante.signer());
+  if (!conSello) {
+    return {
+      pdf: await signpdf.sign(conHueco, firmante.signer()),
+      sello: null,
+      errorSello: null,
+      huecoUsado: 0,
+    };
+  }
+
+  const s = new SignerSellado(firmante.signer(), conSello);
+  const salida = await signpdf.sign(conHueco, s);
+  return {
+    pdf: salida,
+    sello: s.sello,
+    errorSello: s.errorSello,
+    huecoUsado: Number((s.bytesFirma / largo).toFixed(3)),
+  };
 }
 
 // ---------------------------------------------------------------------------
@@ -139,6 +235,9 @@ export interface FirmaVerificada {
   cubre_hasta: number;
   bytes_cubiertos: number;
   alcance: AlcanceFirma;
+  /** El sello RFC 3161 embebido, leído del archivo. Null si esta firma no lo
+   *  tiene — que es lo que pasa con todo lo firmado antes de que existiera. */
+  sello: { sellado_en: string | null; politica: string; numero_serie: string } | null;
 }
 
 export interface VerificacionPdf {
@@ -260,6 +359,7 @@ export function verificar(pdf: Buffer): VerificacionPdf {
     let firmante: string | null = null;
     let emisor: string | null = null;
     let firmadaEn: string | null = null;
+    let cms: Buffer | null = null;
 
     try {
       const hex = pdf
@@ -269,6 +369,7 @@ export function verificar(pdf: Buffer): VerificacionPdf {
         .replace(/[\s>\0]+$/, '');
       const bruto = Buffer.from(hex, 'hex');
       const der = bruto.subarray(0, largoDer(bruto));
+      cms = der;
       const p7: any = forge.pkcs7.messageFromAsn1(forge.asn1.fromDer(der.toString('binary')));
 
       for (const at of p7.rawCapture?.authenticatedAttributes ?? []) {
@@ -308,6 +409,7 @@ export function verificar(pdf: Buffer): VerificacionPdf {
       cubre_hasta: c + d,
       bytes_cubiertos: b + d,
       alcance: 'sin_explicar',
+      sello: cms ? leerSelloDeFirma(cms) : null,
     });
   }
 

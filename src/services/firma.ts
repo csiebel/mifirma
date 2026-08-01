@@ -7,6 +7,7 @@ import { almacen, nuevaClave } from '../almacenamiento/almacen';
 import { normalizar, sellar, verificar } from '../firma/pades';
 import { selloDePlataforma } from '../firma/adaptadores/sello_plataforma';
 import { anotar } from './evidencia';
+import { obtenerSello, selloObligatorio, type ResultadoSello } from './tsa';
 import { avisarAlQueSigue } from './circuito';
 import { HttpError } from '../http/errors';
 
@@ -219,6 +220,7 @@ export async function firmar(token: string, input: FirmaInput) {
       sha256: Buffer; titulo: string; nivel_firma: string; me_toca: boolean;
       anclaje_email: string | null; clave: string; mime: string;
       archivo_vigente_id: string | null; firmante: string | null; emisor: string | null;
+      pais: string | null;
     }>`
       select p.id as participacion_id, p.instancia_id, p.circuito_id,
              p.cuenta_propietaria_id, p.estado, p.papel, p.orden,
@@ -237,7 +239,10 @@ export async function firmar(token: string, input: FirmaInput) {
              -- las anteriores.
              a.clave_almacenamiento as clave, a.mime,
              i2.archivo_vigente_id,
-             ident.nombre_mostrado as firmante, cu.nombre_mostrado as emisor
+             ident.nombre_mostrado as firmante, cu.nombre_mostrado as emisor,
+             -- El país de la cuenta EMISORA, que es la que asume el documento.
+             -- Es lo que decide si la ley local exige sello de tiempo.
+             cu.pais
         from participacion p
         join circuito c on c.id = p.circuito_id
         join instancia i2 on i2.id = p.instancia_id
@@ -271,9 +276,19 @@ export async function firmar(token: string, input: FirmaInput) {
   // archivo NO se vuelve a serializar — hacerlo rompería esa firma.
   const base = ctx.archivo_vigente_id ? original : await normalizar(original);
 
-  let firmado: Buffer;
+  // ── El sello de tiempo. Lo único de todo esto que no admite segunda vuelta.
+  //
+  // El hash encadenado de la evidencia prueba consistencia interna, no
+  // anterioridad: quien tenga escritura sobre la base puede rehacerla entera.
+  // Un tercero afirmando la hora es lo que convierte el expediente en prueba.
+  //
+  // Se pide DENTRO del firmado, porque el sello es sobre el valor de la firma y
+  // tiene que quedar adentro del PKCS#7 antes de escribirlo en el PDF.
+  let resultadoSello: ResultadoSello | null = null;
+
+  let salida;
   try {
-    firmado = await sellar(
+    salida = await sellar(
       base,
       {
         // El motivo dice a nombre de quién se selló. Es lo que ve cualquiera en
@@ -284,10 +299,33 @@ export async function firmar(token: string, input: FirmaInput) {
         contacto: process.env.SOPORTE_EMAIL ?? '',
       },
       selloDePlataforma(),
+      async (datos) => {
+        resultadoSello = await obtenerSello(datos, ctx.pais ?? null);
+        return resultadoSello.sello;
+      },
     );
   } catch (err) {
     if (err instanceof HttpError) throw err;
     throw new HttpError(502, 'No se pudo aplicar la firma al documento. Probá de nuevo en un momento.');
+  }
+  const firmado: Buffer = salida.pdf;
+  // ⚠ El cast es necesario y no es pereza: TypeScript no ve que `resultadoSello`
+  // se asigna dentro del callback que le pasamos a `sellar`, así que lo estrecha
+  // a `null` y después a `never`. El valor sí llega; el análisis de flujo no
+  // atraviesa la clausura.
+  const rs = resultadoSello as ResultadoSello | null;
+
+  // ⚠ La única puerta que puede detener una firma por falta de sello, y no la
+  // decide este archivo: la decide `pais_firma`, que es derecho verificado por
+  // un abogado local y versionado por fecha de vigencia. Donde la ley exija
+  // sello para el nivel que estamos vendiendo, no se firma sin él — vender una
+  // firma más débil de lo que se dice es peor que no firmar.
+  if (!salida.sello && (await selloObligatorio(ctx.pais ?? null, ctx.nivel_firma ?? 'simple'))) {
+    throw new HttpError(
+      503,
+      'No se pudo obtener el sello de tiempo, y en este país la firma lo exige. ' +
+        'Probá de nuevo en unos minutos.',
+    );
   }
 
   // Verificar lo que acabamos de producir, antes de guardarlo. Entregar un
@@ -375,6 +413,73 @@ export async function firmar(token: string, input: FirmaInput) {
       // contenido sobre el que esta persona prestó su consentimiento.
       sha256Documento: ctx.sha256,
     });
+
+    // ── El sello de tiempo, en la cadena. Salga o no salga.
+    //
+    // `sello.fallido` es de peso ALTO aunque sea un fallo, y va con el error
+    // textual de cada autoridad probada. Es lo que explica, tres años después,
+    // por qué este documento no tiene sello: sin esa explicación la ausencia
+    // parece negligencia o, peor, manipulación. El expediente es inmutable, así
+    // que esta es la única oportunidad de dejar dicho lo que pasó.
+    if (salida.sello) {
+      const selloId = randomUUID();
+      await sql`
+        insert into sello_tiempo
+          (id, alcance, raiz, autoridad, pais, politica_oid, token, sellado_en,
+           estado, instancia_id, tsa_id)
+        values (${selloId}::uuid, 'firma', ${createHash('sha256').update(salida.sello.token).digest()},
+                ${salida.sello.tsaNombre}, ${ctx.pais}, ${salida.sello.politica},
+                ${salida.sello.token}, ${salida.sello.selladoEn}, 'sellado',
+                ${ctx.instancia_id}::uuid, ${salida.sello.tsaId}::uuid)
+      `.execute(trx);
+
+      await anotar(trx, {
+        ...comun,
+        tipo: 'firma.sellada',
+        actorTipo: 'proveedor',
+        datos: {
+          autoridad: salida.sello.tsaNombre,
+          politica: salida.sello.politica,
+          numero_serie: salida.sello.serie,
+          // ⚠ La hora que afirma la AUTORIDAD, no la nuestra. `now()` sirve para
+          // ordenar; esto es lo que prueba.
+          sellado_en: salida.sello.selladoEn.toISOString(),
+          // Nuestro desvío contra esa hora. No invalida nada, pero un desvío
+          // grande dice que nuestro reloj se fue — y de eso depende el orden de
+          // todo el expediente. Ver R5 de auditoria-y-evidencias.md.
+          desvio_segundos: rs?.desvioSegundos ?? null,
+          // Cuánto del hueco reservado ocupó la firma. Que el tamaño lo decidan
+          // los documentos reales y no una estimación: si se acerca a 1, hay que
+          // agrandarlo ANTES de que un documento no se pueda firmar.
+          hueco_usado: salida.huecoUsado,
+        },
+        sha256Documento: sha256Firmado,
+      });
+    } else {
+      await anotar(trx, {
+        ...comun,
+        tipo: 'sello.fallido',
+        actorTipo: 'sistema',
+        datos: {
+          motivo: salida.errorSello ?? 'ninguna autoridad respondió',
+          intentos: rs?.intentos ?? [],
+          // Se dice explícitamente qué se perdió, para que no haya que deducirlo.
+          consecuencia:
+            'La firma es válida pero ninguna autoridad externa afirma la hora. ' +
+            'Se puede agregar después un sello de DOCUMENTO, que prueba que el ' +
+            'archivo ya existía, no cuándo se firmó.',
+        },
+        sha256Documento: sha256Firmado,
+      });
+    }
+
+    await sql`
+      update instancia set nivel_sello = ${salida.sello ? 'firma' : 'sin_sello'}
+       where id = ${ctx.instancia_id}::uuid
+         -- Sin pisar hacia abajo: si otra firma de esta instancia ya consiguió
+         -- sello, que ésta falle no borra aquel hecho.
+         and nivel_sello = 'sin_sello'
+    `.execute(trx);
 
     await sql`
       update participacion

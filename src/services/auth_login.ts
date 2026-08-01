@@ -586,7 +586,7 @@ export async function verificarOtp(
   const otp = await enSistema((trx) =>
     trx
       .selectFrom('otp_login')
-      .select(['id', 'codigo_hash', 'expira_en', 'intentos', 'anclaje_destino_id'])
+      .select(['id', 'codigo_hash', 'expira_en', 'intentos', 'anclaje_destino_id', 'canal'])
       .where('identidad_id', '=', identidadId)
       .where('device_id', '=', deviceId)
       .where('usado', '=', false)
@@ -623,10 +623,70 @@ export async function verificarOtp(
     trx.updateTable('otp_login').set({ usado: true, intentos: otp.intentos + 1 }).where('id', '=', otp.id).execute(),
   );
 
+  // ── Acertar el código ES la prueba, y hay que anotarla como tal.
+  //
+  // ⚠ Acá había un agujero que dejaba muerto medio modelo de autorización.
+  //
+  // `anclaje_identidad` sólo se creaba en un lugar de todo el sistema: cuando un
+  // firmante EXTERNO abría su enlace. Una persona que se registraba y entraba
+  // con su contraseña no tenía ningún anclaje nunca, así que el OTP se guardaba
+  // con `anclaje_destino_id` en null, el dispositivo se recordaba con null, y la
+  // sesión salía con el conjunto de anclajes VACÍO — para siempre.
+  //
+  // Consecuencia: `app.identidad_probada()` era falso para todos los usuarios
+  // con cuenta, y toda política que dependiera de eso no servía. No daba error:
+  // simplemente nunca era verdad. Se descubrió el 1/8/2026 con la primera
+  // política que dependía sólo de esa rama.
+  //
+  // Acertar un código enviado al correo prueba control de ese correo. Es
+  // exactamente el mismo hecho que registra el firmante externo al abrir su
+  // enlace, y merece el mismo anclaje: `verificacion_email`, nivel bajo. No
+  // convierte a nadie en identificado —eso lo hace un documento o un
+  // certificado—, pero es un hecho probado y va anotado.
+  let anclajeId = otp.anclaje_destino_id ?? null;
+  if (!anclajeId) {
+    anclajeId = await enSistema(async (trx) => {
+      // SQL crudo y no Kysely: `db/schema.ts` está desactualizado (deuda 5 de
+      // estado-y-proximos-pasos) y no conoce todas las columnas de `identidad`.
+      const yoAhora = await sql<{ email: string | null; telefono: string | null }>`
+        select i.email_mostrado as email, c.telefono_e164 as telefono
+          from identidad i
+          left join credencial c on c.identidad_id = i.id
+         where i.id = ${identidadId}::uuid
+      `.execute(trx);
+
+      const porEmail = otp.canal === 'email';
+      const valor = porEmail ? yoAhora.rows[0]?.email : yoAhora.rows[0]?.telefono;
+      if (!valor) return null;
+
+      const tipo = porEmail ? 'email' : 'telefono';
+      const metodo = porEmail ? 'verificacion_email' : 'otp_sms';
+
+      // Idempotente: si ya existe uno vivo para ese valor, se reusa. Un anclaje
+      // es una prueba, no un contador de logins.
+      const r = await sql<{ id: string }>`
+        with existente as (
+          select id from anclaje_identidad
+           where identidad_id = ${identidadId}::uuid and tipo = ${tipo}
+             and valor_normalizado = lower(btrim(${valor})) and revocado_en is null
+           limit 1
+        ), nuevo as (
+          insert into anclaje_identidad
+            (identidad_id, tipo, valor_normalizado, metodo_prueba, nivel_garantia)
+          select ${identidadId}::uuid, ${tipo}, lower(btrim(${valor})), ${metodo}, 'bajo'
+           where not exists (select 1 from existente)
+          returning id
+        )
+        select id from existente union all select id from nuevo
+      `.execute(trx);
+      return r.rows[0]?.id ?? null;
+    });
+  }
+
   // El nivel del anclaje probado es el de la sesión. No se sube por haber
   // pasado un OTP: un código por mail prueba control del mail, nada más.
-  const nivel = otp.anclaje_destino_id ? await nivelDeAnclaje(otp.anclaje_destino_id) : 'bajo';
-  const prueba: PruebaDeDispositivo = { anclajeId: otp.anclaje_destino_id ?? null, nivel };
+  const nivel = anclajeId ? await nivelDeAnclaje(anclajeId) : 'bajo';
+  const prueba: PruebaDeDispositivo = { anclajeId, nivel };
 
   await confiarDispositivo(identidadId, deviceId, prueba, userAgent, ip);
 

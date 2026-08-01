@@ -25,11 +25,36 @@ tunel_cerrar() {
   unset MIFIRMA_TUNEL_PID MIFIRMA_DB DATABASE_URL DATABASE_OPERADOR_URL
 }
 
-# Si ya hay uno vivo en esta terminal, no abrimos otro.
-if [ -n "$MIFIRMA_TUNEL_PID" ] && kill -0 "$MIFIRMA_TUNEL_PID" 2>/dev/null; then
-  echo "Ya hay un túnel abierto (pid $MIFIRMA_TUNEL_PID)."
+# ¿Está vivo el túnel? Se pregunta por el PUERTO, no por el proceso.
+#
+# ⚠ Antes esto sólo comprobaba `kill -0 $PID`, o sea que el proceso existiera.
+# Un `railway connect` que se muere a medias deja el proceso en pie y el puerto
+# cerrado: el script decía "ya hay un túnel abierto" y psql contestaba
+# "connection refused", que manda a buscar el problema a la base. El proceso
+# existe; el túnel no. Son dos cosas distintas y sólo importa la segunda.
+_tunel_vivo() {
+  [ -n "$MIFIRMA_TUNEL_PID" ] || return 1
+  kill -0 "$MIFIRMA_TUNEL_PID" 2>/dev/null || return 1
+  local hp="${MIFIRMA_DB#*@}"; hp="${hp%%/*}"
+  local h="${hp%%:*}" p="${hp##*:}"
+  [ -n "$h" ] && [ -n "$p" ] || return 1
+  # /dev/tcp es de bash y no necesita nc instalado.
+  (exec 3<>"/dev/tcp/$h/$p") 2>/dev/null && exec 3<&- 2>/dev/null && return 0
+  return 1
+}
+
+if _tunel_vivo; then
+  echo "Ya hay un túnel abierto y respondiendo (pid $MIFIRMA_TUNEL_PID)."
   echo "MIFIRMA_DB -> $(printf '%s' "$MIFIRMA_DB" | sed 's|://[^@]*@|://***@|')"
 else
+  # Si quedó un proceso a medio morir, se lo limpia antes de abrir otro. Dos
+  # `railway connect` peleando por el mismo puerto es peor que ninguno.
+  if [ -n "$MIFIRMA_TUNEL_PID" ] && kill -0 "$MIFIRMA_TUNEL_PID" 2>/dev/null; then
+    echo "Había un túnel colgado (pid $MIFIRMA_TUNEL_PID): el proceso estaba vivo pero el puerto no respondía. Lo cierro."
+    kill "$MIFIRMA_TUNEL_PID" 2>/dev/null
+    unset MIFIRMA_TUNEL_PID
+  fi
+
   MIFIRMA_TUNEL_LOG="$(mktemp -t mifirma-tunel)"
   railway connect Postgres --tunnel-only >"$MIFIRMA_TUNEL_LOG" 2>&1 &
   MIFIRMA_TUNEL_PID=$!

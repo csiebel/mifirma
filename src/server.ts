@@ -1,4 +1,5 @@
 import Fastify, { type FastifyInstance, type FastifyRequest } from 'fastify';
+import { abrirContextoPedido, fijarSesionDelPedido } from './auth/contexto_pedido';
 import rateLimit from '@fastify/rate-limit';
 import cookie from '@fastify/cookie';
 import multipart from '@fastify/multipart';
@@ -82,6 +83,16 @@ export function construirServidor(): FastifyInstance {
   //  - CSP: permite el JS/CSS inline que usa el frontend y las fuentes de Google, y
   //    bloquea la carga de scripts/recursos de otros orígenes. Rutas que sirven imágenes
   //    (p. ej. SVG de beneficios) fijan su propia CSP más estricta en su handler.
+  // ⚠ PRIMER hook de todos: abre el contexto del pedido.
+  //
+  // Va con `done()` adentro del `run` y no como hook async, porque lo que tiene
+  // que quedar dentro del contexto es TODO lo que viene después —los otros
+  // hooks, el handler, y cada `await` de la cadena—. Comprobado que propaga y
+  // que no se cruza entre pedidos concurrentes antes de ponerlo acá.
+  app.addHook('onRequest', (_req, _reply, done) => {
+    abrirContextoPedido(() => done());
+  });
+
   app.addHook('onRequest', async (_req, reply) => {
     reply.header('X-Content-Type-Options', 'nosniff');
     reply.header('X-Frame-Options', 'DENY');
@@ -335,6 +346,10 @@ export function construirServidor(): FastifyInstance {
     if (path.startsWith('/pagos/webhook/')) return;
     if (PUBLICAS.has(path)) return;
     req.identidad = await autenticar(req.headers.authorization);
+    // Los anclajes probados y el nivel de garantía viajan firmados en el token
+    // y la BASE los necesita. Acá es donde entran al contexto; de ahí los toma
+    // `withUsuario` sin que nadie tenga que acordarse de pasarlos.
+    fijarSesionDelPedido(req.identidad);
     if (!req.authViaCookie) avisarAuthPorHeader(req, 'empresa', path);
   });
 

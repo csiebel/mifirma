@@ -10,6 +10,12 @@ import {
 } from '../../services/repositorio';
 import { expediente, verificarCadena } from '../../services/evidencia';
 import { listarBitacora } from '../../services/auditoria';
+import {
+  guardarFirmaVisual,
+  verFirmasVisuales,
+  bajarFirmaVisual,
+  quitarFirmaVisual,
+} from '../../services/firma_visual';
 import { HttpError } from '../errors';
 
 /**
@@ -137,6 +143,54 @@ export function registrarRutasRepositorio(app: FastifyInstance) {
       if (!eventos.length) throw new HttpError(404, 'No hay expediente para ese documento.');
       return { eventos, cadena: await verificarCadena(trx, id) };
     });
+  });
+
+  // ==========================================================================
+  // Mi firma: la representación VISUAL. No es la firma.
+  //
+  // Cuelga de la identidad y no de la cuenta: una persona tiene una firma, no
+  // una por empresa donde trabaja. Por eso estas rutas no reciben ni miran a
+  // qué cuenta pertenece el que las llama más allá de lo que exige la sesión.
+  // ==========================================================================
+
+  app.get('/mi/firma-visual', async (req) => {
+    const { cuentaId, identidadId } = req.identidad;
+    return verFirmasVisuales(cuentaId, identidadId);
+  });
+
+  app.post('/mi/firma-visual/:tipo', async (req) => {
+    const { tipo } = z.object({ tipo: z.enum(['firma', 'rubrica']) }).parse(req.params);
+    const parte = await (req as any).file();
+    if (!parte) throw new HttpError(400, 'No llegó ninguna imagen.');
+    const contenido = await parte.toBuffer();
+
+    const campos: Record<string, string> = {};
+    for (const [k, v] of Object.entries<any>(parte.fields ?? {})) {
+      if (v && typeof v.value === 'string') campos[k] = v.value;
+    }
+    const origen = campos.origen === 'dibujada' ? 'dibujada' : 'subida';
+
+    const { cuentaId, identidadId } = req.identidad;
+    return guardarFirmaVisual(cuentaId, identidadId, tipo, contenido, origen);
+  });
+
+  app.get('/mi/firma-visual/:tipo', async (req, reply) => {
+    const { tipo } = z.object({ tipo: z.enum(['firma', 'rubrica']) }).parse(req.params);
+    const { cuentaId, identidadId } = req.identidad;
+    const r = await bajarFirmaVisual(cuentaId, identidadId, tipo);
+    // `no-store` y no `private`: es una imagen que sirve para suplantar a
+    // alguien. Que no quede en el disco de un locutorio.
+    reply
+      .header('Content-Type', r.mime)
+      .header('X-Content-Type-Options', 'nosniff')
+      .header('Cache-Control', 'no-store');
+    return reply.send(r.contenido);
+  });
+
+  app.delete('/mi/firma-visual/:tipo', async (req) => {
+    const { tipo } = z.object({ tipo: z.enum(['firma', 'rubrica']) }).parse(req.params);
+    const { cuentaId, identidadId } = req.identidad;
+    return quitarFirmaVisual(cuentaId, identidadId, tipo);
   });
 
   /**

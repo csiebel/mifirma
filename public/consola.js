@@ -55,7 +55,7 @@
   var ROLES = [];         // roles de la cuenta (para los selectores)
   var CATALOGO = null;    // catálogo de capacidades
 
-  var VISTAS = ['documentos', 'carpetas', 'accesos', 'roles', 'actividad', 'cuenta'];
+  var VISTAS = ['documentos', 'carpetas', 'accesos', 'roles', 'mifirma', 'actividad', 'cuenta'];
 
   var ETIQUETA_ACCION = {
     ver: 'Ver que existe',
@@ -134,6 +134,7 @@
     if (vista === 'carpetas') cargarCarpetas();
     if (vista === 'accesos') cargarUsuarios();
     if (vista === 'roles') cargarRoles();
+    if (vista === 'mifirma') cargarFirmaVisual();
     if (vista === 'actividad') cargarActividad();
     if (vista === 'cuenta') pintarCuenta();
   }
@@ -773,6 +774,11 @@
    * el PDF en la mano, sin acceso a nada nuestro, puede llegar al mismo
    * resultado — y eso es lo que hace que la firma valga.
    */
+  function selloFecha(iso) {
+    if (!iso) return 'sin fecha legible';
+    try { return new Date(iso).toLocaleString('es'); } catch (e) { return iso; }
+  }
+
   async function verFirmas(instanciaId) {
     abrirModal('<h2>Firmas del documento</h2><p class="sub">Verificando…</p>');
     try {
@@ -828,6 +834,19 @@
           'Certificado: ' + esc(f.firmante || '—') +
           (f.emisor ? ' · emitido por ' + esc(f.emisor) : '') + '</div>' +
           (cuando ? '<div style="font-size:12.5px;color:var(--mut)">' + esc(cuando) + '</div>' : '') +
+          // El sello de tiempo se muestra distinto del resto a propósito: es lo
+          // único de esta pantalla que afirma un TERCERO. Todo lo demás lo
+          // decimos nosotros, y esa diferencia es la que le da valor.
+          (f.sello
+            ? '<div style="font-size:12.5px;color:var(--acc-700);font-weight:600;margin-top:3px">' +
+              '⏱ Hora certificada por una autoridad externa: ' +
+              esc(selloFecha(f.sello.sellado_en)) + '</div>' +
+              '<div style="font-size:11px;color:var(--mut)">serie ' +
+              esc((f.sello.numero_serie || '').slice(0, 24)) + ' · política ' +
+              esc(f.sello.politica) + '</div>'
+            : '<div style="font-size:12px;color:var(--mut);margin-top:3px">' +
+              'Sin sello de tiempo: la fecha de esta firma la afirmamos nosotros, ' +
+              'no un tercero.</div>') +
           '<div style="font-size:12px;color:var(--mut);' + al[0] + '">' +
           esc(al[1].replace('%B', f.cubre_hasta)) + ' · ' + f.bytes_cubiertos + ' bytes firmados</div>' +
           '</div>';
@@ -909,6 +928,229 @@
       $('mCancel').addEventListener('click', cerrarModal);
     }
   }
+
+  // ===========================================================================
+  // MI FIRMA — la representación visual
+  //
+  // ⚠ Esto NO es la firma. El valor legal lo da el PAdES; esto es una imagen.
+  // La pantalla lo dice en voz alta a propósito: si el producto deja creer que
+  // el trazo es lo que vale, el día que alguien lo discuta la respuesta llega
+  // tarde. Regla de oro nº1.
+  //
+  // Todo el procesamiento de imagen ocurre ACÁ, en el navegador. No es una
+  // optimización: una foto de una firma sobre un escritorio trae el escritorio,
+  // y lo que no se sube no hay que custodiarlo después.
+  // ===========================================================================
+
+  async function cargarFirmaVisual() {
+    msg('msgFirmaVisual', '', '');
+    try {
+      var j = await api('/mi/firma-visual');
+      var hay = {};
+      (j.imagenes || []).forEach(function (i) { hay[i.tipo] = i; });
+      pintarLienzo('visorFirma', 'firma', hay.firma);
+      pintarLienzo('visorRubrica', 'rubrica', hay.rubrica);
+    } catch (e) {
+      msg('msgFirmaVisual', e.message, 'err');
+    }
+  }
+
+  function pintarLienzo(id, tipo, info) {
+    var el = $(id);
+    if (!el) return;
+    if (!info) {
+      el.innerHTML = '<span class="vacio">Todavía no cargaste ' +
+        (tipo === 'firma' ? 'tu firma' : 'tu inicial') + '</span>';
+      return;
+    }
+    // `?t=` obliga al navegador a no reusar la anterior después de cambiarla.
+    el.innerHTML = '<img alt="" src="/mi/firma-visual/' + tipo + '?t=' + Date.now() + '" />';
+  }
+
+  /**
+   * Deja la imagen lista para estampar: sin fondo y recortada al trazo.
+   *
+   * Dos pasos, y los dos importan:
+   *
+   * 1. Transparencia por luminancia. Todo lo que es claro —el papel— pasa a
+   *    alpha 0. No es un recorte perfecto, es el que hace falta: el trazo de
+   *    una lapicera sobre papel blanco tiene muchísimo contraste.
+   * 2. Recorte al rectángulo que ocupa el trazo. Sin esto, una foto con la
+   *    firma chiquita en el medio se estampa como un sello enorme casi vacío,
+   *    y el usuario no entiende por qué le quedó torcida en el documento.
+   */
+  function limpiarImagen(img) {
+    var c = document.createElement('canvas');
+    // Tope de resolución: más que esto no mejora nada estampado y pesa de más.
+    var esc = Math.min(1, 1400 / Math.max(img.width, img.height));
+    c.width = Math.round(img.width * esc);
+    c.height = Math.round(img.height * esc);
+    var g = c.getContext('2d');
+    g.drawImage(img, 0, 0, c.width, c.height);
+
+    var d = g.getImageData(0, 0, c.width, c.height);
+    var p = d.data;
+    var x0 = c.width, y0 = c.height, x1 = -1, y1 = -1;
+
+    for (var i = 0; i < p.length; i += 4) {
+      var lum = 0.299 * p[i] + 0.587 * p[i + 1] + 0.114 * p[i + 2];
+      if (lum > 205) {
+        p[i + 3] = 0;                       // papel: fuera
+      } else {
+        // Semitransparencia en el borde del trazo, para que no quede aserrado.
+        if (lum > 150) p[i + 3] = Math.round(p[i + 3] * (205 - lum) / 55);
+        if (p[i + 3] > 8) {
+          var px = (i / 4) % c.width, py = Math.floor((i / 4) / c.width);
+          if (px < x0) x0 = px; if (px > x1) x1 = px;
+          if (py < y0) y0 = py; if (py > y1) y1 = py;
+        }
+      }
+    }
+    g.putImageData(d, 0, 0);
+
+    if (x1 < 0) return null;                 // no quedó ningún trazo
+    var m = 6;                               // un respiro alrededor
+    x0 = Math.max(0, x0 - m); y0 = Math.max(0, y0 - m);
+    x1 = Math.min(c.width - 1, x1 + m); y1 = Math.min(c.height - 1, y1 + m);
+
+    var r = document.createElement('canvas');
+    r.width = x1 - x0 + 1; r.height = y1 - y0 + 1;
+    r.getContext('2d').drawImage(c, x0, y0, r.width, r.height, 0, 0, r.width, r.height);
+    return r;
+  }
+
+  function canvasABlob(canvas) {
+    return new Promise(function (res) { canvas.toBlob(res, 'image/png'); });
+  }
+
+  async function mandarImagen(tipo, blob, origen) {
+    var fd = new FormData();
+    fd.append('origen', origen);
+    fd.append('archivo', blob, tipo + '.png');
+    var t = csrf();
+    var r = await fetch('/mi/firma-visual/' + tipo, {
+      method: 'POST',
+      credentials: 'same-origin',
+      headers: t ? { 'X-CSRF-Token': t } : {},
+      body: fd,
+    });
+    var txt = await r.text();
+    var data; try { data = txt ? JSON.parse(txt) : {}; } catch (e) { data = { error: txt }; }
+    if (!r.ok) throw new Error(data.error || ('HTTP ' + r.status));
+    return data;
+  }
+
+  async function subirFirmaVisual(tipo, input) {
+    var f = input.files && input.files[0];
+    input.value = '';
+    if (!f) return;
+    msg('msgFirmaVisual', 'Procesando la imagen…', '');
+    try {
+      var img = await new Promise(function (res, rej) {
+        var i = new Image();
+        i.onload = function () { res(i); };
+        i.onerror = function () { rej(new Error('No pude leer esa imagen.')); };
+        i.src = URL.createObjectURL(f);
+      });
+      var limpio = limpiarImagen(img);
+      URL.revokeObjectURL(img.src);
+      if (!limpio) {
+        return msg('msgFirmaVisual',
+          'No encontré ningún trazo en esa imagen: quedó toda clara. Probá con una ' +
+          'foto con más contraste, o dibujá la firma acá mismo.', 'err');
+      }
+      await mandarImagen(tipo, await canvasABlob(limpio), 'subida');
+      await cargarFirmaVisual();
+      msg('msgFirmaVisual', 'Listo. Se le sacó el fondo y se recortó al trazo.', 'ok');
+    } catch (e) {
+      msg('msgFirmaVisual', e.message, 'err');
+    }
+  }
+
+  /**
+   * El pad para dibujarla con el dedo o el mouse.
+   *
+   * Vale más que la foto y conviene ofrecerlo primero: sale con fondo
+   * transparente de fábrica, sin umbrales ni recortes que puedan salir mal. Y
+   * en el expediente queda anotado que se dibujó en el momento, que no es lo
+   * mismo que una imagen subida hace dos años y que cualquiera pudo mandarle.
+   */
+  function dibujarFirmaVisual(tipo) {
+    abrirModal(
+      '<h2>Dibujá tu ' + (tipo === 'firma' ? 'firma' : 'inicial') + '</h2>' +
+      '<p class="sub">Con el dedo, el mouse o un lápiz. Se guarda sin fondo.</p>' +
+      '<canvas id="padDibujo" width="900" height="300" style="height:220px"></canvas>' +
+      '<div id="mErr"></div>' +
+      '<div class="acc"><button class="btn btn-s" id="mLimpiar">Borrar</button>' +
+      '<button class="btn" id="mCancel">Cancelar</button>' +
+      '<button class="btn btn-p" id="mOk">Guardar</button></div>'
+    );
+
+    var cv = $('padDibujo');
+    var g = cv.getContext('2d');
+    g.lineWidth = 3.5; g.lineCap = 'round'; g.lineJoin = 'round'; g.strokeStyle = '#111827';
+    var trazando = false, hubo = false;
+
+    function punto(ev) {
+      var r = cv.getBoundingClientRect();
+      return { x: (ev.clientX - r.left) * (cv.width / r.width),
+               y: (ev.clientY - r.top) * (cv.height / r.height) };
+    }
+    cv.addEventListener('pointerdown', function (ev) {
+      // Captura del puntero: si el dedo se va del canvas y vuelve, sigue el
+      // mismo trazo en vez de cortarse. Firmar es un gesto continuo.
+      cv.setPointerCapture(ev.pointerId);
+      trazando = true; hubo = true;
+      var p = punto(ev); g.beginPath(); g.moveTo(p.x, p.y);
+    });
+    cv.addEventListener('pointermove', function (ev) {
+      if (!trazando) return;
+      var p = punto(ev); g.lineTo(p.x, p.y); g.stroke();
+    });
+    ['pointerup', 'pointercancel'].forEach(function (t) {
+      cv.addEventListener(t, function () { trazando = false; });
+    });
+
+    $('mLimpiar').addEventListener('click', function () {
+      g.clearRect(0, 0, cv.width, cv.height); hubo = false;
+    });
+    $('mCancel').addEventListener('click', cerrarModal);
+    $('mOk').addEventListener('click', async function () {
+      if (!hubo) {
+        return ($('mErr').innerHTML = '<div class="msg err">Todavía no dibujaste nada.</div>');
+      }
+      $('mOk').disabled = true;
+      try {
+        // El canvas ya viene transparente; sólo se recorta al trazo.
+        var limpio = limpiarImagen(cv) || cv;
+        await mandarImagen(tipo, await canvasABlob(limpio), 'dibujada');
+        cerrarModal();
+        await cargarFirmaVisual();
+        msg('msgFirmaVisual', 'Guardada.', 'ok');
+      } catch (e) {
+        $('mOk').disabled = false;
+        $('mErr').innerHTML = '<div class="msg err">' + esc(e.message) + '</div>';
+      }
+    });
+  }
+
+  async function quitarFirmaVisual(tipo) {
+    try {
+      await api('/mi/firma-visual/' + tipo, 'DELETE');
+      await cargarFirmaVisual();
+      // Se dice qué pasó de verdad: la imagen deja de usarse, no desaparece.
+      // Los documentos que ya la llevan estampada siguen mostrándola, y el
+      // expediente tiene que poder explicar cuál se usó en cada uno.
+      msg('msgFirmaVisual',
+        'Ya no se va a estampar. Los documentos que ya firmaste no cambian.', 'ok');
+    } catch (e) {
+      msg('msgFirmaVisual', e.message, 'err');
+    }
+  }
+
+  window.subirFirmaVisual = subirFirmaVisual;
+  window.dibujarFirmaVisual = dibujarFirmaVisual;
+  window.quitarFirmaVisual = quitarFirmaVisual;
 
   // ===========================================================================
   // CARPETAS

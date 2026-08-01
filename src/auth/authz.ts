@@ -1,4 +1,5 @@
 import type { Transaction } from 'kysely';
+import { sesionDelPedido } from './contexto_pedido';
 import { fijarContexto, type ContextoRls, type NivelGarantia } from '../db/contexto';
 import { db } from '../db/pool';
 import type { DB } from '../db/schema';
@@ -105,6 +106,12 @@ export async function withUsuario<T>(
   fn: (trx: Transaction<DB>, autz: ContextoAutz) => Promise<T>,
   sesion?: DatosSesion,
 ): Promise<T> {
+  // Si no se lo pasan —que es lo que pasa en los 56 lugares donde se llama—,
+  // sale del contexto del pedido. Antes quedaba en undefined y la base recibía
+  // el conjunto de anclajes VACÍO en todos los pedidos del sistema: cualquier
+  // política que dependiera de `app.identidad_probada()` era falsa siempre.
+  // Ver src/auth/contexto_pedido.ts.
+  sesion = sesion ?? sesionDelPedido();
   if (!cuentaId || !identidadId) {
     throw new Error('withUsuario: cuentaId e identidadId son requeridos');
   }

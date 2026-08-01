@@ -76,6 +76,22 @@
   .pill.no{background:#f2f5f9;color:var(--mut)}
   .acc{display:flex;gap:6px;justify-content:flex-end;flex-wrap:wrap}
 
+  /* ---------- mi firma ---------- */
+  /* El fondo a cuadros hace visible la transparencia: sin él, un PNG con fondo
+     blanco y uno recortado se ven idénticos, y el usuario no sabe si funcionó. */
+  .lienzo{height:150px;border:1px solid var(--line);border-radius:10px;display:grid;
+          place-items:center;margin-top:12px;
+          background-image:linear-gradient(45deg,#eef2f7 25%,transparent 25%),
+                           linear-gradient(-45deg,#eef2f7 25%,transparent 25%),
+                           linear-gradient(45deg,transparent 75%,#eef2f7 75%),
+                           linear-gradient(-45deg,transparent 75%,#eef2f7 75%);
+          background-size:16px 16px;
+          background-position:0 0,0 8px,8px -8px,-8px 0}
+  .lienzo img{max-height:130px;max-width:92%}
+  .lienzo .vacio{color:var(--mut);font-size:13.5px}
+  #padDibujo{border:1px dashed var(--line);border-radius:10px;touch-action:none;cursor:crosshair;
+             background:#fff;width:100%}
+
   /* ---------- carpetas ---------- */
   .doscol{display:grid;gap:22px;grid-template-columns:1fr}
   @media(min-width:1000px){.doscol{grid-template-columns:320px 1fr;align-items:start}}
@@ -172,6 +188,10 @@
     <button onclick="ir('roles')" data-v="roles">
       <svg viewBox="0 0 24 24"><path d="M12 3l8 3.5v5.8c0 4.9-3.3 8.8-8 10.2-4.7-1.4-8-5.3-8-10.2V6.5z"/><path d="M9 12l2 2 4.5-4.5"/></svg>
       Roles
+    </button>
+    <button onclick="ir('mifirma')" data-v="mifirma">
+      <svg viewBox="0 0 24 24"><path d="M3 17c3-1 5-9 8-9s2 7 5 7 2-3 5-3"/></svg>
+      Mi firma
     </button>
     <button onclick="ir('actividad')" data-v="actividad">
       <svg viewBox="0 0 24 24"><path d="M12 8v4l3 2"/><circle cx="12" cy="12" r="9"/></svg>
@@ -288,6 +308,58 @@
       <tbody id="tRoles"></tbody>
     </table></div>
     <div id="msgRoles"></div>
+  </section>
+
+  <!-- ============ Mi firma ============ -->
+  <section id="vMifirma" class="hidden">
+    <div class="cab"><div>
+      <h1>Mi firma</h1>
+      <p>Tu firma autógrafa y tu inicial, para que quien reciba el documento reconozca
+         de un vistazo quién firmó.</p>
+    </div></div>
+
+    <div class="msg" style="background:var(--soft);color:var(--mut);border:1px solid var(--line)">
+      <b>Esto no es tu firma.</b> Lo que le da valor legal al documento es la firma
+      electrónica —el certificado y el sello de tiempo—, no esta imagen. La imagen
+      comunica; la criptografía firma. Un documento sin imagen está firmado igual.
+    </div>
+
+    <div class="doscol">
+      <div class="panel" style="padding:18px">
+        <b style="font-size:15.5px">Firma autógrafa</b>
+        <p class="pista">La firma completa. Va donde corresponde firmar.</p>
+        <div class="lienzo" id="visorFirma"></div>
+        <div class="acc" style="justify-content:flex-start;margin-top:12px">
+          <label class="btn btn-s chico" style="cursor:pointer">Subir imagen
+            <input type="file" accept="image/png,image/jpeg" style="display:none"
+                   onchange="subirFirmaVisual('firma', this)" />
+          </label>
+          <button class="btn btn-s chico" onclick="dibujarFirmaVisual('firma')">Dibujarla</button>
+          <button class="btn btn-d chico" onclick="quitarFirmaVisual('firma')">Quitar</button>
+        </div>
+      </div>
+
+      <div class="panel" style="padding:18px">
+        <b style="font-size:15.5px">Rúbrica</b>
+        <p class="pista">La inicial. Va en el resto de las hojas.</p>
+        <div class="lienzo" id="visorRubrica"></div>
+        <div class="acc" style="justify-content:flex-start;margin-top:12px">
+          <label class="btn btn-s chico" style="cursor:pointer">Subir imagen
+            <input type="file" accept="image/png,image/jpeg" style="display:none"
+                   onchange="subirFirmaVisual('rubrica', this)" />
+          </label>
+          <button class="btn btn-s chico" onclick="dibujarFirmaVisual('rubrica')">Dibujarla</button>
+          <button class="btn btn-d chico" onclick="quitarFirmaVisual('rubrica')">Quitar</button>
+        </div>
+      </div>
+    </div>
+    <div id="msgFirmaVisual" style="padding:14px 2px"></div>
+
+    <div class="msg" style="background:var(--soft);color:var(--mut);border:1px solid var(--line)">
+      Si subís una foto de tu firma en papel, se le saca el fondo blanco y se recorta
+      automáticamente <b>en tu navegador</b>: la imagen sale de acá ya limpia, y el papel,
+      la mesa y lo que hubiera alrededor no se suben a ningún lado.
+    </div>
   </section>
 
   <!-- ============ Actividad ============ -->
