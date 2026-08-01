@@ -47,7 +47,7 @@ export async function verTwilio() {
       wa_content_sid: c.wa_content_sid || '',
       token_mask: enmascarar(c.auth_token_cifrado),
       tiene_token: !!c.auth_token_cifrado,
-      activo: c.activo,
+      activo: c.activa,
     },
   };
 }
@@ -77,7 +77,7 @@ export async function guardarTwilio(d: DatosTwilio) {
         from_whatsapp: d.fromWhatsapp || null,
         wa_content_sid: d.waContentSid || null,
         auth_token_cifrado: d.authToken ? cifrar(d.authToken) : null,
-        activo: false,
+        activa: false,
       })
       .execute();
   }
@@ -94,7 +94,7 @@ export async function setTwilioActivo(activo: boolean) {
       throw new HttpError(400, 'No se puede activar: falta un remitente (número de SMS o de WhatsApp).');
     }
   }
-  await ownerDb().updateTable('twilio_config').set({ activo }).where('id', '=', c.id).execute();
+  await ownerDb().updateTable('twilio_config').set({ activa: activo }).where('id', '=', c.id).execute();
   return { ok: true };
 }
 
@@ -102,7 +102,7 @@ export async function setTwilioActivo(activo: boolean) {
  *  la usa para decidir si puede mandar por SMS/WhatsApp o si tiene que caer a email. */
 export async function twilioActivo(): Promise<FilaTwilio | null> {
   const c = await fila();
-  if (!c || !c.activo || !c.auth_token_cifrado) return null;
+  if (!c || !c.activa || !c.auth_token_cifrado) return null;
   return c;
 }
 

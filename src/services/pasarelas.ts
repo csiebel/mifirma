@@ -10,7 +10,6 @@ export interface DatosPasarela {
   proveedor: string;
   nombre: string;
   modo?: 'sandbox' | 'produccion';
-  moneda?: string;
   clientId?: string | null;
   clientSecret?: string; // si viene vacío en edición, NO se cambia
   webhookSecret?: string; // idem
@@ -24,11 +23,10 @@ export async function listarPasarelas() {
       'proveedor',
       'nombre',
       'modo',
-      'moneda',
       'client_id',
       'client_secret_cifrado',
       'webhook_secret_cifrado',
-      'activo',
+      'activa',
     ])
     .orderBy('proveedor')
     .execute();
@@ -37,12 +35,11 @@ export async function listarPasarelas() {
       proveedor: p.proveedor,
       nombre: p.nombre,
       modo: p.modo,
-      moneda: p.moneda,
       client_id: p.client_id ?? '',
       client_secret_mask: enmascarar(p.client_secret_cifrado),
       webhook_secret_mask: enmascarar(p.webhook_secret_cifrado),
       tiene_secret: !!p.client_secret_cifrado,
-      activo: p.activo,
+      activo: p.activa,
     })),
   };
 }
@@ -62,14 +59,12 @@ export async function guardarPasarela(d: DatosPasarela) {
     const set: Partial<{
       nombre: string;
       modo: string;
-      moneda: string;
       client_id: string | null;
       client_secret_cifrado: string;
       webhook_secret_cifrado: string;
     }> = {
       nombre: d.nombre,
       modo: d.modo ?? 'sandbox',
-      moneda: d.moneda ?? 'USD',
       client_id: d.clientId ?? null,
     };
     if (d.clientSecret) set.client_secret_cifrado = cifrar(d.clientSecret);
@@ -82,11 +77,10 @@ export async function guardarPasarela(d: DatosPasarela) {
         proveedor: d.proveedor,
         nombre: d.nombre,
         modo: d.modo ?? 'sandbox',
-        moneda: d.moneda ?? 'USD',
-        client_id: d.clientId ?? null,
+          client_id: d.clientId ?? null,
         client_secret_cifrado: d.clientSecret ? cifrar(d.clientSecret) : null,
         webhook_secret_cifrado: d.webhookSecret ? cifrar(d.webhookSecret) : null,
-        activo: false,
+        activa: false,
       })
       .execute();
   }
@@ -104,7 +98,7 @@ export async function setPasarelaActiva(proveedor: string, activo: boolean) {
   if (activo && (!p.client_id || !p.client_secret_cifrado)) {
     throw new HttpError(400, 'No se puede activar: faltan credenciales (Client ID y Client Secret).');
   }
-  await ownerDb().updateTable('pasarela_pago').set({ activo }).where('proveedor', '=', proveedor).execute();
+  await ownerDb().updateTable('pasarela_pago').set({ activa: activo }).where('proveedor', '=', proveedor).execute();
   return { ok: true };
 }
 
@@ -124,15 +118,14 @@ export async function eliminarPasarela(proveedor: string) {
 export async function credencialesDe(proveedor: string) {
   const p = await ownerDb()
     .selectFrom('pasarela_pago')
-    .select(['proveedor', 'modo', 'moneda', 'client_id', 'client_secret_cifrado', 'webhook_secret_cifrado', 'activo'])
+    .select(['proveedor', 'modo', 'client_id', 'client_secret_cifrado', 'webhook_secret_cifrado', 'activa'])
     .where('proveedor', '=', proveedor)
     .executeTakeFirst();
   if (!p) return null;
   return {
     proveedor: p.proveedor,
     modo: p.modo,
-    moneda: p.moneda,
-    activo: p.activo,
+    activo: p.activa,
     clientId: p.client_id ?? '',
     clientSecret: descifrar(p.client_secret_cifrado),
     webhookSecret: descifrar(p.webhook_secret_cifrado),

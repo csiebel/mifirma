@@ -42,7 +42,7 @@ export async function verCorreo() {
       remitente_email: c.remitente_email,
       password_mask: enmascarar(c.password_cifrado),
       tiene_password: !!c.password_cifrado,
-      activo: c.activo,
+      activo: c.activa,
     },
   };
 }
@@ -77,7 +77,7 @@ export async function guardarCorreo(d: DatosCorreo) {
         remitente_nombre: d.remitenteNombre,
         remitente_email: d.remitenteEmail,
         password_cifrado: d.password ? cifrar(d.password) : null,
-        activo: false,
+        activa: false,
       })
       .execute();
   }
@@ -91,14 +91,14 @@ export async function setCorreoActivo(activo: boolean) {
   if (activo && !c.password_cifrado) {
     throw new HttpError(400, 'No se puede activar: falta la contraseña (App Password).');
   }
-  await ownerDb().updateTable('correo_config').set({ activo }).where('id', '=', c.id).execute();
+  await ownerDb().updateTable('correo_config').set({ activa: activo }).where('id', '=', c.id).execute();
   return { ok: true };
 }
 
 /** Transporte nodemailer desde la config activa. Uso interno; requiere red. */
 async function transporte() {
   const c = await fila();
-  if (!c || !c.activo) throw new HttpError(503, 'No hay conexión de correo activa.');
+  if (!c || !c.activa) throw new HttpError(503, 'No hay conexión de correo activa.');
   const pass = descifrar(c.password_cifrado);
   if (!pass) throw new HttpError(503, 'La conexión de correo no tiene contraseña cargada.');
   const t = nodemailer.createTransport({

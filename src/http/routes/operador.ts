@@ -386,26 +386,28 @@ export function registrarRutasOperador(app: FastifyInstance) {
   app.get('/operador/integracion-facturacion', async (req) => {
     const s = await sesion(req);
     exigirCap(s, 'gestionar_pagos');
-    return verIntegracionFacturacion();
+    const { pais } = z.object({ pais: z.string().length(2) }).parse(req.query);
+    return verIntegracionFacturacion(pais.toUpperCase());
   });
   app.post('/operador/integracion-facturacion', async (req) => {
     const s = await sesion(req);
     exigirCap(s, 'gestionar_pagos');
     const b = z
       .object({
+        pais: z.string().length(2),
         modo: z.enum(['api', 'archivo']),
         api_url: z.string().optional().nullable(),
         api_credencial: z.string().optional(),
         archivo_formato: z.string().optional().nullable(),
       })
       .parse(req.body);
-    return guardarIntegracionFacturacion({ modo: b.modo, apiUrl: b.api_url, apiCredencial: b.api_credencial, archivoFormato: b.archivo_formato });
+    return guardarIntegracionFacturacion(b.pais.toUpperCase(), { modo: b.modo, apiUrl: b.api_url, apiCredencial: b.api_credencial, archivoFormato: b.archivo_formato });
   });
   app.patch('/operador/integracion-facturacion', async (req) => {
     const s = await sesion(req);
     exigirCap(s, 'gestionar_pagos');
-    const b = z.object({ activo: z.boolean() }).parse(req.body);
-    return setIntegracionFacturacionActiva(b.activo);
+    const b = z.object({ pais: z.string().length(2), activo: z.boolean() }).parse(req.body);
+    return setIntegracionFacturacionActiva(b.pais.toUpperCase(), b.activo);
   });
 
   // --- Conexión de correo saliente (plataforma) ---
