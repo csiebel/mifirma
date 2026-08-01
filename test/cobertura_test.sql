@@ -132,3 +132,26 @@ begin
   end if;
   raise notice 'OK C6 — las particiones no se pueden consultar directamente';
 end $c6$;
+
+-- ---------- C7: ninguna vista perfora la RLS -------------------------------
+--
+-- Por defecto una vista se ejecuta con los permisos de su DUEÑO, no de quien
+-- consulta. Si el dueño es quien corrió las migraciones, las políticas de las
+-- tablas de abajo se evalúan contra él —que las saltea— y la vista se convierte
+-- en una puerta trasera que no aparece en ninguna revisión de políticas.
+--
+-- `security_invoker = true` invierte eso: la vista corre con los permisos y el
+-- contexto de quien la consulta, que es lo que este modelo necesita siempre.
+do $c7$
+declare v text;
+begin
+  select string_agg(c.relname, ', ' order by c.relname) into v
+  from pg_class c join pg_namespace n on n.oid = c.relnamespace
+  where n.nspname = 'public' and c.relkind = 'v'
+    and coalesce((select option_value from pg_options_to_table(c.reloptions)
+                   where option_name = 'security_invoker'), 'false') <> 'true';
+  if v is not null then
+    raise exception 'FALLA C7 — vistas sin security_invoker (saltean RLS): %', v;
+  end if;
+  raise notice 'OK C7 — ninguna vista se ejecuta con los permisos de su dueño';
+end $c7$;

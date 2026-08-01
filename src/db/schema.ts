@@ -3,10 +3,10 @@
  *
  * NO editar a mano: se regenera desde el esquema real con
  *
- *   DATABASE_URL="$MIFIRMA_DB" \
+ *   DATABASE_URL="$MIFIRMA_DB" \\
  *     npx kysely-codegen --dialect postgres --out-file src/db/schema.ts
  *
- * Cubre las migraciones 001 a 015. Las particiones de `bitacora_plataforma` no
+ * Cubre las migraciones 001 a 016. Las particiones de `bitacora_plataforma` no
  * aparecen a propósito: se escribe y se lee siempre por la tabla padre.
  *
  * Al agregar migraciones hay que volver a generarlo, o TypeScript va a seguir
@@ -244,6 +244,7 @@ export interface Cuenta {
 }
 
 export interface DispositivoConfiable {
+  anclaje_probado_id: string | null;
   confiado_en: Generated<Timestamp>;
   device_id: string;
   etiqueta: string | null;
@@ -251,8 +252,24 @@ export interface DispositivoConfiable {
   id: Generated<string>;
   identidad_id: string;
   ip_alta: string | null;
+  nivel_garantia: string | null;
   revocado_en: Timestamp | null;
   ultimo_uso_en: Generated<Timestamp>;
+  user_agent: string | null;
+}
+
+export interface DispositivoConfiableVigente {
+  anclaje_probado_id: string | null;
+  confiado_en: Timestamp | null;
+  device_id: string | null;
+  etiqueta: string | null;
+  expira_en: Timestamp | null;
+  id: string | null;
+  identidad_id: string | null;
+  ip_alta: string | null;
+  nivel_garantia: string | null;
+  revocado_en: Timestamp | null;
+  ultimo_uso_en: Timestamp | null;
   user_agent: string | null;
 }
 
@@ -423,6 +440,7 @@ export interface Otorgamiento {
 }
 
 export interface OtpLogin {
+  anclaje_destino_id: string | null;
   canal: Generated<string>;
   codigo_hash: string;
   creado_en: Generated<Timestamp>;
@@ -661,6 +679,7 @@ export interface DB {
   credencial: Credencial;
   cuenta: Cuenta;
   dispositivo_confiable: DispositivoConfiable;
+  dispositivo_confiable_vigente: DispositivoConfiableVigente;
   empresa: Empresa;
   factura_linea: FacturaLinea;
   factura_plataforma: FacturaPlataforma;

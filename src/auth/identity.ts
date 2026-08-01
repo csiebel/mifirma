@@ -1,65 +1,71 @@
 import { jwtVerify, createRemoteJWKSet, SignJWT, type JWTPayload } from 'jose';
 import { HttpError } from '../http/errors';
+import type { NivelGarantia } from '../db/contexto';
+
+/**
+ * Emisión y verificación de tokens.
+ *
+ * ⚠ El token lleva los ANCLAJES PROBADOS y el NIVEL DE GARANTÍA de la sesión, y
+ * eso los vuelve datos de seguridad de primer orden: son lo que decide si un
+ * firmante puede abrir un documento que exige nivel sustancial. Van firmados
+ * dentro del JWT y NUNCA se leen de un header, un query param o el cuerpo de la
+ * request. Si algún día alguien agrega `?nivel=alto`, la firma avanzada deja de
+ * significar nada.
+ *
+ * El nivel es de la SESIÓN, no de la identidad: la misma persona entra hoy con
+ * contraseña (bajo) y mañana con certificado (alto). Por eso viaja en el token
+ * y no se lee de una tabla.
+ */
 
 export interface Identidad {
-  usuarioId: string;
   cuentaId: string;
+  identidadId: string;
+  /** Ids de `anclaje_identidad` efectivamente probados en esta sesión. */
+  anclajesProbados: string[];
+  nivelGarantia: NivelGarantia;
+  idioma?: string;
 }
 
-// Paso 1: validamos un JWT firmado y extraemos empresa + usuario para fijar el
-// contexto de tenant. El login/SSO real, la rotación de claves y la resolución
-// de roles/capacidades + alcance jerárquico se enchufan acá en el Paso 3 (§14).
 const jwks = process.env.AUTH_JWKS_URL
   ? createRemoteJWKSet(new URL(process.env.AUTH_JWKS_URL))
   : null;
 
-// DEV: secreto local para emitir/verificar JWT sin IdP (login de desarrollo).
-// En producción se usa AUTH_JWKS_URL (IdP real); nunca AUTH_DEV_SECRET.
+// DEV: secreto local para emitir/verificar JWT sin IdP.
+// En producción se usa AUTH_JWKS_URL; nunca AUTH_DEV_SECRET.
 const devSecret = process.env.AUTH_DEV_SECRET
   ? new TextEncoder().encode(process.env.AUTH_DEV_SECRET)
   : null;
 
-// Emite un token de desarrollo (HS256) para que la UI se autentique sin IdP.
-export async function emitirTokenDev(cuentaId: string, usuarioId: string): Promise<string> {
+function secreto(): Uint8Array {
   if (!devSecret) {
-    throw new HttpError(500, 'AUTH_DEV_SECRET no configurado: el login de desarrollo está deshabilitado');
+    throw new HttpError(500, 'AUTH_DEV_SECRET no configurado: el login local está deshabilitado.');
   }
-  return new SignJWT({ cuenta_id: cuentaId })
+  return devSecret;
+}
+
+export interface DatosDeSesion {
+  anclajesProbados?: string[];
+  nivelGarantia?: NivelGarantia;
+  idioma?: string;
+}
+
+/** Sesión de trabajo: identidad + cuenta activa + lo que probó al entrar. */
+export async function emitirSesion(
+  cuentaId: string,
+  identidadId: string,
+  datos: DatosDeSesion = {},
+): Promise<string> {
+  return new SignJWT({
+    cuenta_id: cuentaId,
+    anc: datos.anclajesProbados ?? [],
+    niv: datos.nivelGarantia ?? 'bajo',
+    lang: datos.idioma,
+  })
     .setProtectedHeader({ alg: 'HS256' })
-    .setSubject(usuarioId)
+    .setSubject(identidadId)
     .setIssuedAt()
     .setExpirationTime('8h')
-    .sign(devSecret);
-}
-
-// Desafío de OTP: token corto que prueba que el paso 1 (contraseña) ya pasó, sin
-// emitir sesión. NO lleva `sub`, así `autenticar` lo rechaza: no sirve como token
-// de sesión aunque alguien lo intente. Lleva usuario + equipo en claims propios.
-export async function firmarDesafioOtp(cuentaId: string, usuarioId: string, deviceId: string): Promise<string> {
-  if (!devSecret) throw new HttpError(500, 'AUTH_DEV_SECRET no configurado.');
-  return new SignJWT({ cuenta_id: cuentaId, uid: usuarioId, did: deviceId, purpose: 'otp' })
-    .setProtectedHeader({ alg: 'HS256' })
-    .setIssuedAt()
-    .setExpirationTime('10m')
-    .sign(devSecret);
-}
-
-export async function verificarDesafioOtp(
-  token: string,
-): Promise<{ cuentaId: string; usuarioId: string; deviceId: string }> {
-  if (!devSecret) throw new HttpError(500, 'AUTH_DEV_SECRET no configurado.');
-  let payload: JWTPayload;
-  try {
-    ({ payload } = await jwtVerify(token, devSecret));
-  } catch {
-    throw new HttpError(401, 'El desafío de verificación venció o no es válido. Iniciá sesión de nuevo.');
-  }
-  if (payload.purpose !== 'otp') throw new HttpError(401, 'Desafío inválido.');
-  const cuentaId = typeof payload.cuenta_id === 'string' ? payload.cuenta_id : undefined;
-  const usuarioId = typeof payload.uid === 'string' ? payload.uid : undefined;
-  const deviceId = typeof payload.did === 'string' ? payload.did : undefined;
-  if (!cuentaId || !usuarioId || !deviceId) throw new HttpError(401, 'Desafío incompleto.');
-  return { cuentaId, usuarioId, deviceId };
+    .sign(secreto());
 }
 
 export async function autenticar(authHeader?: string): Promise<Identidad> {
@@ -80,53 +86,113 @@ export async function autenticar(authHeader?: string): Promise<Identidad> {
   }
 
   const cuentaId = typeof payload.cuenta_id === 'string' ? payload.cuenta_id : undefined;
-  const usuarioId = payload.sub;
-  if (!cuentaId || !usuarioId) {
+  const identidadId = payload.sub;
+  if (!cuentaId || !identidadId) {
     throw new HttpError(401, 'El token no trae cuenta_id / sub');
   }
 
-  return { cuentaId, usuarioId };
+  return {
+    cuentaId,
+    identidadId,
+    anclajesProbados: Array.isArray(payload.anc)
+      ? (payload.anc as unknown[]).filter((x): x is string => typeof x === 'string')
+      : [],
+    nivelGarantia: esNivel(payload.niv) ? payload.niv : 'bajo',
+    idioma: typeof payload.lang === 'string' ? payload.lang : undefined,
+  };
 }
 
-// Desafío de SELECCIÓN de empresa: cuando un email tiene la misma contraseña en varias
-// empresas, el login valida la contraseña y emite este JWT corto (prueba de que ya se
-// validó) con los pares empresa/usuario elegibles. El segundo paso lo presenta junto
-// con la empresa elegida; así no se filtra en qué empresas existe el email ni se puede
-// manipular la elección desde el cliente.
-export async function firmarDesafioEleccionEmpresa(
-  email: string,
-  pares: { cuentaId: string; usuarioId: string }[],
-): Promise<string> {
-  if (!devSecret) throw new HttpError(500, 'AUTH_DEV_SECRET no configurado.');
-  return new SignJWT({ email, pares, purpose: 'elegir_empresa' })
+function esNivel(v: unknown): v is NivelGarantia {
+  return v === 'ninguno' || v === 'bajo' || v === 'sustancial' || v === 'alto';
+}
+
+// ---------------------------------------------------------------------------
+// Desafíos intermedios del login
+//
+// Ninguno lleva `sub`, así que `autenticar` los rechaza: un desafío no sirve
+// como token de sesión aunque alguien lo intente usar en el header.
+// ---------------------------------------------------------------------------
+
+/**
+ * Paso contraseña → OTP. Prueba que la contraseña ya se validó.
+ *
+ * NO lleva cuenta_id, y eso es el cambio de fondo respecto de Payroll NG: en
+ * MiFirma la identidad es global y precede a la cuenta. Se prueba quién sos
+ * primero; a qué cuenta entrás se decide después.
+ */
+export async function firmarDesafioOtp(identidadId: string, deviceId: string): Promise<string> {
+  return new SignJWT({ iid: identidadId, did: deviceId, purpose: 'otp' })
     .setProtectedHeader({ alg: 'HS256' })
     .setIssuedAt()
     .setExpirationTime('10m')
-    .sign(devSecret);
+    .sign(secreto());
 }
 
-export async function verificarDesafioEleccionEmpresa(
+export async function verificarDesafioOtp(
   token: string,
-): Promise<{ email: string; pares: { cuentaId: string; usuarioId: string }[] }> {
-  if (!devSecret) throw new HttpError(500, 'AUTH_DEV_SECRET no configurado.');
+): Promise<{ identidadId: string; deviceId: string }> {
+  const payload = await verificar(token, 'otp', 'El desafío de verificación venció o no es válido. Iniciá sesión de nuevo.');
+  const identidadId = typeof payload.iid === 'string' ? payload.iid : undefined;
+  const deviceId = typeof payload.did === 'string' ? payload.did : undefined;
+  if (!identidadId || !deviceId) throw new HttpError(401, 'Desafío incompleto.');
+  return { identidadId, deviceId };
+}
+
+/**
+ * Paso identidad probada → elección de cuenta.
+ *
+ * Lleva firmado lo que la persona probó en esta sesión (anclajes y nivel) para
+ * que no se pierda entre un paso y el otro, y las cuentas elegibles, para que
+ * el cliente no pueda pedir entrar a una que no le corresponde.
+ */
+export async function firmarDesafioCuenta(
+  identidadId: string,
+  cuentas: string[],
+  datos: DatosDeSesion,
+): Promise<string> {
+  return new SignJWT({
+    iid: identidadId,
+    cuentas,
+    anc: datos.anclajesProbados ?? [],
+    niv: datos.nivelGarantia ?? 'bajo',
+    lang: datos.idioma,
+    purpose: 'elegir_cuenta',
+  })
+    .setProtectedHeader({ alg: 'HS256' })
+    .setIssuedAt()
+    .setExpirationTime('10m')
+    .sign(secreto());
+}
+
+export async function verificarDesafioCuenta(
+  token: string,
+): Promise<{ identidadId: string; cuentas: string[]; datos: DatosDeSesion }> {
+  const payload = await verificar(token, 'elegir_cuenta', 'La selección expiró. Iniciá sesión de nuevo.');
+  const identidadId = typeof payload.iid === 'string' ? payload.iid : undefined;
+  const cuentas = Array.isArray(payload.cuentas)
+    ? (payload.cuentas as unknown[]).filter((x): x is string => typeof x === 'string')
+    : [];
+  if (!identidadId || cuentas.length === 0) throw new HttpError(401, 'Desafío incompleto.');
+  return {
+    identidadId,
+    cuentas,
+    datos: {
+      anclajesProbados: Array.isArray(payload.anc)
+        ? (payload.anc as unknown[]).filter((x): x is string => typeof x === 'string')
+        : [],
+      nivelGarantia: esNivel(payload.niv) ? payload.niv : 'bajo',
+      idioma: typeof payload.lang === 'string' ? payload.lang : undefined,
+    },
+  };
+}
+
+async function verificar(token: string, purpose: string, mensaje: string): Promise<JWTPayload> {
   let payload: JWTPayload;
   try {
-    ({ payload } = await jwtVerify(token, devSecret));
+    ({ payload } = await jwtVerify(token, secreto()));
   } catch {
-    throw new HttpError(401, 'La selección expiró. Iniciá sesión de nuevo.');
+    throw new HttpError(401, mensaje);
   }
-  if (payload.purpose !== 'elegir_empresa') throw new HttpError(401, 'Desafío inválido.');
-  const email = typeof payload.email === 'string' ? payload.email : '';
-  const pares: { cuentaId: string; usuarioId: string }[] = [];
-  if (Array.isArray(payload.pares)) {
-    for (const p of payload.pares as unknown[]) {
-      if (p && typeof p === 'object') {
-        const e = (p as Record<string, unknown>).cuentaId;
-        const u = (p as Record<string, unknown>).usuarioId;
-        if (typeof e === 'string' && typeof u === 'string') pares.push({ cuentaId: e, usuarioId: u });
-      }
-    }
-  }
-  if (!email || pares.length === 0) throw new HttpError(401, 'Desafío incompleto.');
-  return { email, pares };
+  if (payload.purpose !== purpose) throw new HttpError(401, 'Desafío inválido.');
+  return payload;
 }
