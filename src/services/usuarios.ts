@@ -1,248 +1,422 @@
-import { withUsuario, puede, type ContextoAutz } from '../auth/authz';
+import { sql } from 'kysely';
+import { withUsuario, exigir } from '../auth/authz';
 import { enviarInvitacionPorCorreo } from './auth_reset';
 import { registrar } from './auditoria';
 import { HttpError } from '../http/errors';
 
-function gate(autz: ContextoAutz) {
-  if (!puede(autz, 'usuario', 'escribir')) throw new HttpError(403, 'No tenés permiso para gestionar accesos.');
-}
-
 /**
- * Gestión de accesos (cuentas de usuario). Es tarea de admin: el documento le
- * asigna "configurar usuarios, roles y estructura". Gateado por usuario:escribir.
- * Dar de alta un empleado crea la persona y su relación; ESTO crea la cuenta con
- * la que esa persona ingresa, y le asigna un rol (que define qué puede ver y
- * sobre quién). El login es por email, así que el email es la credencial.
+ * Gestión de accesos: quién de tu empresa puede entrar y con qué rol.
+ *
+ * ═══ CÓMO CAMBIÓ RESPECTO DE PAYROLL NG ═══
+ *
+ * Allá "crear un usuario" era literalmente insertar una fila en `usuario`
+ * dentro de la empresa, colgada de una `relacion_laboral`. Acá son tres cosas
+ * distintas que conviene no confundir:
+ *
+ *   · `identidad`  — quién es la persona. GLOBAL, no pertenece a tu empresa.
+ *   · `membresia`  — que esa persona esté habilitada en TU cuenta.
+ *   · `usuario_rol`— qué puede hacer dentro de tu cuenta.
+ *
+ * Dar acceso es crear la membresía y el rol. La identidad puede existir desde
+ * antes: alguien a quien otra empresa invitó a firmar hace un año ya tiene la
+ * suya, en estado 'latente'. No se duplica ni se migra nada — se le agrega una
+ * membresía y listo, y sus documentos viejos siguen siendo suyos.
+ *
+ * ═══ LO QUE UN ADMIN DE EMPRESA NO PUEDE HACER ═══
+ *
+ * En payroll el admin editaba el teléfono y el canal de OTP del usuario. Acá
+ * eso NO existe, a propósito: el teléfono es un dato de la identidad, que es
+ * global. Si el admin de la empresa A pudiera cambiarlo, estaría tocando el
+ * segundo factor que esa misma persona usa para entrar a la empresa B — y en el
+ * peor caso, redirigiéndose los códigos a su propio teléfono.
+ *
+ * Cada persona administra su teléfono y sus anclajes en su perfil. El admin da
+ * y quita acceso a SU cuenta; no administra personas.
  */
 
-// Roles de la empresa (para elegir al dar acceso).
-export async function listarRoles(cuentaId: string, usuarioId: string) {
-  return withUsuario(cuentaId, usuarioId, async (trx, autz) => {
-    if (!puede(autz, 'usuario', 'escribir'))
-      throw new HttpError(403, 'No tenés permiso para gestionar accesos.');
-    return trx.selectFrom('rol').select(['id', 'nombre']).orderBy('nombre').execute();
-  });
-}
+/** Capacidad que gatea todo este archivo. Ver el catálogo en la migración 004. */
+const CAP = ['usuario', 'administrar'] as const;
 
-export interface CrearAccesoInput {
-  relacionId: string; // el empleado (de ahí se deriva la persona)
-  email: string;
-  rolId: string;
-  vincular?: boolean; // si el email ya tiene cuenta, confirmar que se reasigne a este empleado
-}
-export async function crearAcceso(cuentaId: string, usuarioId: string, input: CrearAccesoInput) {
-  const r = await withUsuario(cuentaId, usuarioId, async (trx, autz) => {
-    gate(autz);
+// ---------------------------------------------------------------------------
+// Roles disponibles
+// ---------------------------------------------------------------------------
 
-    // Persona detrás del empleado.
-    const rel = await trx
-      .selectFrom('relacion_laboral')
-      .select(['persona_id'])
-      .where('id', '=', input.relacionId)
-      .executeTakeFirst();
-    if (!rel) throw new HttpError(404, 'No encontré ese empleado en tu empresa.');
-
-    // El rol tiene que ser de esta empresa (RLS ya filtra, pero validamos claro).
-    const rol = await trx.selectFrom('rol').select(['id']).where('id', '=', input.rolId).executeTakeFirst();
-    if (!rol) throw new HttpError(400, 'Ese rol no existe en tu empresa.');
-
-    // Una persona, una cuenta; y el email no puede repetirse en la empresa.
-    const yaPersona = await trx
-      .selectFrom('usuario')
-      .select(['id'])
-      .where('persona_id', '=', rel.persona_id)
-      .executeTakeFirst();
-    if (yaPersona) throw new HttpError(409, 'Ese empleado ya tiene una cuenta de acceso.');
-    const existente = await trx
-      .selectFrom('usuario')
-      .select(['id', 'persona_id'])
-      .where('email', '=', input.email)
-      .executeTakeFirst();
-    if (existente) {
-      // El email ya tiene cuenta. Si el admin no confirmó, avisamos para que la consola
-      // ofrezca el botón de vincular (no tocamos nada todavía).
-      if (!input.vincular) {
-        return { necesitaVincular: true as const, email: input.email };
-      }
-      // Salvaguarda: no le sacamos la cuenta a otro empleado activo distinto.
-      if (existente.persona_id && existente.persona_id !== rel.persona_id) {
-        const otroActivo = await trx
-          .selectFrom('relacion_laboral')
-          .select(['id'])
-          .where('persona_id', '=', existente.persona_id)
-          .where('fecha_egreso', 'is', null)
-          .executeTakeFirst();
-        if (otroActivo) throw new HttpError(409, 'Ese email pertenece a la cuenta de otro empleado activo. Usá otro email.');
-      }
-      // Vincular: la cuenta existente pasa a ser la de este empleado y recibe el rol.
-      await trx.updateTable('usuario').set({ persona_id: rel.persona_id }).where('id', '=', existente.id).execute();
-      const tieneRol = await trx
-        .selectFrom('usuario_rol')
-        .select(['rol_id'])
-        .where('usuario_id', '=', existente.id)
-        .where('rol_id', '=', input.rolId)
-        .executeTakeFirst();
-      if (!tieneRol) {
-        await trx.insertInto('usuario_rol').values({ cuenta_id: cuentaId, usuario_id: existente.id, rol_id: input.rolId }).execute();
-      }
-      await registrar(trx, cuentaId, usuarioId, { accion: 'usuario.vincular_acceso', recurso: 'usuario', objetoId: existente.id, detalle: { email: input.email, rol_id: input.rolId } });
-      return { usuarioId: existente.id, email: input.email, vinculado: true as const };
-    }
-
-    // Crear la cuenta y asignarle el rol.
-    const u = await trx
-      .insertInto('usuario')
-      .values({ cuenta_id: cuentaId, persona_id: rel.persona_id, email: input.email })
-      .returning('id')
-      .executeTakeFirstOrThrow();
-    await trx
-      .insertInto('usuario_rol')
-      .values({ cuenta_id: cuentaId, usuario_id: u.id, rol_id: input.rolId })
-      .execute();
-
-    await registrar(trx, cuentaId, usuarioId, { accion: 'usuario.crear_acceso', recurso: 'usuario', objetoId: u.id, detalle: { email: input.email, rol_id: input.rolId } });
-    return { usuarioId: u.id, email: input.email };
-  });
-  // Si el email ya tenía cuenta y falta confirmar, devolvemos el aviso sin enviar nada.
-  if ('necesitaVincular' in r) return r;
-  // Invitación por correo para que elija su contraseña (cuenta nueva o recién vinculada).
-  await enviarInvitacionPorCorreo(cuentaId, r.usuarioId, r.email, input.rolId);
-  return r;
-}
-
-// ---- Panel del admin: listar y gestionar usuarios y sus roles ----
-export interface UsuarioListado {
-  usuario_id: string;
-  email: string;
-  nombre: string | null;
-  activo: boolean;
-  tiene_password: boolean;
-  telefono: string | null;
-  canal_otp: string;
-  roles: { rol_id: string; nombre: string }[];
-}
-
-export async function listarUsuarios(cuentaId: string, adminUsuarioId: string): Promise<UsuarioListado[]> {
-  return withUsuario(cuentaId, adminUsuarioId, async (trx, autz) => {
-    gate(autz);
-    const usuarios = await trx
-      .selectFrom('usuario as u')
-      .leftJoin('persona as p', 'p.id', 'u.persona_id')
-      .select(['u.id as usuario_id', 'u.email as email', 'u.activo as activo', 'u.password_hash as password_hash', 'u.telefono as telefono', 'u.canal_otp as canal_otp', 'p.nombre as nombre'])
-      .orderBy('u.email')
-      .execute();
+export async function listarRoles(cuentaId: string, identidadId: string) {
+  return withUsuario(cuentaId, identidadId, async (trx, autz) => {
+    exigir(autz, ...CAP, 'No tenés permiso para gestionar accesos.');
     const roles = await trx
-      .selectFrom('usuario_rol as ur')
-      .innerJoin('rol as r', 'r.id', 'ur.rol_id')
-      .select(['ur.usuario_id as usuario_id', 'r.id as rol_id', 'r.nombre as rol_nombre'])
+      .selectFrom('rol')
+      .select(['id', 'codigo', 'nombre_i18n', 'sistema'])
       .execute();
-    const porUsuario = new Map<string, { rol_id: string; nombre: string }[]>();
-    for (const r of roles) {
-      const a = porUsuario.get(r.usuario_id) || [];
-      a.push({ rol_id: r.rol_id, nombre: r.rol_nombre });
-      porUsuario.set(r.usuario_id, a);
-    }
-    return usuarios.map((u) => ({
-      usuario_id: u.usuario_id,
-      email: u.email,
-      nombre: u.nombre ?? null,
-      activo: u.activo,
-      tiene_password: !!u.password_hash,
-      telefono: u.telefono ?? null,
-      canal_otp: u.canal_otp,
-      roles: porUsuario.get(u.usuario_id) || [],
+    return roles.map((r) => ({
+      id: r.id,
+      codigo: r.codigo,
+      nombre: textoI18n(r.nombre_i18n) ?? r.codigo,
+      sistema: r.sistema,
     }));
   });
 }
 
-export async function asignarRol(cuentaId: string, adminUsuarioId: string, objetivoId: string, rolId: string) {
-  return withUsuario(cuentaId, adminUsuarioId, async (trx, autz) => {
-    gate(autz);
-    const u = await trx.selectFrom('usuario').select('id').where('id', '=', objetivoId).executeTakeFirst();
-    if (!u) throw new HttpError(404, 'Usuario no encontrado.');
+/**
+ * Los nombres de rol son `jsonb` por idioma. La resolución "de verdad" la hace
+ * `app.t()` en la base con el idioma de la sesión; esto es el equivalente del
+ * lado del servidor para armar respuestas JSON.
+ */
+function textoI18n(v: unknown, idioma = 'es'): string | null {
+  if (!v || typeof v !== 'object') return null;
+  const m = v as Record<string, string>;
+  return m[idioma] ?? m.es ?? m.en ?? Object.values(m)[0] ?? null;
+}
+
+// ---------------------------------------------------------------------------
+// Dar acceso
+// ---------------------------------------------------------------------------
+
+export interface DarAccesoInput {
+  email: string;
+  rolId: string;
+  /** Legajo dentro de la cuenta, opcional: no toda cuenta lleva organigrama. */
+  personaId?: string | null;
+  nombre?: string | null;
+}
+
+export interface AccesoCreado {
+  identidad_id: string;
+  email: string;
+  ya_existia: boolean;
+}
+
+export async function darAcceso(
+  cuentaId: string,
+  identidadId: string,
+  input: DarAccesoInput,
+): Promise<AccesoCreado> {
+  const email = input.email.trim();
+  if (!/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(email)) {
+    throw new HttpError(400, 'El correo no es válido.');
+  }
+
+  const r = await withUsuario(cuentaId, identidadId, async (trx, autz) => {
+    exigir(autz, ...CAP, 'No tenés permiso para gestionar accesos.');
+
+    const rol = await trx.selectFrom('rol').select(['id']).where('id', '=', input.rolId).executeTakeFirst();
+    if (!rol) throw new HttpError(400, 'Ese rol no existe en tu cuenta.');
+
+    // Resuelve o crea la identidad. Es `security definer` y anti-enumeración:
+    // devuelve lo mismo exista o no, así que dar acceso no sirve para averiguar
+    // quién más está en el sistema.
+    const res = await sql<{ id: string }>`select app.resolver_identidad(${email}) as id`.execute(trx);
+    const destino = res.rows[0]?.id;
+    if (!destino) throw new HttpError(500, 'No se pudo resolver la identidad.');
+
+    const previa = await trx
+      .selectFrom('membresia')
+      .select(['id', 'estado'])
+      .where('identidad_id', '=', destino)
+      .where('cuenta_id', '=', cuentaId)
+      .where('hasta', 'is', null)
+      .executeTakeFirst();
+
+    const yaExistia = !!previa;
+
+    if (previa) {
+      if (previa.estado === 'activa') {
+        throw new HttpError(409, 'Esa persona ya tiene acceso a tu cuenta.');
+      }
+      // Reactivar una membresía suspendida en vez de crear otra: el histórico
+      // de esa persona en la cuenta no se parte en dos.
+      await trx
+        .updateTable('membresia')
+        .set({ estado: 'activa', persona_id: input.personaId ?? null })
+        .where('id', '=', previa.id)
+        .execute();
+    } else {
+      await trx
+        .insertInto('membresia')
+        .values({ identidad_id: destino, cuenta_id: cuentaId, persona_id: input.personaId ?? null })
+        .execute();
+    }
+
+    await trx
+      .insertInto('usuario_rol')
+      .values({ identidad_id: destino, cuenta_id: cuentaId, rol_id: input.rolId, asignado_por: identidadId })
+      .onConflict((oc) => oc.columns(['identidad_id', 'cuenta_id', 'rol_id']).doNothing())
+      .execute();
+
+    // Nombre para mostrar, sólo si la identidad todavía no tiene uno propio: el
+    // admin de una cuenta no le renombra la identidad a nadie.
+    if (input.nombre) {
+      await trx
+        .updateTable('identidad')
+        .set({ nombre_mostrado: input.nombre })
+        .where('id', '=', destino)
+        .where('nombre_mostrado', 'is', null)
+        .execute();
+    }
+
+    await registrar(trx, cuentaId, identidadId, {
+      accion: 'acceso.otorgado',
+      recursoTipo: 'membresia',
+      recursoId: destino,
+      despues: { email, rol_id: input.rolId, reactivada: yaExistia },
+    });
+
+    return { identidad_id: destino, email, ya_existia: yaExistia };
+  });
+
+  await enviarInvitacionPorCorreo(cuentaId, r.identidad_id, r.email, input.rolId);
+  return r;
+}
+
+// ---------------------------------------------------------------------------
+// Panel
+// ---------------------------------------------------------------------------
+
+export interface UsuarioListado {
+  identidad_id: string;
+  email: string;
+  nombre: string | null;
+  estado: string;
+  tiene_password: boolean;
+  roles: { rol_id: string; nombre: string }[];
+}
+
+export async function listarUsuarios(cuentaId: string, identidadId: string): Promise<UsuarioListado[]> {
+  return withUsuario(cuentaId, identidadId, async (trx, autz) => {
+    exigir(autz, ...CAP, 'No tenés permiso para gestionar accesos.');
+
+    const filas = await trx
+      .selectFrom('membresia as m')
+      .innerJoin('identidad as i', 'i.id', 'm.identidad_id')
+      .leftJoin('credencial as c', 'c.identidad_id', 'i.id')
+      .select([
+        'i.id as identidad_id',
+        'i.email_mostrado as email',
+        'i.nombre_mostrado as nombre',
+        'm.estado as estado',
+        'c.hash_password as hash',
+      ])
+      .where('m.cuenta_id', '=', cuentaId)
+      .where('m.hasta', 'is', null)
+      .orderBy('i.email_mostrado')
+      .execute();
+
+    const roles = await trx
+      .selectFrom('usuario_rol as ur')
+      .innerJoin('rol as r', 'r.id', 'ur.rol_id')
+      .select(['ur.identidad_id as identidad_id', 'r.id as rol_id', 'r.codigo as codigo', 'r.nombre_i18n as nombre_i18n'])
+      .where('ur.cuenta_id', '=', cuentaId)
+      .execute();
+
+    const porIdentidad = new Map<string, { rol_id: string; nombre: string }[]>();
+    for (const r of roles) {
+      const a = porIdentidad.get(r.identidad_id) ?? [];
+      a.push({ rol_id: r.rol_id, nombre: textoI18n(r.nombre_i18n) ?? r.codigo });
+      porIdentidad.set(r.identidad_id, a);
+    }
+
+    return filas.map((f) => ({
+      identidad_id: f.identidad_id,
+      email: f.email,
+      nombre: f.nombre ?? null,
+      estado: f.estado,
+      tiene_password: !!f.hash,
+      roles: porIdentidad.get(f.identidad_id) ?? [],
+    }));
+  });
+}
+
+// ---------------------------------------------------------------------------
+// Roles de una persona
+// ---------------------------------------------------------------------------
+
+export async function asignarRol(
+  cuentaId: string,
+  identidadId: string,
+  objetivoId: string,
+  rolId: string,
+) {
+  return withUsuario(cuentaId, identidadId, async (trx, autz) => {
+    exigir(autz, ...CAP, 'No tenés permiso para gestionar accesos.');
+    await exigirMiembro(trx, cuentaId, objetivoId);
+
     const rol = await trx.selectFrom('rol').select('id').where('id', '=', rolId).executeTakeFirst();
     if (!rol) throw new HttpError(404, 'Rol no encontrado.');
-    const ya = await trx
-      .selectFrom('usuario_rol')
-      .select('usuario_id')
-      .where('usuario_id', '=', objetivoId)
-      .where('rol_id', '=', rolId)
-      .executeTakeFirst();
-    if (!ya) {
-      await trx.insertInto('usuario_rol').values({ cuenta_id: cuentaId, usuario_id: objetivoId, rol_id: rolId }).execute();
-    }
-    await registrar(trx, cuentaId, adminUsuarioId, { accion: 'usuario.asignar_rol', recurso: 'usuario', objetoId: objetivoId, detalle: { rol_id: rolId } });
-    return { ok: true };
-  });
-}
 
-export async function quitarRol(cuentaId: string, adminUsuarioId: string, objetivoId: string, rolId: string) {
-  return withUsuario(cuentaId, adminUsuarioId, async (trx, autz) => {
-    gate(autz);
-    if (objetivoId === adminUsuarioId) {
-      const rol = await trx.selectFrom('rol').select(['protegido']).where('id', '=', rolId).executeTakeFirst();
-      if (rol && rol.protegido) throw new HttpError(400, 'No podés quitarte a vos mismo un rol protegido.');
-    }
-    await trx.deleteFrom('usuario_rol').where('usuario_id', '=', objetivoId).where('rol_id', '=', rolId).execute();
-    await registrar(trx, cuentaId, adminUsuarioId, { accion: 'usuario.quitar_rol', recurso: 'usuario', objetoId: objetivoId, detalle: { rol_id: rolId } });
-    return { ok: true };
-  });
-}
+    await trx
+      .insertInto('usuario_rol')
+      .values({ identidad_id: objetivoId, cuenta_id: cuentaId, rol_id: rolId, asignado_por: identidadId })
+      .onConflict((oc) => oc.columns(['identidad_id', 'cuenta_id', 'rol_id']).doNothing())
+      .execute();
 
-export async function setActivoUsuario(cuentaId: string, adminUsuarioId: string, objetivoId: string, activo: boolean) {
-  return withUsuario(cuentaId, adminUsuarioId, async (trx, autz) => {
-    gate(autz);
-    if (objetivoId === adminUsuarioId && !activo) {
-      throw new HttpError(400, 'No podés inhabilitar tu propio usuario.');
-    }
-    const u = await trx.selectFrom('usuario').select('id').where('id', '=', objetivoId).executeTakeFirst();
-    if (!u) throw new HttpError(404, 'Usuario no encontrado.');
-    await trx.updateTable('usuario').set({ activo }).where('id', '=', objetivoId).execute();
-    await registrar(trx, cuentaId, adminUsuarioId, { accion: 'usuario.activo', recurso: 'usuario', objetoId: objetivoId, detalle: { activo } });
-    return { ok: true, activo };
-  });
-}
-
-export async function setCanalOtpUsuario(
-  cuentaId: string,
-  adminUsuarioId: string,
-  objetivoId: string,
-  telefono: string | null,
-  canal: string,
-) {
-  return withUsuario(cuentaId, adminUsuarioId, async (trx, autz) => {
-    gate(autz);
-    if (!['email', 'sms', 'whatsapp'].includes(canal)) {
-      throw new HttpError(400, 'Canal de OTP inválido.');
-    }
-    const tel = telefono && telefono.trim() ? telefono.trim() : null;
-    if ((canal === 'sms' || canal === 'whatsapp') && !tel) {
-      throw new HttpError(400, 'Para SMS o WhatsApp hace falta cargar un teléfono.');
-    }
-    if (tel && !/^\+?[0-9]{6,15}$/.test(tel.replace(/[\s-]/g, ''))) {
-      throw new HttpError(400, 'Teléfono inválido. Usá formato internacional (ej. +59899123456).');
-    }
-    const u = await trx.selectFrom('usuario').select('id').where('id', '=', objetivoId).executeTakeFirst();
-    if (!u) throw new HttpError(404, 'Usuario no encontrado.');
-    await trx.updateTable('usuario').set({ telefono: tel, canal_otp: canal }).where('id', '=', objetivoId).execute();
-    await registrar(trx, cuentaId, adminUsuarioId, {
-      accion: 'usuario.canal_otp',
-      recurso: 'usuario',
-      objetoId: objetivoId,
-      detalle: { canal, tiene_telefono: !!tel },
+    await registrar(trx, cuentaId, identidadId, {
+      accion: 'rol.asignado',
+      recursoTipo: 'usuario_rol',
+      recursoId: objetivoId,
+      despues: { rol_id: rolId },
     });
-    return { ok: true, canal, telefono: tel };
+    return { ok: true };
   });
 }
 
-export async function reenviarInvitacion(cuentaId: string, adminUsuarioId: string, objetivoId: string) {
-  const email = await withUsuario(cuentaId, adminUsuarioId, async (trx, autz) => {
-    gate(autz);
-    const u = await trx.selectFrom('usuario').select(['email']).where('id', '=', objetivoId).executeTakeFirst();
-    if (!u) throw new HttpError(404, 'Usuario no encontrado.');
-    await registrar(trx, cuentaId, adminUsuarioId, { accion: 'usuario.reinvitar', recurso: 'usuario', objetoId: objetivoId });
-    return u.email;
+export async function quitarRol(
+  cuentaId: string,
+  identidadId: string,
+  objetivoId: string,
+  rolId: string,
+) {
+  return withUsuario(cuentaId, identidadId, async (trx, autz) => {
+    exigir(autz, ...CAP, 'No tenés permiso para gestionar accesos.');
+
+    // No dejarse a uno mismo sin poder administrar: si se va el último rol con
+    // `usuario.administrar`, la cuenta queda sin nadie que pueda dar acceso y
+    // hay que entrar a arreglarlo por la consola del operador.
+    if (objetivoId === identidadId) {
+      const quedan = await contarAdministradores(trx, cuentaId, { excluyendoRol: rolId, deIdentidad: identidadId });
+      if (quedan === 0) {
+        throw new HttpError(
+          400,
+          'No podés quitarte el último rol que administra accesos: la cuenta quedaría sin administrador.',
+        );
+      }
+    }
+
+    await trx
+      .deleteFrom('usuario_rol')
+      .where('identidad_id', '=', objetivoId)
+      .where('cuenta_id', '=', cuentaId)
+      .where('rol_id', '=', rolId)
+      .execute();
+
+    await registrar(trx, cuentaId, identidadId, {
+      accion: 'rol.quitado',
+      recursoTipo: 'usuario_rol',
+      recursoId: objetivoId,
+      antes: { rol_id: rolId },
+    });
+    return { ok: true };
+  });
+}
+
+// ---------------------------------------------------------------------------
+// Alta y baja de acceso
+// ---------------------------------------------------------------------------
+
+export type EstadoAcceso = 'activa' | 'suspendida' | 'terminada';
+
+/**
+ * Suspender o terminar el acceso de alguien a TU cuenta.
+ *
+ * ⚠ No desactiva a la persona: la identidad es global y sigue existiendo, con
+ * sus documentos, sus otorgamientos y su acceso a otras empresas. Lo único que
+ * se corta es la membresía en esta cuenta.
+ *
+ * Los otorgamientos que esa persona ya tenía sobre documentos NO se tocan.
+ * Alguien que firmó un contrato el año pasado conserva su copia aunque haya
+ * dejado la empresa — eso es deliberado y está en `propiedad-y-otorgamientos.md`.
+ */
+export async function setEstadoAcceso(
+  cuentaId: string,
+  identidadId: string,
+  objetivoId: string,
+  estado: EstadoAcceso,
+) {
+  return withUsuario(cuentaId, identidadId, async (trx, autz) => {
+    exigir(autz, ...CAP, 'No tenés permiso para gestionar accesos.');
+
+    if (objetivoId === identidadId && estado !== 'activa') {
+      throw new HttpError(400, 'No podés darte de baja a vos mismo.');
+    }
+
+    const m = await exigirMiembro(trx, cuentaId, objetivoId);
+
+    await trx
+      .updateTable('membresia')
+      .set(estado === 'terminada' ? { estado, hasta: new Date().toISOString().slice(0, 10) } : { estado })
+      .where('id', '=', m.id)
+      .execute();
+
+    await registrar(trx, cuentaId, identidadId, {
+      accion: 'acceso.estado',
+      recursoTipo: 'membresia',
+      recursoId: objetivoId,
+      antes: { estado: m.estado },
+      despues: { estado },
+    });
+    return { ok: true, estado };
+  });
+}
+
+export async function reenviarInvitacion(cuentaId: string, identidadId: string, objetivoId: string) {
+  const email = await withUsuario(cuentaId, identidadId, async (trx, autz) => {
+    exigir(autz, ...CAP, 'No tenés permiso para gestionar accesos.');
+    await exigirMiembro(trx, cuentaId, objetivoId);
+    const i = await trx
+      .selectFrom('identidad')
+      .select(['email_mostrado'])
+      .where('id', '=', objetivoId)
+      .executeTakeFirst();
+    if (!i) throw new HttpError(404, 'Usuario no encontrado.');
+    await registrar(trx, cuentaId, identidadId, {
+      accion: 'acceso.reinvitado',
+      recursoTipo: 'membresia',
+      recursoId: objetivoId,
+    });
+    return i.email_mostrado;
   });
   await enviarInvitacionPorCorreo(cuentaId, objetivoId, email);
   return { ok: true, email };
+}
+
+// ---------------------------------------------------------------------------
+// Internos
+// ---------------------------------------------------------------------------
+
+/**
+ * Verifica que el objetivo sea miembro de ESTA cuenta.
+ *
+ * La RLS ya lo garantiza —`membresia` filtra por cuenta— pero sin esto un id de
+ * otra cuenta devolvería "no encontrado" recién en el paso siguiente, o peor,
+ * un update de cero filas que parece haber funcionado.
+ */
+async function exigirMiembro(trx: any, cuentaId: string, objetivoId: string) {
+  const m = await trx
+    .selectFrom('membresia')
+    .select(['id', 'estado'])
+    .where('identidad_id', '=', objetivoId)
+    .where('cuenta_id', '=', cuentaId)
+    .where('hasta', 'is', null)
+    .executeTakeFirst();
+  if (!m) throw new HttpError(404, 'Esa persona no tiene acceso a tu cuenta.');
+  return m as { id: string; estado: string };
+}
+
+/** Cuántas identidades quedarían con la capacidad `usuario.administrar`. */
+async function contarAdministradores(
+  trx: any,
+  cuentaId: string,
+  opts: { excluyendoRol?: string; deIdentidad?: string } = {},
+): Promise<number> {
+  let qb = trx
+    .selectFrom('usuario_rol as ur')
+    .innerJoin('rol_capacidad as rc', 'rc.rol_id', 'ur.rol_id')
+    .innerJoin('capacidad as c', 'c.id', 'rc.capacidad_id')
+    .innerJoin('membresia as m', (j: any) =>
+      j.onRef('m.identidad_id', '=', 'ur.identidad_id').onRef('m.cuenta_id', '=', 'ur.cuenta_id'),
+    )
+    .select(({ fn }: any) => [fn.count('ur.identidad_id').distinct().as('n')])
+    .where('ur.cuenta_id', '=', cuentaId)
+    .where('c.recurso', '=', 'usuario')
+    .where('c.accion', '=', 'administrar')
+    .where('m.estado', '=', 'activa')
+    .where('m.hasta', 'is', null);
+
+  if (opts.excluyendoRol && opts.deIdentidad) {
+    qb = qb.where((eb: any) =>
+      eb.not(eb.and([eb('ur.identidad_id', '=', opts.deIdentidad), eb('ur.rol_id', '=', opts.excluyendoRol)])),
+    );
+  }
+
+  const r = await qb.executeTakeFirst();
+  return Number(r?.n ?? 0);
 }
