@@ -1,4 +1,5 @@
 import pg from 'pg';
+import { fijarContexto } from './contexto';
 import { Kysely, PostgresDialect, sql, type Transaction } from 'kysely';
 import type { DB } from './schema';
 
@@ -36,7 +37,39 @@ export async function withTenant<T>(
     // set_config(clave, valor, is_local=true) equivale a SET LOCAL, pero permite
     // pasar el valor como PARÁMETRO (no se concatena el uuid => sin inyección).
     // Solo vive dentro de esta transacción y se revierte al COMMIT/ROLLBACK.
-    await sql`select set_config('app.cuenta_id', ${cuentaId}, true)`.execute(trx);
+    // Modo sistema: jobs de cola, webhooks de proveedores, procesos internos.
+    await fijarContexto(trx, { actor: 'sistema', cuentaId });
+    return fn(trx);
+  });
+}
+
+/**
+ * Contexto del FIRMANTE EXTERNO: alguien sin cuenta que llega por un enlace
+ * firmado enviado a su correo.
+ *
+ * No es un realm nuevo ni un tipo de usuario: el enlace es un PUNTERO A UNA
+ * FILA de otorgamiento. Por eso acá no hay cuentaId — el externo no pertenece a
+ * ninguna cuenta, pertenece a un otorgamiento —, y la RLS lo encierra en el
+ * alcance exacto de esa fila aunque adivine el uuid de otra instancia, aunque
+ * haya un bug de ruteo, aunque exista una inyección en un endpoint.
+ */
+export async function withExterno<T>(
+  otorgamientoId: string,
+  identidadId: string,
+  fn: (trx: Transaction<DB>) => Promise<T>,
+): Promise<T> {
+  if (!otorgamientoId) throw new Error('withExterno: otorgamientoId es requerido');
+  if (!identidadId) throw new Error('withExterno: identidadId es requerido');
+
+  return db.transaction().execute(async (trx) => {
+    await fijarContexto(trx, {
+      actor: 'externo',
+      identidadId,
+      otorgamientoId,
+      // Abrir el enlace no prueba identidad. El nivel sube sólo si firma con
+      // certificado, y esa elevación la hace el motor de firma, no el acceso.
+      nivelGarantia: 'ninguno',
+    });
     return fn(trx);
   });
 }

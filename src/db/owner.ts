@@ -42,17 +42,6 @@ export async function withProvision<T>(
  * estudio al id que se va a crear, para cumplir el WITH CHECK (= estudio actual)
  * al insertar el estudio y su primer contador.
  */
-export async function withProvisionEstudio<T>(
-  estudioId: string,
-  fn: (trx: Transaction<DB>) => Promise<T>,
-): Promise<T> {
-  return ownerDb()
-    .transaction()
-    .execute(async (trx) => {
-      await sql`select set_config('app.current_estudio_id', ${estudioId}, true)`.execute(trx);
-      return fn(trx);
-    });
-}
 
 export async function cerrarOwnerPool(): Promise<void> {
   if (_ownerDb) {

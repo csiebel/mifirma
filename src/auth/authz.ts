@@ -1,4 +1,5 @@
 import { sql, type Transaction } from 'kysely';
+import { fijarContexto, type ContextoRls } from '../db/contexto';
 import { db } from '../db/pool';
 import type { DB, AlcanceDato } from '../db/schema';
 
@@ -180,28 +181,20 @@ export async function withUsuario<T>(
   cuentaId: string,
   usuarioId: string,
   fn: (trx: Transaction<DB>, autz: ContextoAutz) => Promise<T>,
+  sesion?: Pick<ContextoRls, 'anclajesProbados' | 'nivelGarantia' | 'idioma'>,
 ): Promise<T> {
   if (!cuentaId || !usuarioId) throw new Error('withUsuario: cuentaId y usuarioId requeridos');
   return db.transaction().execute(async (trx) => {
-    await sql`select set_config('app.cuenta_id', ${cuentaId}, true)`.execute(trx);
+    await fijarContexto(trx, {
+      actor: 'cuenta',
+      cuentaId,
+      identidadId: usuarioId,        // en MiFirma el usuario ES una identidad
+      anclajesProbados: sesion?.anclajesProbados,
+      nivelGarantia: sesion?.nivelGarantia ?? 'bajo',
+      idioma: sesion?.idioma,
+    });
     const autz = await cargarContextoAutorizacion(trx, usuarioId);
     return fn(trx, autz);
   });
 }
 
-/**
- * Contexto de sesión de un ESTUDIO (panel del contador, sin empresa activa todavía).
- * Fija app.current_estudio_id para que el RLS del módulo deje ver la cartera del
- * estudio. Cuando el contador elige una empresa de su cartera, esa request usa
- * withUsuario con la empresa elegida (el RLS de negocio opera igual que siempre).
- */
-export async function withEstudio<T>(
-  estudioId: string,
-  fn: (trx: Transaction<DB>) => Promise<T>,
-): Promise<T> {
-  if (!estudioId) throw new Error('withEstudio: estudioId requerido');
-  return db.transaction().execute(async (trx) => {
-    await sql`select set_config('app.current_estudio_id', ${estudioId}, true)`.execute(trx);
-    return fn(trx);
-  });
-}

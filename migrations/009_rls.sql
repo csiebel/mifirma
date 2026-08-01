@@ -209,6 +209,11 @@ create policy carpeta_permiso_delete on carpeta_permiso for delete using (
 alter table circuito enable row level security;
 
 create policy circuito_select on circuito for select using (
+     -- El motor de flujo (cola, vencimientos, certificados) corre como
+     -- 'sistema' y necesita leer para procesar. Sólo lo setean procesos
+     -- internos, nunca una request de usuario.
+     app.actor() = 'sistema'
+  or
      (cuenta_propietaria_id = app.cuenta_actual()
       and exists (select 1 from ubicacion u
                   where u.circuito_id = circuito.id
@@ -236,6 +241,11 @@ create policy circuito_delete on circuito for delete using (false);
 alter table instancia enable row level security;
 
 create policy instancia_select on instancia for select using (
+     -- El motor de flujo (cola, vencimientos, certificados) corre como
+     -- 'sistema' y necesita leer para procesar. Sólo lo setean procesos
+     -- internos, nunca una request de usuario.
+     app.actor() = 'sistema'
+  or
      (cuenta_propietaria_id = app.cuenta_actual()
       and exists (select 1 from ubicacion u
                   where (u.instancia_id = instancia.id or u.circuito_id = instancia.circuito_id)
@@ -266,6 +276,11 @@ alter table participacion enable row level security;
 -- firmar algo, aunque ya no pueda abrirlo. Separar "ver que existe" de "ver el
 -- contenido" es lo que hace que el vencimiento no borre la historia de nadie.
 create policy participacion_select on participacion for select using (
+     -- El motor de flujo (cola, vencimientos, certificados) corre como
+     -- 'sistema' y necesita leer para procesar. Sólo lo setean procesos
+     -- internos, nunca una request de usuario.
+     app.actor() = 'sistema'
+  or
      (cuenta_propietaria_id = app.cuenta_actual()
       and exists (select 1 from ubicacion u
                   where (u.instancia_id = participacion.instancia_id
@@ -299,6 +314,11 @@ create policy participacion_delete on participacion for delete using (false);
 alter table archivo enable row level security;
 
 create policy archivo_select on archivo for select using (
+     -- El motor de flujo (cola, vencimientos, certificados) corre como
+     -- 'sistema' y necesita leer para procesar. Sólo lo setean procesos
+     -- internos, nunca una request de usuario.
+     app.actor() = 'sistema'
+  or
      (cuenta_custodia_id = app.cuenta_actual()
       and exists (
         select 1 from instancia i
