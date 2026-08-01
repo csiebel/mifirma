@@ -44,7 +44,7 @@ export interface SuscripcionInput {
 /** Guarda (o actualiza) la suscripción del usuario logueado. */
 export async function registrarSuscripcion(
   cuentaId: string,
-  usuarioId: string,
+  identidadId: string,
   input: SuscripcionInput,
 ): Promise<{ ok: true }> {
   const endpoint = input.endpoint || '';
@@ -53,19 +53,18 @@ export async function registrarSuscripcion(
   if (!endpoint || !p256dh || !auth) {
     throw new HttpError(400, 'Suscripción de notificaciones incompleta.');
   }
-  return withUsuario(cuentaId, usuarioId, async (trx) => {
+  return withUsuario(cuentaId, identidadId, async (trx) => {
     await trx
       .insertInto('push_suscripcion')
       .values({
-        cuenta_id: cuentaId,
-        usuario_id: usuarioId,
+        identidad_id: identidadId,
         endpoint,
         p256dh,
         auth,
         user_agent: input.userAgent || null,
       })
       .onConflict((oc) =>
-        oc.column('endpoint').doUpdateSet({ usuario_id: usuarioId, p256dh, auth }),
+        oc.column('endpoint').doUpdateSet({ identidad_id: identidadId, p256dh, auth }),
       )
       .execute();
     return { ok: true as const };
@@ -75,10 +74,10 @@ export async function registrarSuscripcion(
 /** Borra la suscripción del usuario logueado (al desactivar en el dispositivo). */
 export async function borrarSuscripcion(
   cuentaId: string,
-  usuarioId: string,
+  identidadId: string,
   endpoint: string,
 ): Promise<{ ok: true }> {
-  return withUsuario(cuentaId, usuarioId, async (trx) => {
+  return withUsuario(cuentaId, identidadId, async (trx) => {
     if (endpoint) {
       await trx.deleteFrom('push_suscripcion').where('endpoint', '=', endpoint).execute();
     }
@@ -100,12 +99,12 @@ export interface PushPayload {
  */
 export async function notificarUsuario(
   cuentaId: string,
-  usuarioId: string,
+  identidadId: string,
   payload: PushPayload,
 ): Promise<void> {
   try {
     if (!configurar()) {
-      await registrarSistema(cuentaId, usuarioId, { accion: 'push.fallido', detalle: { motivo: 'sin_vapid', titulo: payload.title } });
+      await registrarSistema(cuentaId, identidadId, { accion: 'push.fallido', recursoTipo: 'push', despues: { motivo: 'sin_vapid', titulo: payload.title } });
       return; // sin VAPID (o VAPID inválido), no hay envío
     }
     // Leemos las suscripciones con app_user + contexto de empresa: el RLS filtra
@@ -115,11 +114,11 @@ export async function notificarUsuario(
       trx
         .selectFrom('push_suscripcion')
         .select(['id', 'endpoint', 'p256dh', 'auth'])
-        .where('usuario_id', '=', usuarioId)
+        .where('identidad_id', '=', identidadId)
         .execute(),
     );
     if (subs.length === 0) {
-      await registrarSistema(cuentaId, usuarioId, { accion: 'push.fallido', detalle: { motivo: 'sin_suscripcion', titulo: payload.title } });
+      await registrarSistema(cuentaId, identidadId, { accion: 'push.fallido', recursoTipo: 'push', despues: { motivo: 'sin_suscripcion', titulo: payload.title } });
       return;
     }
     const data = JSON.stringify(payload);
@@ -148,13 +147,13 @@ export async function notificarUsuario(
         trx.deleteFrom('push_suscripcion').where('id', 'in', muertas).execute(),
       ).catch(() => {});
     }
-    await registrarSistema(cuentaId, usuarioId, {
+    await registrarSistema(cuentaId, identidadId, {
       accion: ok === 0 && fail > 0 ? 'push.fallido' : 'push.enviado',
       detalle: { titulo: payload.title, enviadas: ok, fallidas: fail },
     });
   } catch (e) {
     // Nunca lanza: si algo inesperado falla, lo dejamos en los logs y lo anotamos.
     console.error('notificarUsuario:', e);
-    await registrarSistema(cuentaId, usuarioId, { accion: 'push.fallido', detalle: { motivo: 'error', titulo: payload.title } }).catch(() => {});
+    await registrarSistema(cuentaId, identidadId, { accion: 'push.fallido', recursoTipo: 'push', despues: { motivo: 'error', titulo: payload.title } }).catch(() => {});
   }
 }

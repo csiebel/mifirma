@@ -3,22 +3,16 @@
   "version": "0.1.0",
   "private": true,
   "type": "module",
-  "description": "API de MiFirma — firma electrónica de documentos (núcleo, RLS y motor de firma)",
+  "description": "MiFirma \u2014 API de firma electr\u00f3nica de documentos",
   "scripts": {
     "dev": "tsx watch src/index.ts",
     "start": "tsx src/index.ts",
     "typecheck": "tsc --noEmit",
     "test": "tsx --test test/*.test.ts",
-    "test:engine": "tsx --test test/motor.test.ts test/uruguay.test.ts test/paraguay.test.ts test/facturacion.test.ts",
-    "corrida": "tsx scripts/correr-corrida.ts",
-    "chat": "tsx scripts/chat.ts",
     "provisionar": "tsx scripts/provisionar.ts",
-    "provisionar:estudio": "tsx scripts/provisionar_estudio.ts",
     "set-password": "tsx scripts/set-password.ts",
-    "invitar": "tsx scripts/invitar.ts",
-    "facturar": "tsx scripts/facturar.ts",
     "operador": "tsx scripts/operador.ts",
-    "migrate": "psql \"$DATABASE_OWNER_URL\" -v ON_ERROR_STOP=1 -f migrations/001_nucleo_y_rls.sql"
+    "migrate": "for f in migrations/0*.sql; do psql \"$MIFIRMA_DB\" -v ON_ERROR_STOP=1 -q -f \"$f\" || break; done"
   },
   "dependencies": {
     "@anthropic-ai/sdk": "^0.32.1",

@@ -142,7 +142,7 @@ export async function crearOperador(d: {
 export async function listarOperadores() {
   const ops = await ownerDb()
     .selectFrom('operador')
-    .select(['id', 'usuario', 'nombre', 'es_superadmin', 'activo', 'created_at'])
+    .select(['id', 'usuario', 'nombre', 'es_superadmin', 'activo', 'creado_en'])
     .orderBy('usuario')
     .execute();
   const caps = await ownerDb().selectFrom('operador_capacidad').select(['operador_id', 'capacidad']).execute();

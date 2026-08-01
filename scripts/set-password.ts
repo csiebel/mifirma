@@ -1,56 +1,90 @@
-import 'dotenv/config';
-import { ownerDb, cerrarOwnerPool } from '../src/db/owner';
+/**
+ * Fija la contraseña de una identidad desde la línea de comandos.
+ *
+ *   npm run set-password -- --email ana@empresa.com --password "..."
+ *
+ * Es una herramienta de rescate: se usa cuando alguien quedó afuera y el correo
+ * no funciona. El camino normal es el recupero por correo, que además deja
+ * constancia de quién lo pidió.
+ *
+ * ⚠ Revoca los dispositivos de confianza de esa identidad, igual que el
+ * recupero: si hubo que rescatar una cuenta, los equipos que ya no piden
+ * segundo factor son justamente los que hay que cortar.
+ */
+import { sql } from 'kysely';
+import { db, cerrarPool } from '../src/db/pool';
 import { hashPassword, validarPassword } from '../src/auth/password';
 
-// Uso:
-//   npm run set-password -- "<empresa>" <email> "<contraseña>"
-// Fija (o cambia) la contraseña de un usuario existente. Útil para los usuarios
-// creados antes del login real. La contraseña la tipeás vos; el script solo guarda
-// el hash. Corre con la conexión privilegiada (ownerDb).
-const [empresa, email, password] = process.argv.slice(2);
-
-if (!empresa || !email || !password) {
-  console.error('Uso: npm run set-password -- "<empresa>" <email> "<contraseña>"');
-  process.exit(1);
+function arg(nombre: string): string | undefined {
+  const i = process.argv.indexOf(`--${nombre}`);
+  return i >= 0 ? process.argv[i + 1] : undefined;
 }
 
-const errPwd = validarPassword(password);
-if (errPwd) {
-  console.error(errPwd);
-  process.exit(1);
-}
-
-async function main(empresaNombre: string, emailUsuario: string, plano: string) {
-  const db = ownerDb();
-  const emp = await db
-    .selectFrom('empresa')
-    .select(['id', 'nombre'])
-    .where('nombre', '=', empresaNombre.trim())
-    .orderBy('created_at', 'desc')
-    .executeTakeFirst();
-  if (!emp) throw new Error(`No existe una empresa llamada "${empresaNombre}".`);
-
-  const usr = await db
-    .selectFrom('usuario')
-    .select(['id', 'email'])
-    .where('cuenta_id', '=', emp.id)
-    .where('email', '=', emailUsuario.trim())
-    .executeTakeFirst();
-  if (!usr) throw new Error(`No existe el usuario "${emailUsuario}" en ${empresaNombre}.`);
-
-  await db
-    .updateTable('usuario')
-    .set({ password_hash: hashPassword(plano), password_actualizado: new Date(), activo: true })
-    .where('id', '=', usr.id)
-    .execute();
-
-  console.log(`Contraseña actualizada para ${usr.email} en ${emp.nombre}.`);
-}
-
-main(empresa, email, password)
-  .then(() => cerrarOwnerPool())
-  .catch(async (e) => {
-    console.error(e instanceof Error ? e.message : e);
-    await cerrarOwnerPool();
+async function main() {
+  const email = arg('email');
+  const password = arg('password');
+  if (!email || !password) {
+    console.error('Uso: npm run set-password -- --email ana@empresa.com --password "..."');
     process.exit(1);
+  }
+  const err = validarPassword(password);
+  if (err) {
+    console.error(err);
+    process.exit(1);
+  }
+
+  await db.transaction().execute(async (trx) => {
+    await sql`select
+      set_config('app.actor','sistema',true),
+      set_config('app.cuenta_id','',true),
+      set_config('app.identidad_id','',true),
+      set_config('app.anclajes_probados','',true),
+      set_config('app.nivel_garantia','ninguno',true),
+      set_config('app.idioma','es',true),
+      set_config('app.otorgamiento_id','',true)
+    `.execute(trx);
+
+    const i = await trx
+      .selectFrom('identidad')
+      .select(['id', 'email_mostrado'])
+      .where('email_normalizado', '=', email.trim().toLowerCase())
+      .executeTakeFirst();
+    if (!i) throw new Error(`No existe ninguna identidad con el correo ${email}.`);
+
+    await trx
+      .insertInto('credencial')
+      .values({
+        identidad_id: i.id,
+        hash_password: hashPassword(password),
+        password_cambiada_en: new Date(),
+      })
+      .onConflict((oc) =>
+        oc.column('identidad_id').doUpdateSet({
+          hash_password: hashPassword(password),
+          password_cambiada_en: new Date(),
+          intentos_fallidos: 0,
+          bloqueada_hasta: null,
+        }),
+      )
+      .execute();
+
+    await trx.updateTable('identidad').set({ estado: 'activa' }).where('id', '=', i.id).execute();
+
+    const rev = await trx
+      .updateTable('dispositivo_confiable')
+      .set({ revocado_en: new Date() })
+      .where('identidad_id', '=', i.id)
+      .where('revocado_en', 'is', null)
+      .executeTakeFirst();
+
+    console.log(`Contraseña fijada para ${i.email_mostrado}.`);
+    console.log(`Dispositivos de confianza revocados: ${rev.numUpdatedRows}`);
   });
+}
+
+main()
+  .catch((e: unknown) => {
+    console.error(e instanceof Error ? e.message : e);
+    process.exitCode = 1;
+  })
+  .finally(() => cerrarPool());

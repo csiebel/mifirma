@@ -34,10 +34,17 @@ export async function crearCatalogoPago(
   const pais = (d.pais || '').trim().toUpperCase();
   const nombre = (d.nombre || '').trim();
   if (!pais || !nombre) throw new HttpError(400, 'País y nombre son obligatorios.');
-  await ownerDb()
-    .insertInto(tabla)
-    .values({ pais, nombre, orden: d.orden ?? 0 })
-    .execute();
+  if (tabla === 'banco') {
+    await ownerDb().insertInto('banco').values({ pais, nombre, orden: d.orden ?? 0 }).execute();
+  } else {
+    // El tipo de cuenta es catálogo nuestro y se muestra traducido; el nombre de
+    // un banco, no: "Banco República" es "Banco República" en portugués.
+    const codigo = nombre.toLowerCase().replace(/[^a-z0-9]+/g, '_');
+    await ownerDb()
+      .insertInto('tipo_cuenta_bancaria')
+      .values({ pais, codigo, nombre_i18n: JSON.stringify({ es: nombre }), orden: d.orden ?? 0 })
+      .execute();
+  }
   return { ok: true };
 }
 

@@ -43,7 +43,7 @@ const CONFIG_APAGADA: ConfigIA = {
 async function configIA(trx: Transaction<DB>, cuentaId: string): Promise<ConfigIA> {
   const row = await trx
     .selectFrom('suscripcion as s')
-    .innerJoin('plan as p', 'p.codigo', 's.plan_codigo')
+    .innerJoin('plan as p', 'p.id', 's.plan_id')
     .select([
       's.asistente_ia as s_hab',
       'p.asistente_ia as p_hab',
@@ -70,7 +70,7 @@ async function configIA(trx: Transaction<DB>, cuentaId: string): Promise<ConfigI
 }
 
 async function tarifaVigente(trx: Transaction<DB>, modelo: string) {
-  const hoy = new Date().toISOString().slice(0, 10);
+  const hoy = new Date();
   const t = await trx
     .selectFrom('tarifa_ia')
     .select(['precio_input_millon', 'precio_output_millon', 'moneda'])
