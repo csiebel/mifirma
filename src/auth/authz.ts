@@ -1,200 +1,127 @@
-import { sql, type Transaction } from 'kysely';
-import { fijarContexto, type ContextoRls } from '../db/contexto';
+import type { Transaction } from 'kysely';
+import { fijarContexto, type ContextoRls, type NivelGarantia } from '../db/contexto';
 import { db } from '../db/pool';
-import type { DB, AlcanceDato } from '../db/schema';
+import type { DB } from '../db/schema';
+import { HttpError } from '../http/errors';
 
-// Amplitud relativa de los alcances (para quedarse con el más amplio del usuario).
-const RANGO: Record<AlcanceDato, number> = { propio: 1, equipo: 2, area: 3, empresa: 4 };
+/**
+ * Autorización del lado de la aplicación.
+ *
+ * ⚠ LEER ESTO ANTES DE AGREGAR UN CHEQUEO ACÁ
+ *
+ * La autorización de MiFirma vive en la capa de datos: las políticas RLS de
+ * PostgreSQL. Una consulta sin contexto no devuelve una fila, y una consulta con
+ * el contexto de la cuenta A no ve nada de la cuenta B — aunque el código de la
+ * aplicación se equivoque, aunque un endpoint tenga un bug, aunque haya una
+ * inyección.
+ *
+ * Lo que hay en este archivo NO es la autorización. Es la capa de cortesía:
+ * sirve para devolver un 403 con un mensaje entendible en vez de una lista
+ * vacía inexplicable. Si alguna vez `puede()` dice que sí y la RLS dice que no,
+ * gana la RLS y el bug está acá.
+ *
+ * Corolario práctico: NUNCA reemplazar una política RLS por un chequeo de este
+ * archivo, ni "optimizar" una consulta salteando `withUsuario`.
+ *
+ * Qué se fue de la versión de Payroll NG y por qué:
+ * el modelo de alcances (`propio` / `equipo` / `area` / `empresa`) colgaba de
+ * `relacion_laboral` y del organigrama, que son dominio de RRHH. En MiFirma
+ * quién ve qué documento lo deciden las CARPETAS (permiso por rol, migración
+ * 005) y los OTORGAMIENTOS (migración 008). No hay jerarquía de personas.
+ */
 
 export interface ContextoAutz {
-  relacionPropia: string | null;
-  alcances: Map<string, AlcanceDato>; // recurso -> alcance más amplio para 'leer'
-  alcancesEscritura: Map<string, AlcanceDato>; // recurso -> alcance más amplio para 'escribir'
-  capacidades: Set<string>; // 'recurso:accion' permitidos
+  cuentaId: string;
+  identidadId: string;
+  /** 'recurso:accion' — el catálogo está en la tabla `capacidad` (migración 004). */
+  capacidades: Set<string>;
 }
 
 /**
- * Resuelve los permisos del usuario y FIJA el contexto de autorización en la
- * sesión (las GUCs que consume RLS para el alcance jerárquico). Se llama dentro
- * de una transacción que ya tiene el contexto de empresa puesto.
+ * Carga las capacidades del usuario en la cuenta activa.
+ *
+ * Es la misma consulta que hace `app.tiene_capacidad()` dentro de las políticas
+ * RLS. Duplicarla acá es a propósito: la política decide, esto sólo permite
+ * anticipar la respuesta para dar un error decente.
  */
 export async function cargarContextoAutorizacion(
   trx: Transaction<DB>,
-  usuarioId: string,
+  cuentaId: string,
+  identidadId: string,
 ): Promise<ContextoAutz> {
-  // 1. Relación propia del usuario (su legajo como empleado), si tiene una.
-  const usuario = await trx
-    .selectFrom('usuario')
-    .select(['persona_id'])
-    .where('id', '=', usuarioId)
-    .executeTakeFirst();
-
-  let relacionPropia: string | null = null;
-  if (usuario?.persona_id) {
-    const rel = await trx
-      .selectFrom('relacion_laboral')
-      .select(['id'])
-      .where('persona_id', '=', usuario.persona_id)
-      .orderBy('fecha_ingreso', 'desc')
-      .executeTakeFirst();
-    relacionPropia = rel?.id ?? null;
-  }
-
-  // 2. Capacidades del usuario (roles -> capacidades).
-  const caps = await trx
-    .selectFrom('usuario_rol')
-    .innerJoin('capacidad', 'capacidad.rol_id', 'usuario_rol.rol_id')
-    .select(['capacidad.recurso', 'capacidad.accion', 'capacidad.alcance'])
-    .where('usuario_rol.usuario_id', '=', usuarioId)
+  const filas = await trx
+    .selectFrom('usuario_rol as ur')
+    .innerJoin('rol_capacidad as rc', 'rc.rol_id', 'ur.rol_id')
+    .innerJoin('capacidad as c', 'c.id', 'rc.capacidad_id')
+    .select(['c.recurso', 'c.accion'])
+    .where('ur.identidad_id', '=', identidadId)
+    .where('ur.cuenta_id', '=', cuentaId)
     .execute();
 
-  const alcances = new Map<string, AlcanceDato>();
-  const alcancesEscritura = new Map<string, AlcanceDato>();
   const capacidades = new Set<string>();
-  for (const c of caps) {
-    capacidades.add(`${c.recurso}:${c.accion}`);
-    const destino = c.accion === 'leer' ? alcances : c.accion === 'escribir' ? alcancesEscritura : null;
-    if (destino) {
-      const actual = destino.get(c.recurso);
-      if (!actual || RANGO[c.alcance] > RANGO[actual]) destino.set(c.recurso, c.alcance);
-    }
-  }
+  for (const f of filas) capacidades.add(`${f.recurso}:${f.accion}`);
 
-  // 3. Relaciones supervisadas (subárbol jerárquico), una sola vez.
-  let supervisadas: string[] = [];
-  if (relacionPropia) {
-    const filas = await sql<{ relacion_id: string }>`
-      SELECT relacion_id FROM app.relaciones_supervisadas(${relacionPropia}::uuid)
-    `.execute(trx);
-    supervisadas = filas.rows.map((r) => r.relacion_id);
-  }
-
-  // 4. Fijar el contexto en la sesión (transacción) para RLS.
-  await sql`select set_config('app.current_relacion_id', ${relacionPropia ?? ''}, true)`.execute(trx);
-  await sql`select set_config('app.relaciones_supervisadas', ${supervisadas.join(',')}, true)`.execute(trx);
-  // Alcance por recurso (los recursos sin GUC quedan fail-closed en modo usuario).
-  for (const [recurso, alcance] of alcances) {
-    await sql`select set_config(${`app.alcance_${recurso}`}, ${alcance}, true)`.execute(trx);
-  }
-
-  return { relacionPropia, alcances, alcancesEscritura, capacidades };
+  return { cuentaId, identidadId, capacidades };
 }
 
-/** Gate de RBAC (en la app): ¿el usuario tiene la capacidad (recurso, accion)? */
+/** ¿Tiene la capacidad (recurso, accion)? Fail-closed: lo que no está, no se puede. */
 export function puede(ctx: ContextoAutz, recurso: string, accion: string): boolean {
   return ctx.capacidades.has(`${recurso}:${accion}`);
 }
 
 /**
- * ¿Puede el usuario ver los montos de un recibo? Campo sensible (sección 11, "el
- * sueldo según política"): qué recibos ve lo decide recibo:leer + alcance (RLS);
- * si además ve los importes lo decide la capacidad recibo:ver_monto. El recibo
- * propio siempre muestra sus montos. Fail-closed: por defecto, oculto.
+ * Igual que `puede`, pero corta con 403. Evita el patrón repetido de
+ * `if (!puede(...)) throw new HttpError(403, ...)` en cada servicio, que es
+ * donde se olvida el chequeo.
  */
-export function puedeVerMontosRecibo(ctx: ContextoAutz, relacionId: string): boolean {
-  if (puede(ctx, 'recibo', 'ver_monto')) return true;
-  if (ctx.relacionPropia && ctx.relacionPropia === relacionId) return true;
-  return false;
+export function exigir(ctx: ContextoAutz, recurso: string, accion: string, mensaje?: string): void {
+  if (!puede(ctx, recurso, accion)) {
+    throw new HttpError(403, mensaje ?? `No tenés permiso para ${accion} ${recurso}.`);
+  }
+}
+
+/** Datos de la sesión que viajan al contexto RLS. Vienen del token, no del cliente. */
+export interface DatosSesion {
+  /** Anclajes efectivamente probados en ESTA sesión. Ver 003 y `app.anclajes_probados()`. */
+  anclajesProbados?: string[];
+  /**
+   * Nivel de garantía de la SESIÓN, no de la identidad: la misma persona puede
+   * entrar hoy con contraseña (bajo) y mañana con certificado (alto).
+   */
+  nivelGarantia?: NivelGarantia;
+  idioma?: string;
 }
 
 /**
- * ¿Puede el usuario ver el RESULTADO de una evaluación en detalle? Campo sensible
- * (secciones 10 y 11): qué evaluaciones ve lo decide evaluacion:leer + alcance
- * (RLS); si además ve el resultado, lo decide la capacidad evaluacion:ver_detalle.
- * La evaluación propia siempre muestra su resultado. Fail-closed: por defecto, oculto.
- */
-export function puedeVerDetalleEvaluacion(ctx: ContextoAutz, relacionId: string): boolean {
-  if (puede(ctx, 'evaluacion', 'ver_detalle')) return true;
-  if (ctx.relacionPropia && ctx.relacionPropia === relacionId) return true;
-  return false;
-}
-
-/**
- * ¿Puede el usuario ver los documentos SENSIBLES del legajo (su tipo y su
- * referencia)? Qué legajos ve lo decide legajo:leer + alcance (RLS/app); si además
- * ve el contenido de los marcados como sensibles, lo decide la capacidad
- * legajo:ver_detalle. El legajo propio siempre se ve. Fail-closed: por defecto, oculto.
- */
-export function puedeVerLegajoSensible(ctx: ContextoAutz, relacionId: string): boolean {
-  if (puede(ctx, 'legajo', 'ver_detalle')) return true;
-  if (ctx.relacionPropia && ctx.relacionPropia === relacionId) return true;
-  return false;
-}
-
-/**
- * Alcance de ESCRITURA de un recurso: el declarado en sus capacidades de
- * escritura; si no hay, espeja el de lectura del mismo recurso; en última
- * instancia 'propio' (lo más restrictivo).
- */
-export function alcanceEscritura(ctx: ContextoAutz, recurso: string): AlcanceDato {
-  return ctx.alcancesEscritura.get(recurso) ?? ctx.alcances.get(recurso) ?? 'propio';
-}
-
-/**
- * El alcance de lectura más amplio que el usuario tiene sobre cualquier recurso.
- * Sirve como "a quién puede ver" para listar empleados: no existe un recurso
- * 'empleado:leer', la visibilidad de personas deriva de los datos que ya ve
- * (recibo, evaluación, etc.). Un jefe -> 'area', un admin -> 'empresa'.
- */
-export function alcanceMaximoLectura(ctx: ContextoAutz): AlcanceDato {
-  let best: AlcanceDato = 'propio';
-  for (const a of ctx.alcances.values()) if (RANGO[a] > RANGO[best]) best = a;
-  return best;
-}
-
-/**
- * ¿La relación objetivo cae dentro de un alcance dado? Usa la MISMA función SQL
- * que el RLS. Sirve para validar la escritura en la capa de app: el WITH CHECK
- * del RLS de RRHH es solo por empresa, así que el "quién escribe sobre quién"
- * se chequea acá.
- */
-export async function relacionEnAlcance(
-  trx: Transaction<DB>,
-  relacionId: string,
-  alcance: AlcanceDato,
-): Promise<boolean> {
-  const r = await sql<{ ok: boolean }>`
-    SELECT app.visible_por_alcance(${relacionId}::uuid, ${alcance}) AS ok
-  `.execute(trx);
-  return r.rows[0]?.ok === true;
-}
-
-/** Igual que relacionEnAlcance pero para entidades ancladas en persona (legajo,
- * estudios): la persona es visible si alguna de sus relaciones lo es. */
-export async function personaEnAlcance(
-  trx: Transaction<DB>,
-  personaId: string,
-  alcance: AlcanceDato,
-): Promise<boolean> {
-  const r = await sql<{ ok: boolean }>`
-    SELECT app.persona_visible(${personaId}::uuid, ${alcance}) AS ok
-  `.execute(trx);
-  return r.rows[0]?.ok === true;
-}
-
-/**
- * Ejecuta `fn` con el contexto de EMPRESA + USUARIO puesto. Es el wrapper para
- * peticiones de usuario (a diferencia de withTenant, que es modo sistema y se
- * usa para procesos como la corrida). cuentaId y usuarioId vienen del token.
+ * Ejecuta `fn` con el contexto de cuenta + identidad puesto, dentro de una
+ * transacción. Es el envoltorio de toda petición de usuario autenticado.
+ *
+ * `cuentaId` e `identidadId` salen del token verificado. Nunca de un parámetro
+ * de la request: eso sería dejar que el cliente elija en qué cuenta entra.
  */
 export async function withUsuario<T>(
   cuentaId: string,
-  usuarioId: string,
+  identidadId: string,
   fn: (trx: Transaction<DB>, autz: ContextoAutz) => Promise<T>,
-  sesion?: Pick<ContextoRls, 'anclajesProbados' | 'nivelGarantia' | 'idioma'>,
+  sesion?: DatosSesion,
 ): Promise<T> {
-  if (!cuentaId || !usuarioId) throw new Error('withUsuario: cuentaId y usuarioId requeridos');
+  if (!cuentaId || !identidadId) {
+    throw new Error('withUsuario: cuentaId e identidadId son requeridos');
+  }
   return db.transaction().execute(async (trx) => {
-    await fijarContexto(trx, {
+    const ctx: ContextoRls = {
       actor: 'cuenta',
       cuentaId,
-      identidadId: usuarioId,        // en MiFirma el usuario ES una identidad
+      identidadId,
       anclajesProbados: sesion?.anclajesProbados,
+      // 'bajo' es el piso de una sesión autenticada con contraseña. Subirlo por
+      // defecto haría que los otorgamientos que exigen nivel alto se abran con
+      // sólo iniciar sesión.
       nivelGarantia: sesion?.nivelGarantia ?? 'bajo',
       idioma: sesion?.idioma,
-    });
-    const autz = await cargarContextoAutorizacion(trx, usuarioId);
+    };
+    await fijarContexto(trx, ctx);
+    const autz = await cargarContextoAutorizacion(trx, cuentaId, identidadId);
     return fn(trx, autz);
   });
 }
-

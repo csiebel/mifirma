@@ -1,6 +1,6 @@
 import pg from 'pg';
 import { fijarContexto } from './contexto';
-import { Kysely, PostgresDialect, sql, type Transaction } from 'kysely';
+import { Kysely, PostgresDialect, type Transaction } from 'kysely';
 import type { DB } from './schema';
 
 const { Pool, types } = pg;
@@ -9,23 +9,34 @@ const { Pool, types } = pg;
 // Date evita corrimientos por zona horaria (bug clásico de node-pg con fechas).
 types.setTypeParser(1082, (v) => v);
 
-const pool = new Pool({
-  connectionString: process.env.DATABASE_URL,
-  // OJO: este usuario debe ser `app_user` (sujeto a RLS), no el owner.
-});
+/**
+ * ⚠ DATABASE_URL debe apuntar al rol `mifirma_app`, NUNCA a `postgres`.
+ *
+ * PostgreSQL saltea todas las políticas RLS para un superusuario y para el
+ * dueño de las tablas. La URL que entrega Railway por defecto es del rol
+ * `postgres`, que es superusuario: usarla acá apaga el aislamiento entre
+ * cuentas en producción sin producir ningún síntoma. Los tests siguen pasando,
+ * las consultas simplemente devuelven de más.
+ *
+ * Ver README.md y `claude/infraestructura.md`.
+ */
+const pool = new Pool({ connectionString: process.env.DATABASE_URL });
 
 export const db = new Kysely<DB>({
   dialect: new PostgresDialect({ pool }),
 });
 
 /**
- * Ejecuta `fn` dentro de UNA transacción con el contexto de tenant seteado.
+ * Ejecuta `fn` dentro de UNA transacción con el contexto de tenant seteado, en
+ * modo SISTEMA: jobs de la cola, webhooks de proveedores, procesos internos.
  *
- * Toda consulta de negocio pasa por acá: es lo que activa el filtrado RLS por
- * empresa en la base. Sin contexto, RLS no devuelve filas (fail-closed).
+ * `set_config(clave, valor, is_local=true)` equivale a SET LOCAL pero permite
+ * pasar el valor como PARÁMETRO — el uuid no se concatena, así que no hay
+ * inyección posible. Sólo vive dentro de la transacción y se revierte al
+ * COMMIT o al ROLLBACK.
  *
- * Importante: este helper solo PROVEE el contexto de empresa; no decide
- * permisos. La autorización vive en los datos (políticas RLS), no en este código.
+ * Este helper PROVEE contexto; no decide permisos. La autorización vive en las
+ * políticas RLS, no en este código.
  */
 export async function withTenant<T>(
   cuentaId: string,
@@ -34,10 +45,6 @@ export async function withTenant<T>(
   if (!cuentaId) throw new Error('withTenant: cuentaId es requerido');
 
   return db.transaction().execute(async (trx) => {
-    // set_config(clave, valor, is_local=true) equivale a SET LOCAL, pero permite
-    // pasar el valor como PARÁMETRO (no se concatena el uuid => sin inyección).
-    // Solo vive dentro de esta transacción y se revierte al COMMIT/ROLLBACK.
-    // Modo sistema: jobs de cola, webhooks de proveedores, procesos internos.
     await fijarContexto(trx, { actor: 'sistema', cuentaId });
     return fn(trx);
   });
@@ -74,6 +81,73 @@ export async function withExterno<T>(
   });
 }
 
+// ---------------------------------------------------------------------------
+// Realm operador
+// ---------------------------------------------------------------------------
+
+let _operadorDb: Kysely<DB> | null = null;
+
+/**
+ * Pool SEPARADO para la consola del proveedor del SaaS, con el rol
+ * `mifirma_operador`.
+ *
+ * Es una conexión distinta a propósito, no por prolijidad: el límite del
+ * operador —no ver el contenido de los clientes— es la AUSENCIA de GRANT sobre
+ * `archivo`, `instancia`, `participacion`, `circuito`, `carpeta`,
+ * `otorgamiento`, `persona`, `credencial`, `anclaje_identidad` y `medio_pago`.
+ * Ese límite lo verifica el test C4 y sólo existe si la conexión es otra.
+ * Compartiendo pool con la app, el operador heredaría los permisos de `app_rw`.
+ */
+function operadorDb(): Kysely<DB> {
+  if (!_operadorDb) {
+    const url = process.env.DATABASE_OPERADOR_URL;
+    if (!url) {
+      throw new Error(
+        'DATABASE_OPERADOR_URL no configurado. Es la conexión del rol mifirma_operador; ' +
+          'ver db/roles-login.sql.',
+      );
+    }
+    _operadorDb = new Kysely<DB>({
+      dialect: new PostgresDialect({ pool: new Pool({ connectionString: url }) }),
+    });
+  }
+  return _operadorDb;
+}
+
+/**
+ * Ejecuta `fn` con el contexto del realm operador.
+ *
+ * No lleva cuentaId: el operador no está dentro de ninguna cuenta. Las
+ * políticas que lo admiten lo hacen por `app.actor() = 'operador'`, y lo que ve
+ * está acotado por los GRANT del rol, no por un filtro de tenant.
+ *
+ * Tampoco setea `app.identidad_id`: un operador NO es una identidad. Vive en su
+ * propia tabla (`operador`, migración 010) y no tiene fila en `identidad`.
+ * Ponerlo ahí haría que `app.identidad_actual()` devolviera un uuid inexistente
+ * — inofensivo hoy, pero es la clase de detalle que después se lee como si el
+ * operador fuera un usuario más y termina en una política escrita mal.
+ *
+ * `operadorId` se recibe para que quien registre en la bitácora sepa quién
+ * actuó; no entra al contexto de la base.
+ */
+export async function withOperador<T>(
+  operadorId: string,
+  fn: (trx: Transaction<DB>, operadorId: string) => Promise<T>,
+): Promise<T> {
+  if (!operadorId) throw new Error('withOperador: operadorId es requerido');
+
+  return operadorDb()
+    .transaction()
+    .execute(async (trx) => {
+      await fijarContexto(trx, { actor: 'operador' });
+      return fn(trx, operadorId);
+    });
+}
+
 export async function cerrarPool(): Promise<void> {
   await db.destroy();
+  if (_operadorDb) {
+    await _operadorDb.destroy();
+    _operadorDb = null;
+  }
 }

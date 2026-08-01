@@ -3,13 +3,11 @@
  *
  * NO editar a mano: se regenera desde el esquema real con
  *
- *   DATABASE_URL="postgresql://usuario@localhost:5432/mifirma" \
+ *   DATABASE_URL="$MIFIRMA_DB" \
  *     npx kysely-codegen --dialect postgres --out-file src/db/schema.ts
  *
- * Cubre las migraciones 001 a 014: núcleo (cuenta, identidad, anclajes,
- * credencial, membresía, persona), permisos, carpetas, dominio de firma,
- * otorgamientos, realm operador, sesiones, pagos, billing del chasis y
- * mensajería con textos.
+ * Cubre las migraciones 001 a 015. Las particiones de `bitacora_plataforma` no
+ * aparecen a propósito: se escribe y se lee siempre por la tabla padre.
  *
  * Al agregar migraciones hay que volver a generarlo, o TypeScript va a seguir
  * creyendo en un esquema que ya no existe.
@@ -102,6 +100,21 @@ export interface Banco {
   nombre: string;
   orden: Generated<number>;
   pais: string;
+}
+
+export interface BitacoraPlataforma {
+  accion: string;
+  actor_tipo: string;
+  antes: Json | null;
+  cuenta_id: string;
+  despues: Json | null;
+  id: Generated<string>;
+  identidad_id: string | null;
+  ip: string | null;
+  ocurrido_en: Generated<Timestamp>;
+  recurso_id: string | null;
+  recurso_tipo: string;
+  user_agent: string | null;
 }
 
 export interface BloqueMensaje {
@@ -637,6 +650,7 @@ export interface DB {
   api_token: ApiToken;
   archivo: Archivo;
   banco: Banco;
+  bitacora_plataforma: BitacoraPlataforma;
   bloque_mensaje: BloqueMensaje;
   capacidad: Capacidad;
   carpeta: Carpeta;
