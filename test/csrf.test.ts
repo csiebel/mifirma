@@ -63,7 +63,9 @@ test('CSRF Fase B (double-submit + Origin) — realm empresa', async (t) => {
   const app = construirServidor();
   await app.ready();
   const sess = await emitirSesion('00000000-0000-0000-0000-000000000021', '00000000-0000-0000-0000-000000000022');
-  // POST /usuarios valida zod (relacion_id/email/rol_id) antes de DB -> 400 con payload vacío.
+  // POST /usuarios valida zod (email/rol_id) ANTES de tocar la base: con payload
+  // vacío responde 400 sin conectarse. Eso es lo que hace que este test no
+  // necesite base y, a la vez, que un 400 signifique "pasó el hook de CSRF".
   await casosCsrf(t, app, { ruta: '/usuarios', sessCookie: 'sess_emp', csrfCookie: 'csrf_emp', sess });
   await app.close();
 });
@@ -73,19 +75,16 @@ test('CSRF Fase B (double-submit + Origin) — realm operador', async (t) => {
   await app.ready();
   const sess = await emitirTokenOperador({
     operadorId: '00000000-0000-0000-0000-000000000031',
-    usuario: 'test-op', esSuperadmin: true, capacidades: ['gestionar_planes'],
+    usuario: 'test-op', esSuperadmin: true, capacidades: ['gestionar_industrias'],
   });
-  // POST /operador/planes: sesion + exigirCap (sin DB) y luego zod -> 400 con payload vacío.
-  await casosCsrf(t, app, { ruta: '/operador/planes', sessCookie: 'sess_op', csrfCookie: 'csrf_op', sess });
+  // POST /operador/industrias: sesión + exigirCap (sin base) y después zod.
+  await casosCsrf(t, app, { ruta: '/operador/industrias', sessCookie: 'sess_op', csrfCookie: 'csrf_op', sess });
   await app.close();
 });
 
-test('CSRF Fase B (double-submit + Origin) — /mi (PWA empleado, comparte sess_emp)', async (t) => {
-  const app = construirServidor();
-  await app.ready();
-  // /mi es realm EMPRESA: usa el mismo token e sess_emp/csrf_emp que la consola.
-  const sess = await emitirSesion('00000000-0000-0000-0000-000000000041', '00000000-0000-0000-0000-000000000042');
-  // POST /mi/solicitudes valida zod (tipo/desde/hasta) antes de DB -> 400 con payload vacío.
-  await casosCsrf(t, app, { ruta: '/mi/solicitudes', sessCookie: 'sess_emp', csrfCookie: 'csrf_emp', sess });
-  await app.close();
-});
+// El tercer caso de payroll cubría /mi, la PWA del empleado, que compartía la
+// cookie de sesión de la consola. Ese realm no existe en MiFirma: el firmante
+// externo no entra por cookie sino por un enlace que apunta a un otorgamiento,
+// y su protección no es CSRF sino la RLS (tests T3, T4 y T12 de rls_test.sql).
+//
+// Cuando exista el repositorio del firmante registrado, vuelve un caso acá.

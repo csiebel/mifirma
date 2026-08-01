@@ -3,7 +3,7 @@
   "version": "0.1.0",
   "private": true,
   "type": "module",
-  "description": "MiFirma \u2014 API de firma electr\u00f3nica de documentos",
+  "description": "MiFirma — API de firma electrónica de documentos",
   "scripts": {
     "dev": "tsx watch src/index.ts",
     "start": "tsx src/index.ts",
@@ -16,8 +16,8 @@
   },
   "dependencies": {
     "@anthropic-ai/sdk": "^0.32.1",
-    "@fastify/cookie": "^9.4.0",
-    "@fastify/rate-limit": "^9.1.0",
+    "@fastify/cookie": "^11.1.2",
+    "@fastify/rate-limit": "^11.2.0",
     "decimal.js": "^10.4.3",
     "dotenv": "^16.4.5",
     "fastify": "^5.11.0",
