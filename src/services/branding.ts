@@ -1,72 +1,140 @@
-import { withUsuario, puede } from '../auth/authz';
+import { withUsuario, exigir } from '../auth/authz';
+import { registrar } from './auditoria';
 import { HttpError } from '../http/errors';
 
-// El logo es identidad visual de la empresa. Vive en el dominio del tenant
-// (tabla empresa, bajo RLS). Cargarlo/quitarlo lo puede hacer quien administra
-// la empresa (mismo permiso que gestionar usuarios: 'usuario' + 'escribir').
+/**
+ * Logo y colores de la cuenta.
+ *
+ * Importa más que en payroll: esto es lo que ve un firmante externo al abrir el
+ * documento, muchas veces sin haber oído hablar de nosotros. Es la prueba
+ * visual de que el correo no es una estafa. Por eso la lectura no exige
+ * membresía —el externo tiene que poder verlo— y la escritura sí exige
+ * administrar la cuenta.
+ *
+ * Vive en `marca` (migración 017), no en `empresa`: también una cuenta de tipo
+ * persona puede tener la suya.
+ */
 
-const MIMES = new Set(['image/png', 'image/jpeg']);
-const MAX_BYTES = 500 * 1024; // 500 KB
+const MAX_BYTES = 512 * 1024;
+const MIMES = ['image/png', 'image/jpeg', 'image/webp', 'image/svg+xml'] as const;
+type Mime = (typeof MIMES)[number];
 
 export interface Logo {
-  buffer: Buffer;
+  bytes: Buffer;
   mime: string;
 }
 
-// Devuelve el logo actual (bytes + mime) o null si no hay.
-export async function verLogo(cuentaId: string, usuarioId: string): Promise<Logo | null> {
-  return withUsuario(cuentaId, usuarioId, async (trx) => {
-    const row = await trx
-      .selectFrom('empresa')
+export async function verLogo(cuentaId: string, identidadId: string): Promise<Logo | null> {
+  return withUsuario(cuentaId, identidadId, async (trx) => {
+    const r = await trx
+      .selectFrom('marca')
       .select(['logo', 'logo_mime'])
-      .where('id', '=', cuentaId)
+      .where('cuenta_id', '=', cuentaId)
       .executeTakeFirst();
-    if (!row?.logo || !row.logo_mime) return null;
-    return { buffer: row.logo as Buffer, mime: row.logo_mime };
+    if (!r?.logo || !r.logo_mime) return null;
+    return { bytes: Buffer.from(r.logo as unknown as Uint8Array), mime: r.logo_mime };
   });
 }
 
-// Guarda el logo (base64 ya sin el prefijo data:). Valida formato y tamaño.
+export async function verMarca(cuentaId: string, identidadId: string) {
+  return withUsuario(cuentaId, identidadId, async (trx) => {
+    const r = await trx
+      .selectFrom('marca')
+      .select(['logo_mime', 'logo_bytes', 'color_primario', 'color_texto'])
+      .where('cuenta_id', '=', cuentaId)
+      .executeTakeFirst();
+    return {
+      tiene_logo: !!r?.logo_mime,
+      logo_mime: r?.logo_mime ?? null,
+      logo_bytes: r?.logo_bytes ?? null,
+      color_primario: r?.color_primario ?? null,
+      color_texto: r?.color_texto ?? null,
+    };
+  });
+}
+
 export async function guardarLogo(
   cuentaId: string,
-  usuarioId: string,
-  base64: string,
+  identidadId: string,
+  bytes: Buffer,
   mime: string,
-): Promise<{ ok: true; bytes: number; mime: string }> {
-  if (!MIMES.has(mime)) throw new HttpError(400, 'Formato no soportado: usá PNG o JPG.');
-  let buffer: Buffer;
-  try {
-    buffer = Buffer.from(base64, 'base64');
-  } catch {
-    throw new HttpError(400, 'No se pudo leer la imagen.');
+): Promise<{ ok: true }> {
+  if (!MIMES.includes(mime as Mime)) {
+    throw new HttpError(400, 'El logo tiene que ser PNG, JPEG, WebP o SVG.');
   }
-  if (buffer.length === 0) throw new HttpError(400, 'La imagen está vacía.');
-  if (buffer.length > MAX_BYTES) throw new HttpError(400, 'La imagen supera 500 KB. Subí una más liviana.');
+  if (bytes.length > MAX_BYTES) {
+    throw new HttpError(400, `El logo no puede pasar de ${Math.round(MAX_BYTES / 1024)} KB.`);
+  }
 
-  return withUsuario(cuentaId, usuarioId, async (trx, autz) => {
-    if (!puede(autz, 'usuario', 'escribir')) {
-      throw new HttpError(403, 'No tenés permiso para configurar la empresa.');
-    }
+  return withUsuario(cuentaId, identidadId, async (trx, autz) => {
+    exigir(autz, 'cuenta', 'administrar', 'No tenés permiso para cambiar la marca de la cuenta.');
     await trx
-      .updateTable('empresa')
-      .set({ logo: buffer, logo_mime: mime })
-      .where('id', '=', cuentaId)
+      .insertInto('marca')
+      .values({ cuenta_id: cuentaId, logo: bytes, logo_mime: mime, logo_bytes: bytes.length })
+      .onConflict((oc) =>
+        oc.column('cuenta_id').doUpdateSet({
+          logo: bytes,
+          logo_mime: mime,
+          logo_bytes: bytes.length,
+          actualizada_en: new Date(),
+        }),
+      )
       .execute();
-    return { ok: true, bytes: buffer.length, mime };
+    await registrar(trx, cuentaId, identidadId, {
+      accion: 'marca.logo_cambiado',
+      recursoTipo: 'marca',
+      recursoId: cuentaId,
+      despues: { mime, bytes: bytes.length },
+    });
+    return { ok: true as const };
   });
 }
 
-// Quita el logo.
-export async function borrarLogo(cuentaId: string, usuarioId: string): Promise<{ ok: true }> {
-  return withUsuario(cuentaId, usuarioId, async (trx, autz) => {
-    if (!puede(autz, 'usuario', 'escribir')) {
-      throw new HttpError(403, 'No tenés permiso para configurar la empresa.');
-    }
+export async function setColores(
+  cuentaId: string,
+  identidadId: string,
+  primario: string | null,
+  texto: string | null,
+): Promise<{ ok: true }> {
+  const ok = (c: string | null) => c === null || /^#[0-9a-fA-F]{6}$/.test(c);
+  if (!ok(primario) || !ok(texto)) throw new HttpError(400, 'Los colores van en formato #RRGGBB.');
+
+  return withUsuario(cuentaId, identidadId, async (trx, autz) => {
+    exigir(autz, 'cuenta', 'administrar', 'No tenés permiso para cambiar la marca de la cuenta.');
     await trx
-      .updateTable('empresa')
-      .set({ logo: null, logo_mime: null })
-      .where('id', '=', cuentaId)
+      .insertInto('marca')
+      .values({ cuenta_id: cuentaId, color_primario: primario, color_texto: texto })
+      .onConflict((oc) =>
+        oc.column('cuenta_id').doUpdateSet({
+          color_primario: primario,
+          color_texto: texto,
+          actualizada_en: new Date(),
+        }),
+      )
       .execute();
-    return { ok: true };
+    await registrar(trx, cuentaId, identidadId, {
+      accion: 'marca.colores',
+      recursoTipo: 'marca',
+      recursoId: cuentaId,
+      despues: { primario, texto },
+    });
+    return { ok: true as const };
+  });
+}
+
+export async function borrarLogo(cuentaId: string, identidadId: string): Promise<{ ok: true }> {
+  return withUsuario(cuentaId, identidadId, async (trx, autz) => {
+    exigir(autz, 'cuenta', 'administrar', 'No tenés permiso para cambiar la marca de la cuenta.');
+    await trx
+      .updateTable('marca')
+      .set({ logo: null, logo_mime: null, logo_bytes: null, actualizada_en: new Date() })
+      .where('cuenta_id', '=', cuentaId)
+      .execute();
+    await registrar(trx, cuentaId, identidadId, {
+      accion: 'marca.logo_borrado',
+      recursoTipo: 'marca',
+      recursoId: cuentaId,
+    });
+    return { ok: true as const };
   });
 }

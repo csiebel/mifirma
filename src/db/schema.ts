@@ -6,11 +6,8 @@
  *   DATABASE_URL="$MIFIRMA_DB" \\
  *     npx kysely-codegen --dialect postgres --out-file src/db/schema.ts
  *
- * Cubre las migraciones 001 a 016. Las particiones de `bitacora_plataforma` no
+ * Cubre las migraciones 001 a 017. Las particiones de `bitacora_plataforma` no
  * aparecen a propósito: se escribe y se lee siempre por la tabla padre.
- *
- * Al agregar migraciones hay que volver a generarlo, o TypeScript va a seguir
- * creyendo en un esquema que ya no existe.
  */
 
 /**
@@ -365,6 +362,16 @@ export interface IntegracionFacturacion {
   proveedor: string;
 }
 
+export interface Marca {
+  actualizada_en: Generated<Timestamp>;
+  color_primario: string | null;
+  color_texto: string | null;
+  cuenta_id: string;
+  logo: Buffer | null;
+  logo_bytes: number | null;
+  logo_mime: string | null;
+}
+
 export interface MedioPago {
   activo: Generated<boolean>;
   actualizado_en: Generated<Timestamp>;
@@ -687,6 +694,7 @@ export interface DB {
   industria: Industria;
   instancia: Instancia;
   integracion_facturacion: IntegracionFacturacion;
+  marca: Marca;
   medio_pago: MedioPago;
   membresia: Membresia;
   operador: Operador;

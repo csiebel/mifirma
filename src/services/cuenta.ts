@@ -1,16 +1,25 @@
-import { ownerDb } from '../db/owner';
+import { withUsuario } from '../auth/authz';
 import { hashPassword, verifyPassword, validarPassword } from '../auth/password';
 import { registrarSistema } from './auditoria';
 import { HttpError } from '../http/errors';
 
-// Cambio de la propia contraseña por un usuario autenticado de la empresa.
-// Es self-scoped: sólo afecta al usuario del token (id + empresa del token), así
-// que no necesita permiso de admin. Pide la contraseña actual (reautenticación)
-// para que una sesión robada no pueda cambiarla. Usa ownerDb porque toca
-// credenciales del propio usuario, acotando por id y empresa de forma explícita.
+/**
+ * Perfil propio: contraseña y teléfono.
+ *
+ * Es self-scoped — sólo toca la identidad del token — así que no exige permiso
+ * de administrador. Pide la contraseña actual para que una sesión robada no
+ * pueda cambiarla: sin reautenticación, robar la sesión equivale a robar la
+ * cuenta para siempre.
+ *
+ * ⚠ Esto NO lo puede hacer el administrador de la empresa por vos. La
+ * credencial y el teléfono son de la identidad, que es global: el admin de la
+ * empresa A estaría tocando el acceso que usás en la empresa B. Ver el
+ * encabezado de `usuarios.ts`.
+ */
+
 export async function cambiarMiPassword(
   cuentaId: string,
-  usuarioId: string,
+  identidadId: string,
   actual: unknown,
   nueva: unknown,
 ) {
@@ -20,34 +29,99 @@ export async function cambiarMiPassword(
   const err = validarPassword(nueva);
   if (err) throw new HttpError(400, err);
 
-  const db = ownerDb();
-  const u = await db
-    .selectFrom('usuario')
-    .select(['id', 'password_hash'])
-    .where('id', '=', usuarioId)
-    .where('cuenta_id', '=', cuentaId)
-    .executeTakeFirst();
-  if (!u) throw new HttpError(404, 'Usuario no encontrado.');
-  if (!u.password_hash) {
-    throw new HttpError(400, 'Tu cuenta todavía no tiene contraseña. Usá "¿Olvidaste tu contraseña?" para crear una.');
-  }
-  if (!verifyPassword(actual, u.password_hash)) {
-    throw new HttpError(400, 'La contraseña actual no es correcta.');
-  }
-  if (verifyPassword(nueva, u.password_hash)) {
-    throw new HttpError(400, 'La nueva contraseña debe ser distinta de la actual.');
+  await withUsuario(cuentaId, identidadId, async (trx) => {
+    const c = await trx
+      .selectFrom('credencial')
+      .select(['identidad_id', 'hash_password'])
+      .where('identidad_id', '=', identidadId)
+      .executeTakeFirst();
+    if (!c) throw new HttpError(404, 'No encontramos tu credencial.');
+    if (!c.hash_password) {
+      throw new HttpError(
+        400,
+        'Tu cuenta todavía no tiene contraseña. Usá "¿Olvidaste tu contraseña?" para crear una.',
+      );
+    }
+    if (!verifyPassword(actual, c.hash_password)) {
+      throw new HttpError(400, 'La contraseña actual no es correcta.');
+    }
+    if (verifyPassword(nueva, c.hash_password)) {
+      throw new HttpError(400, 'La nueva contraseña tiene que ser distinta de la actual.');
+    }
+
+    await trx
+      .updateTable('credencial')
+      .set({
+        hash_password: hashPassword(nueva),
+        password_cambiada_en: new Date(),
+        intentos_fallidos: 0,
+        bloqueada_hasta: null,
+      })
+      .where('identidad_id', '=', identidadId)
+      .execute();
+
+    // Mismo criterio que el reset: cambiar la contraseña revoca los dispositivos
+    // de confianza. Si cambiás la clave es porque sospechás de alguien, y ese
+    // alguien puede estar sentado en un equipo que ya no pide segundo factor.
+    await trx
+      .updateTable('dispositivo_confiable')
+      .set({ revocado_en: new Date() })
+      .where('identidad_id', '=', identidadId)
+      .where('revocado_en', 'is', null)
+      .execute();
+  });
+
+  await registrarSistema(cuentaId, identidadId, {
+    accion: 'password.cambiada',
+    recursoTipo: 'credencial',
+    recursoId: identidadId,
+  }, 'usuario');
+
+  return { ok: true };
+}
+
+/**
+ * Teléfono propio, para el segundo factor.
+ *
+ * Cambiar el teléfono es cambiar dónde llegan los códigos de acceso, así que
+ * también exige la contraseña actual. Sin eso, una sesión robada se redirige el
+ * segundo factor y el dueño legítimo queda afuera.
+ */
+export async function cambiarMiTelefono(
+  cuentaId: string,
+  identidadId: string,
+  password: unknown,
+  telefono: string | null,
+) {
+  if (typeof password !== 'string') throw new HttpError(400, 'Falta tu contraseña actual.');
+
+  const tel = telefono?.trim() || null;
+  if (tel && !/^\+[1-9][0-9]{7,14}$/.test(tel.replace(/[\s-]/g, ''))) {
+    throw new HttpError(400, 'El teléfono va en formato internacional, por ejemplo +59899123456.');
   }
 
-  await db
-    .updateTable('usuario')
-    .set({ password_hash: hashPassword(nueva), password_actualizado: new Date() })
-    .where('id', '=', usuarioId)
-    .where('cuenta_id', '=', cuentaId)
-    .execute();
-  await registrarSistema(cuentaId, usuarioId, {
-    accion: 'usuario.cambiar_password',
-    recurso: 'usuario',
-    objetoId: usuarioId,
+  await withUsuario(cuentaId, identidadId, async (trx) => {
+    const c = await trx
+      .selectFrom('credencial')
+      .select(['hash_password'])
+      .where('identidad_id', '=', identidadId)
+      .executeTakeFirst();
+    if (!c?.hash_password || !verifyPassword(password, c.hash_password)) {
+      throw new HttpError(400, 'La contraseña no es correcta.');
+    }
+    await trx
+      .updateTable('credencial')
+      .set({ telefono_e164: tel })
+      .where('identidad_id', '=', identidadId)
+      .execute();
   });
-  return { ok: true };
+
+  await registrarSistema(cuentaId, identidadId, {
+    accion: 'perfil.telefono',
+    recursoTipo: 'credencial',
+    recursoId: identidadId,
+    despues: { tiene_telefono: !!tel },
+  }, 'usuario');
+
+  return { ok: true, telefono: tel };
 }

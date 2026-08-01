@@ -1,176 +1,315 @@
 import { randomUUID } from 'node:crypto';
-import { withProvision } from '../db/owner';
+import { sql, type Transaction } from 'kysely';
+import { db } from '../db/pool';
+import type { DB } from '../db/schema';
+import { fijarContexto } from '../db/contexto';
 import { hashPassword } from '../auth/password';
-import type { AlcanceDato } from '../db/schema';
+import { HttpError } from '../http/errors';
+
+/**
+ * Alta de una cuenta nueva.
+ *
+ * ═══ NO USA CONEXIÓN PRIVILEGIADA ═══
+ *
+ * En payroll esto corría con `DATABASE_OWNER_URL`, un rol que evade RLS, porque
+ * había que insertar la empresa antes de que existiera contexto de empresa.
+ * Acá no hace falta: las políticas de `cuenta` admiten INSERT del actor
+ * 'sistema' (migración 009), así que el alta corre con el pool normal.
+ *
+ * Es más que una simplificación. Mientras exista una conexión que evade RLS,
+ * existe la tentación de usarla "un momentito" para resolver otra cosa, y ese
+ * es el camino por el que la autorización se escapa de la base. Si el alta
+ * —que es el caso más privilegiado que hay— se puede hacer sin evadir nada,
+ * no queda excusa para el resto.
+ *
+ * ═══ QUÉ CREA ═══
+ *
+ * La cuenta, su detalle fiscal si es empresa, tres roles base, el árbol de
+ * carpetas mínimo, y la membresía del primer administrador — que puede ser una
+ * identidad que YA EXISTA, porque a esa persona la invitaron a firmar algo el
+ * año pasado. En ese caso no se crea nada nuevo: se le agrega la membresía y
+ * conserva todo lo suyo.
+ */
 
 export interface ProvisionInput {
   nombre: string;
-  pais: string; // 'UY' | 'PY'
-  moneda: string; // 'UYU' | 'PYG'
-  razonSocial?: string;
-  idFiscal?: string;
-  numSeguridadSocial?: string;
-  domicilio?: string;
-  industriaId?: string;
-  admin: { email: string; nombre: string; documento: string; password?: string };
+  tipo?: 'empresa' | 'persona';
+  pais: string;
+  moneda: string;
+  idioma?: string;
+  razonSocial?: string | null;
+  idFiscal?: string | null;
+  domicilio?: string | null;
+  industriaId?: string | null;
+  planId?: string | null;
+  admin: { email: string; nombre?: string; password?: string };
 }
 
 export interface ProvisionResult {
   cuentaId: string;
-  adminUsuarioId: string;
-  adminPersonaId: string;
+  adminIdentidadId: string;
   roles: Record<string, string>;
+  carpetaRaizId: string;
 }
 
-// Recursos por sujeto (heredan alcance jerárquico) y el catálogo de capacitaciones.
-const RECURSOS_SUJETO = ['recibo', 'evaluacion', 'estudio_cert', 'legajo', 'inscripcion'];
-
 /**
- * Onboarding de un tenant: crea la empresa, su persona+usuario admin, un set de
- * roles base (admin / empleado / jefe / rrhh / liquidador) con capacidades de
- * lectura, y le asigna el rol admin al usuario. Corre con la conexión
- * privilegiada (withProvision). Devuelve los ids para poder loguearse.
+ * Roles base. Tres, no cinco: en payroll los roles se derivaban del organigrama
+ * (jefe, rrhh, liquidador). Acá la pregunta es qué hacés con documentos.
+ *
+ * `admin` es `sistema: true` — no se borra ni se edita desde el panel del
+ * cliente. Es la red que impide que alguien se deje afuera de su propia cuenta.
  */
-export async function provisionarEmpresa(input: ProvisionInput): Promise<ProvisionResult> {
-  const cuentaId = randomUUID();
+const ROLES_BASE = [
+  {
+    codigo: 'admin',
+    nombre: { es: 'Administrador', pt: 'Administrador', en: 'Administrator' },
+    sistema: true,
+    capacidades: [
+      ['documento', 'crear'], ['documento', 'leer'],
+      ['circuito', 'crear'], ['circuito', 'enviar'], ['circuito', 'cancelar'], ['circuito', 'prorrogar'],
+      ['plantilla', 'administrar'],
+      ['carpeta', 'organizar'], ['carpeta', 'permisos'],
+      ['evidencia', 'leer'],
+      ['lote', 'despachar'],
+      ['cuenta', 'administrar'],
+      ['usuario', 'administrar'],
+      ['facturacion', 'leer'],
+      ['bitacora', 'leer'],
+    ],
+  },
+  {
+    codigo: 'emisor',
+    nombre: { es: 'Emisor', pt: 'Emissor', en: 'Sender' },
+    sistema: false,
+    capacidades: [
+      ['documento', 'crear'], ['documento', 'leer'],
+      ['circuito', 'crear'], ['circuito', 'enviar'], ['circuito', 'cancelar'], ['circuito', 'prorrogar'],
+      ['evidencia', 'leer'],
+      ['lote', 'despachar'],
+    ],
+  },
+  {
+    codigo: 'lector',
+    nombre: { es: 'Lector', pt: 'Leitor', en: 'Viewer' },
+    sistema: false,
+    capacidades: [['documento', 'leer'], ['evidencia', 'leer']],
+  },
+] as const;
 
-  return withProvision(cuentaId, async (trx) => {
-    // Empresa (id explícito para cumplir el WITH CHECK del contexto).
+/** Carpetas del sistema. Se crean siempre: un repositorio vacío sin estructura
+ *  obliga a cada cliente a inventar la suya en el primer minuto de uso. */
+const CARPETAS = [
+  { sistema: 'raiz' as const, ruta: 'raiz', nombre: { es: 'Documentos', pt: 'Documentos', en: 'Documents' } },
+  { sistema: 'entrada' as const, ruta: 'raiz.entrada', nombre: { es: 'Recibidos', pt: 'Recebidos', en: 'Inbox' } },
+  { sistema: 'borradores' as const, ruta: 'raiz.borradores', nombre: { es: 'Borradores', pt: 'Rascunhos', en: 'Drafts' } },
+  { sistema: 'papelera' as const, ruta: 'raiz.papelera', nombre: { es: 'Papelera', pt: 'Lixeira', en: 'Trash' } },
+];
+
+async function enSistema<T>(cuentaId: string, fn: (trx: Transaction<DB>) => Promise<T>): Promise<T> {
+  return db.transaction().execute(async (trx) => {
+    await fijarContexto(trx, { actor: 'sistema', cuentaId });
+    return fn(trx);
+  });
+}
+
+export async function provisionarCuenta(input: ProvisionInput): Promise<ProvisionResult> {
+  const email = input.admin.email.trim();
+  if (!/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(email)) throw new HttpError(400, 'El correo del administrador no es válido.');
+  if (!input.nombre?.trim()) throw new HttpError(400, 'Falta el nombre de la cuenta.');
+  if (!/^[A-Z]{2}$/.test(input.pais)) throw new HttpError(400, 'El país va en ISO 3166-1 alfa-2, por ejemplo UY.');
+  if (!/^[A-Z]{3}$/.test(input.moneda)) throw new HttpError(400, 'La moneda va en ISO 4217, por ejemplo UYU.');
+
+  // El id se genera acá y se pasa al contexto ANTES de insertar: así el WITH
+  // CHECK de las políticas se cumple sobre la fila que se está creando.
+  const cuentaId = randomUUID();
+  const tipo = input.tipo ?? 'empresa';
+
+  return enSistema(cuentaId, async (trx) => {
+    const identidadAdmin = await resolverIdentidad(trx, email, input.admin.nombre);
+
     await trx
-      .insertInto('empresa')
+      .insertInto('cuenta')
       .values({
         id: cuentaId,
-        nombre: input.nombre,
+        tipo,
+        nombre_mostrado: input.nombre.trim(),
         pais: input.pais,
         moneda: input.moneda,
-        razon_social: input.razonSocial ?? null,
-        id_fiscal: input.idFiscal ?? null,
-        num_seguridad_social: input.numSeguridadSocial ?? null,
-        domicilio: input.domicilio ?? null,
-        industria_id: input.industriaId ?? null,
+        idioma: input.idioma ?? idiomaPorPais(input.pais),
+        plan_id: input.planId ?? null,
+        // Una cuenta de tipo persona necesita titular; una de empresa, no.
+        identidad_titular_id: tipo === 'persona' ? identidadAdmin : null,
       })
       .execute();
 
-    // Persona + usuario admin.
-    const persona = await trx
-      .insertInto('persona')
-      .values({ cuenta_id: cuentaId, documento: input.admin.documento, nombre: input.admin.nombre })
-      .returning('id')
-      .executeTakeFirstOrThrow();
-    const usuario = await trx
-      .insertInto('usuario')
-      .values({
-        cuenta_id: cuentaId,
-        persona_id: persona.id,
-        email: input.admin.email,
-        password_hash: input.admin.password ? hashPassword(input.admin.password) : null,
-        password_actualizado: input.admin.password ? new Date() : null,
-      })
-      .returning('id')
-      .executeTakeFirstOrThrow();
-
-    // Roles base.
-    const roles: Record<string, string> = {};
-    for (const nombre of ['admin', 'empleado', 'jefe', 'rrhh', 'liquidador']) {
-      const r = await trx
-        .insertInto('rol')
-        .values({ cuenta_id: cuentaId, nombre, protegido: nombre === 'admin' })
-        .returning('id')
-        .executeTakeFirstOrThrow();
-      roles[nombre] = r.id;
+    if (tipo === 'empresa') {
+      await trx
+        .insertInto('empresa')
+        .values({
+          cuenta_id: cuentaId,
+          razon_social: input.razonSocial?.trim() || input.nombre.trim(),
+          identificacion_fiscal: input.idFiscal ?? null,
+          domicilio: input.domicilio ?? null,
+          industria_id: input.industriaId ?? null,
+        })
+        .execute();
     }
 
-    // Capacidades de lectura (el alcance es lo que aplica RLS).
-    const caps: { rol_id: string; recurso: string; accion: string; alcance: AlcanceDato }[] = [];
-    for (const rec of RECURSOS_SUJETO) {
-      caps.push({ rol_id: roles.empleado, recurso: rec, accion: 'leer', alcance: 'propio' });
-      caps.push({ rol_id: roles.jefe, recurso: rec, accion: 'leer', alcance: 'area' });
-      caps.push({ rol_id: roles.admin, recurso: rec, accion: 'leer', alcance: 'empresa' });
-    }
-    for (const rec of ['evaluacion', 'estudio_cert', 'legajo', 'inscripcion', 'capacitacion']) {
-      caps.push({ rol_id: roles.rrhh, recurso: rec, accion: 'leer', alcance: 'empresa' });
-    }
-    caps.push({ rol_id: roles.liquidador, recurso: 'recibo', accion: 'leer', alcance: 'empresa' });
-    // Ver los importes del recibo (campo sensible): liquidador y admin.
-    caps.push({ rol_id: roles.liquidador, recurso: 'recibo', accion: 'ver_monto', alcance: 'empresa' });
-    caps.push({ rol_id: roles.admin, recurso: 'recibo', accion: 'ver_monto', alcance: 'empresa' });
-    caps.push({ rol_id: roles.admin, recurso: 'evaluacion', accion: 'ver_detalle', alcance: 'empresa' });
-    caps.push({ rol_id: roles.rrhh, recurso: 'evaluacion', accion: 'ver_detalle', alcance: 'empresa' });
-    // Ver documentos sensibles del legajo (campo sensible): admin y rrhh.
-    caps.push({ rol_id: roles.admin, recurso: 'legajo', accion: 'ver_detalle', alcance: 'empresa' });
-    caps.push({ rol_id: roles.rrhh, recurso: 'legajo', accion: 'ver_detalle', alcance: 'empresa' });
-    // Correr y emitir liquidaciones: nómina (liquidador) y admin.
-    caps.push({ rol_id: roles.liquidador, recurso: 'corrida', accion: 'escribir', alcance: 'empresa' });
-    caps.push({ rol_id: roles.admin, recurso: 'corrida', accion: 'escribir', alcance: 'empresa' });
-    // El admin además puede dar de alta y editar empleados; el jefe, los de su área.
-    caps.push({ rol_id: roles.admin, recurso: 'empleado', accion: 'escribir', alcance: 'empresa' });
-    caps.push({ rol_id: roles.jefe, recurso: 'empleado', accion: 'escribir', alcance: 'area' });
-    for (const rol of ['empleado', 'jefe', 'admin']) {
-      caps.push({ rol_id: roles[rol], recurso: 'capacitacion', accion: 'leer', alcance: 'empresa' });
-    }
-    // Escritura de RRHH. rrhh y admin: todo, alcance empresa. jefe: evaluar e
-    // inscribir a su equipo (area). empleado: cargar sus propios estudios (propio).
-    for (const rec of ['evaluacion', 'estudio_cert', 'legajo', 'capacitacion', 'inscripcion']) {
-      caps.push({ rol_id: roles.rrhh, recurso: rec, accion: 'escribir', alcance: 'empresa' });
-      caps.push({ rol_id: roles.admin, recurso: rec, accion: 'escribir', alcance: 'empresa' });
-    }
-    caps.push({ rol_id: roles.jefe, recurso: 'evaluacion', accion: 'escribir', alcance: 'area' });
-    caps.push({ rol_id: roles.jefe, recurso: 'inscripcion', accion: 'escribir', alcance: 'area' });
-    // El admin gestiona accesos (crear usuarios y asignarles roles).
-    caps.push({ rol_id: roles.admin, recurso: 'usuario', accion: 'escribir', alcance: 'empresa' });
-    caps.push({ rol_id: roles.admin, recurso: 'auditoria', accion: 'leer', alcance: 'empresa' });
-    // (El rol empleado queda estrictamente de lectura: ve lo suyo, no modifica.)
+    const roles = await crearRolesBase(trx, cuentaId);
+    const carpetas = await crearCarpetas(trx, cuentaId, roles, identidadAdmin);
+
     await trx
-      .insertInto('capacidad')
-      .values(caps.map((c) => ({ cuenta_id: cuentaId, ...c })))
+      .insertInto('membresia')
+      .values({ identidad_id: identidadAdmin, cuenta_id: cuentaId })
       .execute();
 
-    // El admin recibe el rol admin.
     await trx
       .insertInto('usuario_rol')
-      .values({ cuenta_id: cuentaId, usuario_id: usuario.id, rol_id: roles.admin })
+      .values({ identidad_id: identidadAdmin, cuenta_id: cuentaId, rol_id: roles.admin })
       .execute();
 
-    // Catálogo de categorías de comunicados por defecto (la empresa puede editarlo).
-    await trx
-      .insertInto('comunicado_categoria')
-      .values([
-        { cuenta_id: cuentaId, nombre: 'Novedad', orden: 0 },
-        { cuenta_id: cuentaId, nombre: 'Evento', orden: 1 },
-        { cuenta_id: cuentaId, nombre: 'Política', orden: 2 },
-      ])
-      .execute();
+    // La contraseña es opcional: el camino normal es la invitación por correo,
+    // que además prueba que el correo existe. Fijarla acá es para el alta manual
+    // del operador y para las pruebas.
+    if (input.admin.password) {
+      await trx
+        .insertInto('credencial')
+        .values({
+          identidad_id: identidadAdmin,
+          hash_password: hashPassword(input.admin.password),
+          password_cambiada_en: new Date(),
+        })
+        .onConflict((oc) => oc.column('identidad_id').doNothing())
+        .execute();
+      await trx.updateTable('identidad').set({ estado: 'activa' }).where('id', '=', identidadAdmin).execute();
+    }
 
-    // Conceptos de ausencia por defecto (la empresa puede editarlos). 'sin_goce' descuenta.
-    await trx
-      .insertInto('concepto_ausencia')
-      .values([
-        { cuenta_id: cuentaId, codigo: 'vacaciones', etiqueta: 'Vacaciones', descuenta: false, orden: 1 },
-        { cuenta_id: cuentaId, codigo: 'enfermedad', etiqueta: 'Enfermedad', descuenta: false, orden: 2 },
-        { cuenta_id: cuentaId, codigo: 'estudio', etiqueta: 'Estudio', descuenta: false, orden: 3 },
-        { cuenta_id: cuentaId, codigo: 'personal', etiqueta: 'Licencia personal', descuenta: false, orden: 4 },
-        { cuenta_id: cuentaId, codigo: 'sin_goce', etiqueta: 'Licencia sin goce', descuenta: true, orden: 5 },
-      ])
-      .execute();
+    await trx.insertInto('bitacora_plataforma').values({
+      cuenta_id: cuentaId,
+      identidad_id: identidadAdmin,
+      actor_tipo: 'sistema',
+      accion: 'cuenta.creada',
+      recurso_tipo: 'cuenta',
+      recurso_id: cuentaId,
+      despues: JSON.stringify({ nombre: input.nombre, pais: input.pais, tipo }),
+    }).execute();
 
-    // Estructura mínima para que el alta de empleados funcione apenas se crea la
-    // empresa, sin obligar a configurar nada primero: un local, un área y un cargo
-    // por defecto. La empresa puede renombrarlos, desactivarlos o sumar más desde
-    // Estructura. (El cargo cuelga del área General; queda sin nivel de franja.)
+    return { cuentaId, adminIdentidadId: identidadAdmin, roles, carpetaRaizId: carpetas.raiz };
+  });
+}
+
+/**
+ * Idioma por defecto del país. Es una conveniencia del alta, no una regla: la
+ * cuenta lo cambia cuando quiere, y cada persona tiene el suyo.
+ */
+function idiomaPorPais(pais: string): string {
+  return pais === 'BR' ? 'pt-BR' : 'es';
+}
+
+async function resolverIdentidad(
+  trx: Transaction<DB>,
+  email: string,
+  nombre?: string,
+): Promise<string> {
+  const r = await sql<{ id: string }>`select app.resolver_identidad(${email}) as id`.execute(trx);
+  const id = r.rows[0]?.id;
+  if (!id) throw new HttpError(500, 'No se pudo resolver la identidad del administrador.');
+  if (nombre?.trim()) {
+    // Sólo si no tenía: el alta de una cuenta no le renombra la identidad a
+    // alguien que ya existe en el sistema.
     await trx
-      .insertInto('establecimiento')
-      .values({ cuenta_id: cuentaId, nombre: 'Casa Central' })
+      .updateTable('identidad')
+      .set({ nombre_mostrado: nombre.trim() })
+      .where('id', '=', id)
+      .where('nombre_mostrado', 'is', null)
       .execute();
-    const areaGeneral = await trx
-      .insertInto('unidad_org')
-      .values({ cuenta_id: cuentaId, nombre: 'General' })
+  }
+  return id;
+}
+
+async function crearRolesBase(trx: Transaction<DB>, cuentaId: string): Promise<Record<string, string>> {
+  const catalogo = await trx.selectFrom('capacidad').select(['id', 'recurso', 'accion']).execute();
+  const idDe = new Map(catalogo.map((c) => [`${c.recurso}:${c.accion}`, c.id]));
+
+  const roles: Record<string, string> = {};
+  for (const def of ROLES_BASE) {
+    const r = await trx
+      .insertInto('rol')
+      .values({
+        cuenta_id: cuentaId,
+        codigo: def.codigo,
+        nombre_i18n: JSON.stringify(def.nombre),
+        sistema: def.sistema,
+      })
       .returning('id')
       .executeTakeFirstOrThrow();
-    await trx
-      .insertInto('cargo')
-      .values({ cuenta_id: cuentaId, unidad_org_id: areaGeneral.id, nombre: 'Empleado' })
-      .execute();
+    roles[def.codigo] = r.id;
 
-    return { cuentaId, adminUsuarioId: usuario.id, adminPersonaId: persona.id, roles };
-  });
+    const filas = def.capacidades
+      .map(([recurso, accion]) => idDe.get(`${recurso}:${accion}`))
+      .filter((x): x is string => !!x)
+      .map((capacidad_id) => ({ rol_id: r.id, capacidad_id }));
+
+    // Si el catálogo cambió y una capacidad del rol base ya no existe, el alta
+    // no se cae: el rol queda con las que sí existen y el faltante se ve en el
+    // panel. Caerse acá dejaría cuentas a medio crear.
+    if (filas.length) await trx.insertInto('rol_capacidad').values(filas).execute();
+  }
+  return roles;
+}
+
+async function crearCarpetas(
+  trx: Transaction<DB>,
+  cuentaId: string,
+  roles: Record<string, string>,
+  creadaPor: string,
+): Promise<Record<string, string>> {
+  const ids: Record<string, string> = {};
+  for (const c of CARPETAS) {
+    const padre = c.ruta.includes('.') ? ids.raiz : null;
+    const r = await trx
+      .insertInto('carpeta')
+      .values({
+        cuenta_id: cuentaId,
+        padre_id: padre,
+        nombre_i18n: JSON.stringify(c.nombre),
+        ruta: sql`${c.ruta}::ltree` as any,
+        sistema: c.sistema,
+        creada_por: creadaPor,
+      })
+      .returning('id')
+      .executeTakeFirstOrThrow();
+    ids[c.sistema] = r.id;
+  }
+
+  // Permisos sobre la raíz. La herencia es aditiva y desciende sola, así que
+  // alcanza con otorgar acá: no hay que repetir el permiso en cada subcarpeta.
+  await trx
+    .insertInto('carpeta_permiso')
+    .values([
+      {
+        carpeta_id: ids.raiz,
+        cuenta_id: cuentaId,
+        rol_id: roles.admin,
+        acciones: ['ver', 'leer', 'crear', 'enviar', 'mover', 'organizar', 'permisos'],
+        otorgado_por: creadaPor,
+      },
+      {
+        carpeta_id: ids.raiz,
+        cuenta_id: cuentaId,
+        rol_id: roles.emisor,
+        acciones: ['ver', 'leer', 'crear', 'enviar', 'mover'],
+        otorgado_por: creadaPor,
+      },
+      {
+        carpeta_id: ids.raiz,
+        cuenta_id: cuentaId,
+        rol_id: roles.lector,
+        acciones: ['ver', 'leer'],
+        otorgado_por: creadaPor,
+      },
+    ])
+    .execute();
+
+  return ids;
 }
