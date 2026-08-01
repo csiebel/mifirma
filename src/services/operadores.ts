@@ -1,10 +1,16 @@
-import { ownerDb } from '../db/owner';
+import { operadorDb } from '../db/pool';
 import { HttpError } from '../http/errors';
 import { hashPassword, verifyPassword } from '../operador/password';
 import { emitirTokenOperador } from '../operador/sesion';
 
 // Catálogo de privilegios de operador (lo conoce el código y lo muestra la consola).
-export const CAPACIDADES = ['gestionar_planes', 'gestionar_empresas', 'gestionar_operadores', 'gestionar_pagos', 'gestionar_ofertas', 'gestionar_firma', 'gestionar_industrias', 'gestionar_creditos', 'ver_auditoria'] as const;
+// `gestionar_mensajeria` es nueva: correo y Twilio guardan las credenciales con
+// las que sale TODO —códigos de acceso, invitaciones, avisos de firma—. Quien la
+// tiene puede redirigir los códigos de acceso de la plataforma entera, así que
+// merece ser un privilegio propio y no colgar de "gestionar_pagos".
+// `operador_capacidad.capacidad` es texto libre (migración 010): agregarla no
+// necesita migración.
+export const CAPACIDADES = ['gestionar_planes', 'gestionar_empresas', 'gestionar_operadores', 'gestionar_pagos', 'gestionar_mensajeria', 'gestionar_ofertas', 'gestionar_firma', 'gestionar_industrias', 'gestionar_creditos', 'ver_auditoria'] as const;
 export type Capacidad = (typeof CAPACIDADES)[number];
 
 function filtrarCaps(caps: string[]): string[] {
@@ -13,7 +19,7 @@ function filtrarCaps(caps: string[]): string[] {
 
 async function capacidadesDe(operadorId: string, esSuperadmin: boolean): Promise<string[]> {
   if (esSuperadmin) return [...CAPACIDADES]; // el superadmin tiene todo
-  const filas = await ownerDb()
+  const filas = await operadorDb()
     .selectFrom('operador_capacidad')
     .select('capacidad')
     .where('operador_id', '=', operadorId)
@@ -25,7 +31,7 @@ const UMBRAL_BLOQUEO_OPERADOR = 5;
 const LOCKOUT_OPERADOR_MIN = 15;
 
 export async function loginOperador(usuario: string, password: string) {
-  const db = ownerDb();
+  const db = operadorDb();
   const op = await db
     .selectFrom('operador')
     .select(['id', 'usuario', 'nombre', 'password_hash', 'es_superadmin', 'activo', 'intentos_fallidos', 'bloqueado_hasta'])
@@ -85,7 +91,7 @@ interface DatosNuevoOperador {
 
 async function crearOperadorInterno(d: DatosNuevoOperador) {
   if (d.password.length < 8) throw new HttpError(400, 'La contraseña debe tener al menos 8 caracteres.');
-  const existe = await ownerDb()
+  const existe = await operadorDb()
     .selectFrom('operador')
     .select('id')
     .where('usuario', '=', d.usuario)
@@ -94,7 +100,7 @@ async function crearOperadorInterno(d: DatosNuevoOperador) {
 
   const caps = filtrarCaps(d.capacidades);
   const hash = await hashPassword(d.password);
-  return ownerDb()
+  return operadorDb()
     .transaction()
     .execute(async (trx) => {
       const fila = await trx
@@ -140,12 +146,12 @@ export async function crearOperador(d: {
 }
 
 export async function listarOperadores() {
-  const ops = await ownerDb()
+  const ops = await operadorDb()
     .selectFrom('operador')
     .select(['id', 'usuario', 'nombre', 'es_superadmin', 'activo', 'creado_en'])
     .orderBy('usuario')
     .execute();
-  const caps = await ownerDb().selectFrom('operador_capacidad').select(['operador_id', 'capacidad']).execute();
+  const caps = await operadorDb().selectFrom('operador_capacidad').select(['operador_id', 'capacidad']).execute();
   const mapa = new Map<string, string[]>();
   for (const c of caps) {
     const a = mapa.get(c.operador_id) ?? [];
@@ -163,9 +169,9 @@ export async function listarOperadores() {
 export async function setOperadorActivo(id: string, activo: boolean) {
   // No dejar la plataforma sin ningún superadmin activo.
   if (!activo) {
-    const op = await ownerDb().selectFrom('operador').select(['es_superadmin']).where('id', '=', id).executeTakeFirst();
+    const op = await operadorDb().selectFrom('operador').select(['es_superadmin']).where('id', '=', id).executeTakeFirst();
     if (op?.es_superadmin) {
-      const r = await ownerDb()
+      const r = await operadorDb()
         .selectFrom('operador')
         .select((eb) => eb.fn.countAll<string>().as('n'))
         .where('es_superadmin', '=', true)
@@ -174,13 +180,13 @@ export async function setOperadorActivo(id: string, activo: boolean) {
       if (Number(r?.n ?? 0) <= 1) throw new HttpError(400, 'No podés desactivar al último superadmin activo.');
     }
   }
-  await ownerDb().updateTable('operador').set({ activo }).where('id', '=', id).execute();
+  await operadorDb().updateTable('operador').set({ activo }).where('id', '=', id).execute();
   return { ok: true };
 }
 
 export async function editarCapacidades(id: string, capacidades: string[]) {
   const caps = filtrarCaps(capacidades);
-  return ownerDb()
+  return operadorDb()
     .transaction()
     .execute(async (trx) => {
       await trx.deleteFrom('operador_capacidad').where('operador_id', '=', id).execute();
@@ -203,7 +209,7 @@ export async function cambiarPasswordOperador(operadorId: string, actual: unknow
   if (nueva.length < 8) throw new HttpError(400, 'La contraseña debe tener al menos 8 caracteres.');
   if (nueva.length > 200) throw new HttpError(400, 'La contraseña es demasiado larga.');
 
-  const op = await ownerDb()
+  const op = await operadorDb()
     .selectFrom('operador')
     .select(['id', 'password_hash', 'activo'])
     .where('id', '=', operadorId)
@@ -216,7 +222,7 @@ export async function cambiarPasswordOperador(operadorId: string, actual: unknow
     throw new HttpError(400, 'La nueva contraseña debe ser distinta de la actual.');
   }
 
-  await ownerDb().updateTable('operador').set({ password_hash: await hashPassword(nueva) }).where('id', '=', operadorId).execute();
+  await operadorDb().updateTable('operador').set({ password_hash: await hashPassword(nueva) }).where('id', '=', operadorId).execute();
   return { ok: true };
 }
 
@@ -231,9 +237,9 @@ function validarClaveOperador(nueva: unknown): string {
 // (superadmin). No pide la actual: es una acción administrativa.
 export async function setPasswordOperador(id: string, nueva: unknown) {
   const clave = validarClaveOperador(nueva);
-  const op = await ownerDb().selectFrom('operador').select(['id']).where('id', '=', id).executeTakeFirst();
+  const op = await operadorDb().selectFrom('operador').select(['id']).where('id', '=', id).executeTakeFirst();
   if (!op) throw new HttpError(404, 'Operador no encontrado.');
-  await ownerDb().updateTable('operador').set({ password_hash: await hashPassword(clave) }).where('id', '=', id).execute();
+  await operadorDb().updateTable('operador').set({ password_hash: await hashPassword(clave) }).where('id', '=', id).execute();
   return { ok: true };
 }
 
@@ -241,8 +247,8 @@ export async function setPasswordOperador(id: string, nueva: unknown) {
 // entrar a la consola). Uso: npm run operador -- reset-password <usuario> <nueva>
 export async function resetPasswordOperadorPorUsuario(usuario: string, nueva: string) {
   const clave = validarClaveOperador(nueva);
-  const op = await ownerDb().selectFrom('operador').select(['id', 'usuario']).where('usuario', '=', usuario).executeTakeFirst();
+  const op = await operadorDb().selectFrom('operador').select(['id', 'usuario']).where('usuario', '=', usuario).executeTakeFirst();
   if (!op) throw new HttpError(404, `No existe un operador con usuario "${usuario}".`);
-  await ownerDb().updateTable('operador').set({ password_hash: await hashPassword(clave) }).where('id', '=', op.id).execute();
+  await operadorDb().updateTable('operador').set({ password_hash: await hashPassword(clave) }).where('id', '=', op.id).execute();
   return { ok: true, usuario: op.usuario };
 }

@@ -50,6 +50,17 @@
   input:focus,select:focus{outline:2px solid var(--brand-600);outline-offset:-1px;border-color:var(--brand-600)}
   input[inputmode="numeric"]{letter-spacing:.5em;font-size:23px;text-align:center;font-weight:700}
   .dos{display:grid;gap:12px;grid-template-columns:1fr 1fr}
+
+  /* Campo de contraseña con el ojo para revelarla. El botón lo inyecta
+     entrar.js sobre cada input[type=password]: así no hay que acordarse de
+     ponerlo en cada pantalla nueva. */
+  .pw{position:relative}
+  .pw input{padding-right:46px}
+  .pw button{position:absolute;right:5px;top:50%;transform:translateY(-50%);background:none;border:0;
+             padding:7px;cursor:pointer;color:var(--mut);border-radius:9px;display:grid;place-items:center}
+  .pw button:hover{color:var(--brand);background:var(--brand-50)}
+  .pw svg{width:19px;height:19px;stroke:currentColor;fill:none;stroke-width:1.7;
+          stroke-linecap:round;stroke-linejoin:round;display:block}
   .pista{font-size:12.5px;color:var(--mut);margin-top:6px}
 
   button.primary{width:100%;margin-top:22px;font:inherit;font-weight:600;color:#fff;background:var(--brand);
@@ -201,8 +212,11 @@
     </div>
 
     <label for="cPass" data-t="crear.password">Contraseña</label>
-    <input id="cPass" type="password" autocomplete="new-password" onkeydown="if(event.key==='Enter')crearCuenta()" />
-    <p class="pista" data-t="crear.password.p">Mínimo 12 caracteres.</p>
+    <input id="cPass" type="password" autocomplete="new-password" />
+    <p class="pista" data-t="crear.password.p">Mínimo 12 caracteres. No pedimos mayúsculas ni símbolos: el largo defiende más que las reglas.</p>
+
+    <label for="cPass2" data-t="crear.repetir">Repetí la contraseña</label>
+    <input id="cPass2" type="password" autocomplete="new-password" onkeydown="if(event.key==='Enter')crearCuenta()" />
 
     <button class="primary" id="btnCrear" onclick="crearCuenta()" data-t="crear.btn">Crear la cuenta</button>
     <div id="msgCrear"></div>

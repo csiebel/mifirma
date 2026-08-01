@@ -1,4 +1,4 @@
-import { ownerDb } from '../db/owner';
+import { operadorDb } from '../db/pool';
 import { HttpError } from '../http/errors';
 import { cifrar, descifrar, enmascarar } from '../operador/cripto';
 
@@ -20,7 +20,7 @@ export interface DatosIntegracionFact {
 
 /** Config actual (la credencial se devuelve enmascarada, nunca en claro). */
 export async function verIntegracionFacturacion(pais: string) {
-  const r = await ownerDb()
+  const r = await operadorDb()
     .selectFrom('integracion_facturacion')
     .select(['proveedor', 'modo', 'api_url', 'api_credencial_cifrada', 'archivo_formato', 'activa'])
     .where('pais', '=', pais)
@@ -43,7 +43,7 @@ export async function verIntegracionFacturacion(pais: string) {
 /** Crea o actualiza la config. La credencial vacía no se toca (igual que pasarelas). */
 export async function guardarIntegracionFacturacion(pais: string, d: DatosIntegracionFact) {
   if (d.modo !== 'api' && d.modo !== 'archivo') throw new HttpError(400, 'Modo inválido (api | archivo).');
-  const existe = await ownerDb()
+  const existe = await operadorDb()
     .selectFrom('integracion_facturacion')
     .select('id')
     .where('pais', '=', pais)
@@ -57,10 +57,10 @@ export async function guardarIntegracionFacturacion(pais: string, d: DatosIntegr
       archivo_formato: d.archivoFormato ?? null,
     };
     if (d.apiCredencial) set.api_credencial_cifrada = cifrar(d.apiCredencial);
-    await ownerDb().updateTable('integracion_facturacion').set(set).where('pais', '=', pais)
+    await operadorDb().updateTable('integracion_facturacion').set(set).where('pais', '=', pais)
     .where('pais', '=', pais).where('proveedor', '=', PROVEEDOR).execute();
   } else {
-    await ownerDb()
+    await operadorDb()
       .insertInto('integracion_facturacion')
       .values({
         pais,
@@ -78,7 +78,7 @@ export async function guardarIntegracionFacturacion(pais: string, d: DatosIntegr
 
 /** Activa o desactiva el conector. Para activar exige lo mínimo de cada modo. */
 export async function setIntegracionFacturacionActiva(pais: string, activo: boolean) {
-  const r = await ownerDb()
+  const r = await operadorDb()
     .selectFrom('integracion_facturacion')
     .select(['modo', 'api_url', 'api_credencial_cifrada', 'archivo_formato'])
     .where('pais', '=', pais)
@@ -93,7 +93,7 @@ export async function setIntegracionFacturacionActiva(pais: string, activo: bool
       throw new HttpError(400, 'Para activar el modo Archivo falta indicar el formato.');
     }
   }
-  await ownerDb().updateTable('integracion_facturacion').set({ activa: activo }).where('pais', '=', pais)
+  await operadorDb().updateTable('integracion_facturacion').set({ activa: activo }).where('pais', '=', pais)
     .where('pais', '=', pais).where('proveedor', '=', PROVEEDOR).execute();
   return { ok: true };
 }
@@ -104,7 +104,7 @@ export async function setIntegracionFacturacionActiva(pais: string, activo: bool
  * el endpoint/layout; esta función deja lista la lectura de la config.
  */
 export async function configIntegracionInterna(pais: string) {
-  const r = await ownerDb()
+  const r = await operadorDb()
     .selectFrom('integracion_facturacion')
     .select(['proveedor', 'modo', 'api_url', 'api_credencial_cifrada', 'archivo_formato', 'activa'])
     .where('pais', '=', pais)

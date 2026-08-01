@@ -1,11 +1,11 @@
-import { ownerDb } from '../db/owner';
+import { operadorDb } from '../db/pool';
 import { HttpError } from '../http/errors';
 import { getI18n, IDIOMAS, type Idioma } from '../i18n/textos';
 
 // Diccionario editable del operador. Los textos de interfaz viven en código
 // (i18n/textos.ts) como DEFAULTS; esta capa guarda solo los OVERRIDES que el
 // operador edita en la consola. Es config global de plataforma → todo va por
-// ownerDb (mifirma_owner), igual que correo/twilio/pasarela. No hay RLS.
+// operadorDb (mifirma_owner), igual que correo/twilio/pasarela. No hay RLS.
 
 function esIdiomaValido(id: string): id is Idioma {
   return (IDIOMAS as readonly string[]).includes(id);
@@ -18,7 +18,7 @@ function placeholdersDe(s: string): string[] {
 
 // Overrides de un idioma como mapa clave -> valor.
 async function overridesDe(idioma: string): Promise<Record<string, string>> {
-  const filas = await ownerDb()
+  const filas = await operadorDb()
     .selectFrom('traduccion_override')
     .select(['clave', 'valor'])
     .where('idioma', '=', idioma)
@@ -72,7 +72,7 @@ export async function setTraduccion(idioma: string, clave: string, valor: string
       throw new HttpError(400, 'Faltan variables que el texto necesita: ' + faltan.join(', '));
     }
   }
-  await ownerDb()
+  await operadorDb()
     .insertInto('traduccion_override')
     .values({ idioma, clave: c, valor: v })
     .onConflict((oc) => oc.columns(['idioma', 'clave']).doUpdateSet({ valor: v }))
@@ -82,7 +82,7 @@ export async function setTraduccion(idioma: string, clave: string, valor: string
 
 export async function borrarTraduccion(idioma: string, clave: string) {
   if (!esIdiomaValido(idioma)) throw new HttpError(400, 'Idioma inválido.');
-  await ownerDb()
+  await operadorDb()
     .deleteFrom('traduccion_override')
     .where('idioma', '=', idioma)
     .where('clave', '=', clave)

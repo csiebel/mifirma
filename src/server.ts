@@ -143,7 +143,7 @@ export function construirServidor(): FastifyInstance {
 
   // JavaScript de las páginas públicas. Se sirve como archivo suelto, igual que
   // el HTML: para dos archivos no vale la pena montar un servidor de estáticos.
-  for (const js of ['sitio.js', 'entrar.js', 'consola.js']) {
+  for (const js of ['sitio.js', 'entrar.js', 'consola.js', 'operador.js']) {
     app.get('/' + js, async (_req, reply) => {
       try {
         const body = readFileSync(new URL('../public/' + js, import.meta.url), 'utf8');
@@ -211,6 +211,7 @@ export function construirServidor(): FastifyInstance {
     '/sitio.js',
     '/entrar.js',
     '/consola.js',
+    '/operador.js',
     '/manifest.webmanifest',
     '/manifest-empleado.webmanifest',
     '/sw.js',
@@ -376,6 +377,16 @@ export function construirServidor(): FastifyInstance {
       return;
     }
     const status = (err as { statusCode?: number }).statusCode ?? 500;
+    // Un HttpError lo escribimos nosotros: su texto es apto para el usuario
+    // aunque el codigo sea 5xx. Los 502/503 de operacion --"no hay conexion de
+    // correo activa"-- son justamente los que hay que poder leer en pantalla;
+    // taparlos con "ocurrio un error en el servidor" manda a revisar el log del
+    // servidor para entender algo que se resolvia solo.
+    if (err instanceof HttpError) {
+      if (status >= 500) app.log.error(err);
+      reply.code(status).send({ error: err.message });
+      return;
+    }
     if (status >= 500) {
       // No filtrar detalles internos (mensajes de la base, config, stack) al cliente:
       // se loguea del lado servidor y se responde con un mensaje genérico.

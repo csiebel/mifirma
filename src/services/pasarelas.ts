@@ -1,4 +1,4 @@
-import { ownerDb } from '../db/owner';
+import { operadorDb } from '../db/pool';
 import { HttpError } from '../http/errors';
 import { cifrar, descifrar, enmascarar } from '../operador/cripto';
 
@@ -17,7 +17,7 @@ export interface DatosPasarela {
 
 /** Lista las pasarelas configuradas. Los secretos se devuelven enmascarados. */
 export async function listarPasarelas() {
-  const filas = await ownerDb()
+  const filas = await operadorDb()
     .selectFrom('pasarela_pago')
     .select([
       'proveedor',
@@ -49,7 +49,7 @@ export async function guardarPasarela(d: DatosPasarela) {
   if (!(PROVEEDORES as readonly string[]).includes(d.proveedor)) {
     throw new HttpError(400, `Proveedor no soportado: ${d.proveedor}`);
   }
-  const existe = await ownerDb()
+  const existe = await operadorDb()
     .selectFrom('pasarela_pago')
     .select('id')
     .where('proveedor', '=', d.proveedor)
@@ -69,9 +69,9 @@ export async function guardarPasarela(d: DatosPasarela) {
     };
     if (d.clientSecret) set.client_secret_cifrado = cifrar(d.clientSecret);
     if (d.webhookSecret) set.webhook_secret_cifrado = cifrar(d.webhookSecret);
-    await ownerDb().updateTable('pasarela_pago').set(set).where('proveedor', '=', d.proveedor).execute();
+    await operadorDb().updateTable('pasarela_pago').set(set).where('proveedor', '=', d.proveedor).execute();
   } else {
-    await ownerDb()
+    await operadorDb()
       .insertInto('pasarela_pago')
       .values({
         proveedor: d.proveedor,
@@ -89,7 +89,7 @@ export async function guardarPasarela(d: DatosPasarela) {
 
 /** Activa o desactiva una pasarela. Para activar exige credenciales cargadas. */
 export async function setPasarelaActiva(proveedor: string, activo: boolean) {
-  const p = await ownerDb()
+  const p = await operadorDb()
     .selectFrom('pasarela_pago')
     .select(['client_id', 'client_secret_cifrado'])
     .where('proveedor', '=', proveedor)
@@ -98,12 +98,12 @@ export async function setPasarelaActiva(proveedor: string, activo: boolean) {
   if (activo && (!p.client_id || !p.client_secret_cifrado)) {
     throw new HttpError(400, 'No se puede activar: faltan credenciales (Client ID y Client Secret).');
   }
-  await ownerDb().updateTable('pasarela_pago').set({ activa: activo }).where('proveedor', '=', proveedor).execute();
+  await operadorDb().updateTable('pasarela_pago').set({ activa: activo }).where('proveedor', '=', proveedor).execute();
   return { ok: true };
 }
 
 export async function eliminarPasarela(proveedor: string) {
-  const del = await ownerDb()
+  const del = await operadorDb()
     .deleteFrom('pasarela_pago')
     .where('proveedor', '=', proveedor)
     .executeTakeFirstOrThrow();
@@ -116,7 +116,7 @@ export async function eliminarPasarela(proveedor: string) {
  * (no se expone por HTTP). Lo usará la integración funcional del próximo paso.
  */
 export async function credencialesDe(proveedor: string) {
-  const p = await ownerDb()
+  const p = await operadorDb()
     .selectFrom('pasarela_pago')
     .select(['proveedor', 'modo', 'client_id', 'client_secret_cifrado', 'webhook_secret_cifrado', 'activa'])
     .where('proveedor', '=', proveedor)

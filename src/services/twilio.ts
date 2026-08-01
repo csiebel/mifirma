@@ -1,4 +1,4 @@
-import { ownerDb } from '../db/owner';
+import { operadorDb } from '../db/pool';
 import { HttpError } from '../http/errors';
 import { cifrar, descifrar, enmascarar } from '../operador/cripto';
 
@@ -32,7 +32,7 @@ interface FilaTwilio {
 }
 
 async function fila() {
-  return ownerDb().selectFrom('twilio_config').selectAll().executeTakeFirst();
+  return operadorDb().selectFrom('twilio_config').selectAll().executeTakeFirst();
 }
 
 /** Config actual con el token enmascarado (nunca en claro). null si no hay. */
@@ -67,9 +67,9 @@ export async function guardarTwilio(d: DatosTwilio) {
       wa_content_sid: d.waContentSid || null,
     };
     if (d.authToken) set.auth_token_cifrado = cifrar(d.authToken);
-    await ownerDb().updateTable('twilio_config').set(set).where('id', '=', existe.id).execute();
+    await operadorDb().updateTable('twilio_config').set(set).where('id', '=', existe.id).execute();
   } else {
-    await ownerDb()
+    await operadorDb()
       .insertInto('twilio_config')
       .values({
         account_sid: d.accountSid,
@@ -94,7 +94,7 @@ export async function setTwilioActivo(activo: boolean) {
       throw new HttpError(400, 'No se puede activar: falta un remitente (número de SMS o de WhatsApp).');
     }
   }
-  await ownerDb().updateTable('twilio_config').set({ activa: activo }).where('id', '=', c.id).execute();
+  await operadorDb().updateTable('twilio_config').set({ activa: activo }).where('id', '=', c.id).execute();
   return { ok: true };
 }
 

@@ -45,8 +45,37 @@ export function verifyPassword(plano: string, guardado: string | null | undefine
 }
 
 // Política mínima de contraseña. Devuelve un mensaje de error o null si está OK.
+//
+// ═══ POR QUÉ 12 Y NO 8 ═══
+//
+// scrypt encarece el ataque por fuerza bruta, pero no lo impide: si algún día se
+// filtra la tabla `credencial`, el atacante prueba de a millones contra su
+// propio hardware, sin límite de intentos y sin que nos enteremos. Ahí lo único
+// que sigue defendiendo es el LARGO. Ocho caracteres elegidos por una persona
+// —una palabra, una mayúscula al principio y un número al final— es un espacio
+// que se recorre entero; doce ya no.
+//
+// No se piden mayúsculas ni símbolos a propósito. Las reglas de composición
+// empujan al mismo patrón previsible (`Empresa2026!`) y no agregan entropía
+// real: NIST retiró esa recomendación junto con la del cambio periódico
+// obligatorio. Largo mínimo y nada más.
+//
+// El chequeo de caracteres distintos mata el atajo obvio de la regla de largo:
+// `aaaaaaaaaaaa` y `123412341234` tienen doce caracteres y ninguna resistencia.
+//
+// ⚠ Lo que falta y vale más que todo esto junto: contrastar contra una lista de
+// contraseñas ya filtradas (HIBP con k-anonimato). Una contraseña larga que ya
+// está en un diccionario público se rompe en el primer intento.
+const LARGO_MINIMO = 12;
+const DISTINTOS_MINIMO = 5;
+
 export function validarPassword(plano: string): string | null {
-  if (typeof plano !== 'string' || plano.length < 8) return 'La contraseña debe tener al menos 8 caracteres.';
+  if (typeof plano !== 'string' || plano.length < LARGO_MINIMO) {
+    return `La contraseña debe tener al menos ${LARGO_MINIMO} caracteres.`;
+  }
   if (plano.length > 200) return 'La contraseña es demasiado larga.';
+  if (new Set(plano).size < DISTINTOS_MINIMO) {
+    return 'Esa contraseña repite siempre los mismos caracteres. Probá con algo menos regular.';
+  }
   return null;
 }

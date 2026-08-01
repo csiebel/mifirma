@@ -1,2370 +1,309 @@
 <!doctype html>
 <html lang="es">
 <head>
-<meta charset="utf-8">
-<meta name="viewport" content="width=device-width, initial-scale=1">
-<title>Consola de Operador — MiFirma</title>
-<meta name="theme-color" content="#123a5e">
-<link rel="icon" type="image/svg+xml" href="/favicon.svg">
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Consola · MiFirma</title>
+<meta name="theme-color" content="#0B2B4A" />
+<meta name="robots" content="noindex" />
+<link rel="icon" type="image/svg+xml" href="/favicon.svg" />
+<link rel="preconnect" href="https://fonts.googleapis.com" />
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet" />
 <style>
- :root{ --teal:#123a5e; --ink:#13241f; --muted:#6b7d76; --line:#dfe7e3; --bg:#f4f7f5; --warn:#8a5a00; }
- *{box-sizing:border-box}
- body{margin:0;font-family:system-ui,-apple-system,Segoe UI,Roboto,sans-serif;color:var(--ink);background:var(--bg)}
- header{background:var(--teal);color:#fff;padding:14px 22px;display:flex;align-items:center;justify-content:space-between}
- header .t{font-weight:700}
- header .sub{font-size:12px;opacity:.82}
- header .who{font-size:13px;opacity:.95;margin-right:12px}
- .wrap{max-width:1240px;margin:0 auto;padding:22px}
- #login{max-width:440px;margin:0 auto}
- .card{background:#fff;border:1px solid var(--line);border-radius:12px;padding:20px;margin-bottom:20px}
- h2{margin:.2em 0 .6em;font-size:18px}
- label{display:block;font-size:13px;color:var(--muted);margin:8px 0 3px}
- input,select{width:100%;padding:8px 10px;border:1px solid var(--line);border-radius:8px;font-size:14px;background:#fff}
- button{background:var(--teal);color:#fff;border:0;border-radius:8px;padding:8px 14px;font-size:14px;cursor:pointer}
- button.sec{background:#fff;color:var(--teal);border:1px solid var(--teal)}
- button.mini{padding:5px 9px;font-size:12px}
- table{width:100%;border-collapse:collapse;font-size:14px}
- th,td{text-align:left;padding:8px 10px;border-bottom:1px solid var(--line);vertical-align:top}
- th{color:var(--muted);font-weight:600;font-size:12px}
- .num{text-align:right}
- .row{display:flex;gap:10px;flex-wrap:wrap;align-items:flex-end}
- .row>div{flex:1;min-width:120px}
- .muted{color:var(--muted)}
- .ok{color:var(--teal);font-weight:600}
- .off{color:#a33}
- .msg{font-size:13px}
- .empty{padding:16px;color:var(--muted);text-align:center;border:1px dashed var(--line);border-radius:8px}
- .banner{background:#fff7e6;border:1px solid #f0d9a8;color:var(--warn);padding:10px 14px;border-radius:8px;font-size:13px;margin-bottom:18px}
- .hidden{display:none}
- .inline{display:flex;gap:8px;align-items:center}
- .inline input,.inline select{width:auto}
- .checks label{display:flex;gap:8px;align-items:center;color:var(--ink);font-size:14px;margin:6px 0}
- .checks input{width:auto}
- .pill{display:inline-block;background:#eef3f1;color:var(--teal);border-radius:6px;padding:2px 7px;font-size:11px;margin:1px 2px}
- /* Layout de 2 columnas: menú lateral izquierdo fijo + contenido a la derecha */
- .consola-layout{display:flex;gap:20px;align-items:flex-start}
- .sidebar{flex:0 0 240px;width:240px;position:sticky;top:20px}
- .consola-main{flex:1;min-width:0}
- nav.consola-nav{background:#fff;border:1px solid var(--line);border-radius:12px;padding:10px;display:flex;flex-direction:column;gap:4px}
- .navgroup{display:flex;flex-direction:column}
- .navgroup+.navgroup{margin-top:8px;padding-top:10px;border-top:1px solid var(--line)}
- .navtitulo{padding:4px 10px 6px;font-size:11px;font-weight:700;letter-spacing:.04em;text-transform:uppercase;color:var(--muted)}
- .navtitulo.activo{color:var(--teal)}
- .navlink{display:block;padding:8px 12px;border-radius:8px;cursor:pointer;font-size:14px;color:var(--ink);text-decoration:none;border-left:3px solid transparent}
- .navlink:hover{background:#eef3f1;color:var(--teal)}
- .navlink.activo{background:#eef3f1;color:var(--teal);font-weight:600;border-left-color:var(--teal)}
- .menubtn{display:none}
- @media (max-width: 720px) {
-   header{padding:12px 16px;flex-wrap:wrap;gap:8px}
-   header .sub{font-size:11px}
-   .wrap{padding:14px}
-   .card{padding:16px}
-   /* En pantallas chicas el sidebar se apila arriba y se colapsa detrás de la hamburguesa,
-      como bloque estático: empuja el contenido, no lo tapa. */
-   .consola-layout{flex-direction:column}
-   .sidebar{position:static;width:auto;flex:none;display:none;margin-bottom:14px}
-   .sidebar.abierto{display:block}
-   .menubtn{display:inline-flex;align-items:center;gap:8px;margin-bottom:14px}
-   /* Tablas: cada fila pasa a "tarjeta" apilada; así los botones de Acciones quedan visibles sin scroll horizontal */
-   table thead{display:none}
-   table, table tbody, table tr, table td{display:block;width:auto}
-   table tr{border:1px solid var(--line);border-radius:10px;margin-bottom:10px;padding:6px 12px}
-   table td{border:0;padding:5px 0;white-space:normal;text-align:left}
-   table td.num{text-align:left}
-   table td[data-label]::before{content:attr(data-label) ': ';color:var(--muted);font-weight:600;font-size:12px}
-   /* Los grupos de botones envuelven en vez de salirse de pantalla */
-   .inline{flex-wrap:wrap}
-   .inline input,.inline select{max-width:100%}
- }
+  /* La consola del operador es DELIBERADAMENTE distinta de la del cliente:
+     fondo oscuro, acento ámbar. Acá se tocan las credenciales con las que sale
+     todo y los precios de todos los países; confundir una pantalla con la otra
+     no puede depender de leer el título. */
+  :root{
+    --brand:#0B2B4A; --brand-600:#14456f;
+    --acc:#F5B544; --acc-700:#8a5c05;
+    --ink:#0f1e2c; --mut:#5a6878; --line:#e4ebf3; --soft:#f7fafc; --paper:#fff;
+    --oscuro:#0a1b2b; --oscuro-2:#122c44;
+    --danger:#b42318; --ok:#067647; --r:11px;
+    --font:'Inter',system-ui,-apple-system,'Segoe UI',Roboto,sans-serif;
+  }
+  *{box-sizing:border-box}
+  body{margin:0;font-family:var(--font);color:var(--ink);background:var(--soft);line-height:1.55;
+       -webkit-font-smoothing:antialiased;min-height:100dvh}
+  body.dentro{display:grid;grid-template-columns:1fr}
+  @media(min-width:900px){body.dentro{grid-template-columns:238px 1fr}}
+
+  /* ---------- lateral ---------- */
+  aside{background:var(--oscuro);color:#b9cbdc;padding:22px 16px;display:flex;flex-direction:column;gap:24px}
+  aside .logo{padding:0 8px;display:flex;align-items:center;gap:10px}
+  aside .logo img{height:26px}
+  aside .logo span{font-size:11px;font-weight:700;letter-spacing:.1em;text-transform:uppercase;
+                   color:var(--acc);border:1px solid rgba(245,181,68,.4);border-radius:999px;padding:2px 8px}
+  nav.menu{display:flex;flex-direction:column;gap:2px}
+  nav.menu button{display:flex;align-items:center;gap:11px;width:100%;text-align:left;font:inherit;font-size:14.5px;
+    font-weight:500;color:#a9c0d4;background:none;border:0;border-radius:9px;padding:10px 12px;cursor:pointer;transition:.14s}
+  nav.menu button:hover{background:rgba(255,255,255,.07);color:#fff}
+  nav.menu button[aria-current="true"]{background:rgba(245,181,68,.16);color:#fff;font-weight:600}
+  nav.menu svg{width:18px;height:18px;stroke:currentColor;fill:none;stroke-width:1.8;stroke-linecap:round;stroke-linejoin:round;flex:none}
+  aside .pie{margin-top:auto;border-top:1px solid rgba(255,255,255,.12);padding-top:16px;font-size:13px}
+  aside .pie b{display:block;color:#fff;font-size:14px}
+  aside .pie span{color:#7f9ab3;font-size:12.5px}
+  aside .pie button{margin-top:12px;font:inherit;font-size:13px;color:#a9c0d4;background:none;border:0;padding:0;cursor:pointer}
+  aside .pie button:hover{color:#fff;text-decoration:underline}
+
+  /* ---------- contenido ---------- */
+  main{padding:30px 28px 60px;overflow-x:hidden}
+  .cab{display:flex;align-items:flex-start;justify-content:space-between;gap:18px;flex-wrap:wrap;margin-bottom:24px}
+  h1{font-size:25px;margin:0;letter-spacing:-.025em}
+  .cab p{color:var(--mut);font-size:14.5px;margin:6px 0 0;max-width:74ch}
+
+  .panel{background:var(--paper);border:1px solid var(--line);border-radius:14px;overflow:hidden}
+  .panel .cuerpo{padding:24px}
+  .cabPanel{display:flex;align-items:center;justify-content:space-between;gap:14px;flex-wrap:wrap;
+            padding:15px 20px;border-bottom:1px solid var(--line);background:var(--soft)}
+  .cabPanel b{font-size:15px}
+  .cabPanel span{font-size:12.5px;color:var(--mut)}
+
+  label{display:block;font-size:13px;font-weight:600;margin:15px 0 6px}
+  label:first-child{margin-top:0}
+  input,select{width:100%;font:inherit;padding:10px 12px;border:1px solid var(--line);border-radius:var(--r);
+               background:var(--paper);color:var(--ink)}
+  input:focus,select:focus{outline:2px solid var(--brand-600);outline-offset:-1px}
+  textarea{width:100%;font:inherit;padding:10px 12px;border:1px solid var(--line);border-radius:var(--r);
+           min-height:96px;resize:vertical}
+  .dos{display:grid;gap:14px;grid-template-columns:1fr 1fr}
+  .tres{display:grid;gap:14px;grid-template-columns:2fr 1fr 1fr}
+  @media(max-width:700px){.dos,.tres{grid-template-columns:1fr}}
+  .pista{font-size:12.5px;color:var(--mut);margin-top:6px}
+  .check{display:flex;align-items:center;gap:9px;font-size:14px;font-weight:500;margin:12px 0 0;cursor:pointer}
+  .check input{width:16px;height:16px;accent-color:var(--brand-600);flex:none}
+
+  .btn{font:inherit;font-weight:600;font-size:14px;padding:9.5px 16px;border-radius:var(--r);
+       border:1px solid transparent;cursor:pointer;transition:.15s;white-space:nowrap}
+  .btn-p{background:var(--brand);color:#fff}
+  .btn-p:hover{background:var(--brand-600)}
+  .btn-s{background:var(--paper);color:var(--brand);border-color:var(--line)}
+  .btn-s:hover{border-color:var(--brand)}
+  .btn-d{background:var(--paper);color:var(--danger);border-color:#fecdc9}
+  .btn:disabled{opacity:.5;cursor:default}
+  .btn.chico{font-size:13px;padding:6px 11px}
+  .acc{display:flex;gap:8px;flex-wrap:wrap;align-items:center}
+
+  table{width:100%;border-collapse:collapse}
+  th{text-align:left;font-size:11.5px;text-transform:uppercase;letter-spacing:.07em;color:var(--mut);
+     font-weight:700;padding:12px 18px;border-bottom:1px solid var(--line);background:var(--soft)}
+  td{padding:12px 18px;border-bottom:1px solid var(--line);font-size:14.5px;vertical-align:middle}
+  tr:last-child td{border-bottom:0}
+  td input{padding:8px 10px}
+  .pill{display:inline-block;font-size:12px;font-weight:600;padding:3px 10px;border-radius:999px;margin-right:5px}
+  .pill.on{background:#ecfdf3;color:var(--ok)}
+  .pill.off{background:#f2f5f9;color:var(--mut)}
+  .pill.des{background:#fef6e7;color:var(--acc-700)}
+
+  .msg{margin-top:16px;font-size:13.5px;padding:11px 13px;border-radius:var(--r)}
+  .msg.err{background:#fef3f2;color:var(--danger);border:1px solid #fecdc9}
+  .msg.ok{background:#ecfdf3;color:var(--ok);border:1px solid #abefc6}
+  .vacio{padding:44px 24px;text-align:center;color:var(--mut);font-size:14.5px}
+  .hidden{display:none!important}
+
+  /* ---------- login ---------- */
+  .entrada{min-height:100dvh;display:grid;place-items:center;padding:24px;
+           background:radial-gradient(760px 420px at 50% -10%, #163a5c, transparent 70%), var(--oscuro)}
+  .entrada .caja{width:100%;max-width:390px;background:var(--paper);border-radius:18px;padding:32px;
+                 box-shadow:0 24px 60px rgba(0,0,0,.35)}
+  .entrada h1{font-size:22px;margin-bottom:4px}
+  .entrada p.sub{color:var(--mut);font-size:14px;margin:0 0 20px}
+  .entrada button.primary{width:100%;margin-top:22px;font:inherit;font-weight:600;color:#fff;background:var(--brand);
+                          border:0;border-radius:var(--r);padding:12.5px;cursor:pointer}
+  .entrada button.primary:hover{background:var(--brand-600)}
+
+  /* ---------- modal ---------- */
+  .fondo{position:fixed;inset:0;background:rgba(6,18,30,.55);display:grid;place-items:center;padding:24px;z-index:80;overflow:auto}
+  .modal{background:var(--paper);border-radius:16px;padding:28px;width:100%;max-width:560px;
+         box-shadow:0 24px 60px rgba(0,0,0,.3);margin:auto}
+  .modal h2{font-size:19px;margin:0 0 6px}
+  .modal p.sub{color:var(--mut);font-size:14px;margin:0 0 18px}
+  .modal .acc{margin-top:24px;justify-content:flex-end}
+  .idiomas{display:inline-flex;gap:1px;background:var(--soft);border:1px solid var(--line);border-radius:999px;padding:3px}
+  .idiomas button{border:0;background:none;font:inherit;font-size:12.5px;font-weight:600;color:var(--mut);
+                  padding:4px 12px;border-radius:999px;cursor:pointer}
+  .idiomas button[aria-pressed="true"]{background:var(--brand);color:#fff}
 </style>
 </head>
 <body>
-<header>
-  <div><svg viewBox="0 0 272 60" style="height:38px;display:block" role="img" aria-label="MiFirma"><rect x="0" y="14" width="36" height="6.5" rx="3.25" fill="#fff"/><rect x="0" y="25" width="23" height="6.5" rx="3.25" fill="#0aa2b0"/><rect x="0" y="36" width="31" height="6.5" rx="3.25" fill="#fff"/><text x="52" y="26" font-family="system-ui,-apple-system,'Segoe UI',Roboto,sans-serif" font-size="25" font-weight="700" fill="#fff">MiFirma</text><text x="52" y="47" font-family="system-ui,-apple-system,'Segoe UI',Roboto,sans-serif" font-size="13.5" font-weight="500" fill="#6fd2da">New Generation</text></svg><div class="sub" style="margin-top:4px">Consola de Operador · proveedor del servicio</div></div>
-  <div><span id="who" class="who hidden"></span><button id="btnSalir" class="sec mini hidden" onclick="salir()">Salir</button></div>
-</header>
-<div class="wrap">
 
-  <div id="login" class="card">
-    <h2>Acceso de operador</h2>
-    <p class="muted">Consola interna del proveedor del SaaS. No es para empresas clientes.</p>
-    <label>Usuario</label>
-    <input id="lUsuario" autocomplete="username">
-    <label>Contraseña</label>
-    <input id="lPass" type="password" autocomplete="current-password">
-    <div style="margin-top:12px"><button onclick="entrar()">Entrar</button></div>
-    <div id="loginMsg" class="msg" style="margin-top:10px"></div>
+<!-- ============ Login ============ -->
+<div id="vLogin" class="entrada">
+  <div class="caja">
+    <h1>Consola del operador</h1>
+    <p class="sub">La administración de MiFirma. No es el acceso de los clientes.</p>
+    <label for="lUsuario">Usuario</label>
+    <input id="lUsuario" autocomplete="username" />
+    <label for="lPassword">Contraseña</label>
+    <input id="lPassword" type="password" autocomplete="current-password"
+           onkeydown="if(event.key==='Enter')entrar()" />
+    <button class="primary" id="btnEntrar" onclick="entrar()">Entrar</button>
+    <div id="msgLogin"></div>
   </div>
-
-  <div id="consola" class="hidden">
-    <button class="menubtn sec" id="btnMenu" onclick="toggleMenu()">☰ Menú</button>
-    <div class="consola-layout">
-
-    <aside id="sidebar" class="sidebar">
-    <nav class="consola-nav">
-      <div class="navgroup">
-        <div id="ntFacturacion" class="navtitulo activo">Facturación</div>
-        <a class="navlink" data-sec="planes" onclick="ver('planes')">Planes y precios</a>
-        <a class="navlink" data-sec="empresas" onclick="ver('empresas')">Empresas</a>
-        <a class="navlink" data-sec="planes_estudio" onclick="ver('planes_estudio')">Planes de estudios contables</a>
-        <a class="navlink" data-sec="estudios" onclick="ver('estudios')">Estudios contables</a>
-        <a class="navlink" data-sec="ofertas" onclick="ver('ofertas')">Ofertas y beneficios</a>
-        <a class="navlink" data-sec="creditos" onclick="ver('creditos')">Solicitudes de crédito</a>
-      </div>
-      <div id="grpAdmin" class="navgroup hidden">
-        <div id="ntAdmin" class="navtitulo">Administración</div>
-        <a class="navlink" data-sec="operadores" onclick="ver('operadores')">Operadores</a>
-        <a class="navlink" data-sec="auditoria" onclick="ver('auditoria')">Auditoría</a>
-      </div>
-      <div id="grpConfig" class="navgroup hidden">
-        <div id="ntConfig" class="navtitulo">Configuración</div>
-        <a class="navlink" data-sec="pasarelas" onclick="ver('pasarelas')">Medios de pago</a>
-        <a class="navlink" data-sec="integracion" onclick="ver('integracion')">Facturación (Nodum)</a>
-        <a class="navlink" data-sec="correo" onclick="ver('correo')">Correo / Email</a>
-        <a class="navlink" data-sec="twilio" onclick="ver('twilio')">SMS / WhatsApp</a>
-        <a class="navlink" data-sec="i18n" onclick="ver('i18n')">Etiquetas / Traducciones</a>
-        <a class="navlink" data-sec="firma" onclick="ver('firma')">Firma de recibos</a>
-        <a class="navlink" data-sec="industrias" onclick="ver('industrias')">Industrias / Rubros</a>
-        <a class="navlink" data-sec="tarifas_ia" onclick="ver('tarifas_ia')">Tarifas IA</a>
-        <a class="navlink" data-sec="catalogos_pago" onclick="ver('catalogos_pago')">Catálogos de pago</a>
-      </div>
-      <div class="navgroup">
-        <div id="ntAyuda" class="navtitulo">Ayuda</div>
-        <a class="navlink" data-sec="asistente" onclick="ver('asistente')">Asistente IA</a>
-      </div>
-      <div class="navgroup">
-        <div id="ntCuenta" class="navtitulo">Mi cuenta</div>
-        <a class="navlink" data-sec="cuenta" onclick="ver('cuenta')">Cambiar contraseña</a>
-      </div>
-    </nav>
-    </aside>
-
-    <div class="consola-main">
-    <div class="banner">Lo que cambiás acá son criterios comerciales globales del servicio e impactan a todas las empresas.</div>
-
-    <div class="card hidden" id="secAsistente">
-      <h2>Asistente</h2>
-      <p class="muted">Preguntale cómo hacer cualquier cosa en la consola: cómo crear una oferta, cómo segmentar un grupo, cómo aprobar un crédito, etc. Solo te explica los pasos; no accede a datos ni hace cambios.</p>
-      <div id="asistHist" style="border:1px solid var(--line);border-radius:10px;padding:12px;height:380px;overflow-y:auto;background:#fafafa;display:flex;flex-direction:column;gap:10px"></div>
-      <div class="row" style="margin-top:10px;align-items:flex-end">
-        <div style="flex:1"><label>Tu pregunta</label><input id="asistInput" placeholder="¿Cómo creo una oferta y la segmento?" onkeydown="if(event.key==='Enter'){event.preventDefault();enviarAsistente();}"></div>
-        <button onclick="enviarAsistente()" id="asistBtn">Preguntar</button>
-      </div>
-      <div id="asistMsg" class="msg" style="margin-top:8px"></div>
-    </div>
-
-    <div class="card hidden" id="secCuenta">
-      <h2>Cambiar contraseña</h2>
-      <p class="muted">Cambiá la contraseña con la que entrás a esta consola. Necesitás tu contraseña actual.</p>
-      <div class="row">
-        <div><label>Contraseña actual</label><input id="opActual" type="password" autocomplete="current-password"></div>
-      </div>
-      <div class="row">
-        <div><label>Nueva contraseña</label><input id="opNueva" type="password" autocomplete="new-password"></div>
-        <div><label>Repetir nueva</label><input id="opNueva2" type="password" autocomplete="new-password"></div>
-      </div>
-      <p class="muted">Mínimo 8 caracteres.</p>
-      <div style="margin-top:12px" class="inline">
-        <button id="btnOpPass" onclick="cambiarMiClaveOp()">Cambiar contraseña</button>
-        <span id="opPassMsg" class="msg"></span>
-      </div>
-    </div>
-
-    <div class="card hidden" id="secPlanes">
-      <h2>Planes y precios</h2>
-      <div id="planesOut"><p class="muted">Cargando…</p></div>
-
-      <div id="formPlan" class="hidden">
-        <h2 id="formTitulo" style="margin-top:18px">Nuevo plan</h2>
-        <div class="row">
-          <div><label>Código</label><input id="pCodigo" placeholder="pro"></div>
-          <div><label>Nombre</label><input id="pNombre" placeholder="Pro"></div>
-          <div><label>Moneda</label><input id="pMoneda" value="USD" maxlength="3"></div>
-          <div><label>Periodicidad</label><select id="pPeriodo"><option value="mensual">Mensual</option><option value="semestral">Semestral</option><option value="anual">Anual</option></select></div>
-        </div>
-        <div class="row">
-          <div><label>Modalidad de precio</label><select id="pModo" onchange="modoPlanCambio()"><option value="por_funcionario">Por funcionario</option><option value="fijo">Precio fijo</option></select></div>
-          <div id="wrapFijo" class="hidden"><label>Precio fijo (por período)</label><input id="pFijo" type="number" step="0.01" min="0" value="0"></div>
-        </div>
-        <div id="wrapFranjas">
-          <label>Franjas de precio · cada funcionario se cobra según el tramo en que cae (dejá "Hasta" vacío en la última franja para "sin tope")</label>
-          <table id="tablaFranjas"><thead><tr><th>Desde</th><th>Hasta</th><th>Precio por funcionario</th><th></th></tr></thead><tbody></tbody></table>
-          <button type="button" class="sec mini" onclick="agregarFranja()" style="margin-top:8px">+ Agregar franja</button>
-        </div>
-        <div class="row" style="margin-top:12px">
-          <div><label>Asistente IA</label><select id="pIaHab"><option value="si">Incluido</option><option value="no">Deshabilitado</option></select></div>
-          <div><label>Cobrar uso de IA</label><select id="pIaCobra"><option value="no">No</option><option value="si">Sí</option></select></div>
-          <div><label>Margen de ganancia IA (%)</label><input id="pIaMargen" type="number" step="0.01" min="0" value="0"></div>
-          <div><label>Crédito IA incluido (por período)</label><input id="pIaIncluido" type="number" step="0.01" min="0" value="0"></div>
-        </div>
-        <div style="margin-top:12px" class="inline">
-          <button id="btnGuardarPlan" onclick="guardarPlan()">Crear plan</button>
-          <button id="btnCancelar" class="sec hidden" onclick="cancelarEdicion()">Cancelar</button>
-          <span id="planMsg" class="msg"></span>
-        </div>
-      </div>
-    </div>
-
-    <div class="card hidden" id="secEmpresas">
-      <h2>Empresas</h2>
-      <div id="empresasOut"><p class="muted">Cargando…</p></div>
-      <div id="empMsg" class="msg" style="margin-top:10px"></div>
-    </div>
-
-    <div class="card hidden" id="secPlanesEstudio">
-      <h2>Planes de estudios contables</h2>
-      <p class="muted">El cobro a un estudio contable se calcula por la cantidad de empresas-cliente que gestiona. Definí las franjas escalonadas (precio 0 = tramo gratis) y, si querés, un tope de empresas para el plan.</p>
-      <div id="planesEstudioOut"><p class="muted">Cargando…</p></div>
-
-      <div id="formPlanE" class="hidden">
-        <h2 id="formTituloE" style="margin-top:18px">Nuevo plan</h2>
-        <div class="row">
-          <div><label>Código</label><input id="peCodigo" placeholder="estudio_pro"></div>
-          <div><label>Nombre</label><input id="peNombre" placeholder="Estudio Pro"></div>
-          <div><label>Moneda</label><input id="peMoneda" value="USD" maxlength="3"></div>
-          <div><label>Periodicidad</label><select id="pePeriodo"><option value="mensual">Mensual</option><option value="semestral">Semestral</option><option value="anual">Anual</option></select></div>
-        </div>
-        <div class="row">
-          <div><label>Tope de empresas (vacío = sin tope)</label><input id="peLimite" type="number" min="0" placeholder="sin tope" style="width:160px"></div>
-        </div>
-        <div id="wrapFranjasE">
-          <label>Franjas de precio · cada empresa-cliente se cobra según el tramo en que cae (dejá "Hasta" vacío en la última franja para "sin tope"; precio 0 = tramo gratis)</label>
-          <table id="tablaFranjasE"><thead><tr><th>Desde</th><th>Hasta</th><th>Precio por empresa</th><th></th></tr></thead><tbody></tbody></table>
-          <button type="button" class="sec mini" onclick="agregarFranjaE()" style="margin-top:8px">+ Agregar franja</button>
-        </div>
-        <div style="margin-top:12px" class="inline">
-          <button id="btnGuardarPlanE" onclick="guardarPlanEstudio()">Crear plan</button>
-          <button id="btnCancelarE" class="sec hidden" onclick="cancelarEdicionE()">Cancelar</button>
-          <span id="planEMsg" class="msg"></span>
-        </div>
-      </div>
-    </div>
-
-    <div class="card hidden" id="secEstudios">
-      <h2>Estudios contables</h2>
-      <p class="muted">Los estudios contables dados de alta, con su plan y cuántas empresas-cliente gestionan hoy. Asignales un plan; el tope de empresas se controla cuando una empresa los autoriza.</p>
-      <div id="estudiosOpOut"><p class="muted">Cargando…</p></div>
-      <div id="estOpMsg" class="msg" style="margin-top:10px"></div>
-    </div>
-
-    <div class="card hidden" id="secOfertas">
-      <h2>Ofertas y beneficios</h2>
-      <p class="muted">Catálogo global del servicio: oferentes (bancos, financieras, comercios) y sus ofertas. Lo que cargás acá se muestra a los empleados de las empresas que tengan las ofertas habilitadas (eso se prende por empresa en la pestaña Empresas).</p>
-
-      <h2 style="margin-top:6px">Oferentes</h2>
-      <div id="oferentesOut"><p class="muted">Cargando…</p></div>
-      <div class="card hidden" id="ofeFactBox" style="margin-top:10px"></div>
-      <div class="card hidden" id="ofeComBox" style="margin-top:10px"></div>
-      <div class="row" style="margin-top:10px">
-        <div><label>Nombre</label><input id="ofeNombre" placeholder="Banco Ejemplo"></div>
-        <div><label>Tipo</label><select id="ofeTipo"><option value="financiera">Financiera</option><option value="banco">Banco</option><option value="comercio">Comercio</option><option value="otro">Otro</option></select></div>
-        <div><label>País (vacío = todos)</label><input id="ofePais" maxlength="2" placeholder="UY"></div>
-      </div>
-      <div style="margin-top:10px" class="inline"><button onclick="crearOferenteUI()">Agregar oferente</button></div>
-      <div id="ofeMsg" class="msg" style="margin-top:8px"></div>
-
-      <h2 style="margin-top:18px">Ofertas</h2>
-      <div id="ofertasOut"><p class="muted">Cargando…</p></div>
-      <div class="card hidden" id="ofIndBox" style="margin-top:10px"></div>
-      <div class="card hidden" id="ofComBox" style="margin-top:10px"></div>
-      <div class="card hidden" id="ofFormBox" style="margin-top:10px"></div>
-      <div class="card hidden" id="ofEditBox" style="margin-top:10px"></div>
-      <div class="row" style="margin-top:10px">
-        <div><label>Oferente</label><select id="ofOferente"></select></div>
-        <div><label>Tipo</label><select id="ofTipo"><option value="publicidad">Publicidad</option><option value="venta">Venta de productos o servicios</option><option value="financiero">Financiero</option></select></div>
-        <div><label>Título</label><input id="ofTitulo" placeholder="Préstamo personal"></div>
-        <div><label>País (vacío = todos)</label><input id="ofPais" maxlength="2" placeholder="UY"></div>
-      </div>
-      <div class="row">
-        <div style="flex:1"><label>Descripción</label><input id="ofDescripcion" placeholder="Breve descripción"></div>
-      </div>
-      <div class="row">
-        <div><label>Texto del botón</label><input id="ofCtaTexto" placeholder="Ver más"></div>
-        <div style="flex:1"><label>Link del botón</label><input id="ofCtaUrl" placeholder="https://..."></div>
-      </div>
-      <div class="row">
-        <div><label>Vigente desde</label><input id="ofDesde" type="date"></div>
-        <div><label>Vigente hasta</label><input id="ofHasta" type="date"></div>
-        <div><label>Orden</label><input id="ofOrden" type="number" value="0" style="width:80px"></div>
-      </div>
-      <div style="margin-top:10px"><label style="cursor:pointer"><input type="checkbox" id="ofConsent"> Requiere consentimiento del empleado (usa sus datos)</label></div>
-      <div style="margin-top:10px" class="inline"><button onclick="crearOfertaUI()">Agregar oferta</button></div>
-      <div id="ofMsg" class="msg" style="margin-top:8px"></div>
-
-      <h2 style="margin-top:18px">Ventas y préstamos por confirmar</h2>
-      <p class="muted">Ventas y préstamos que cargaron los oferentes. Confirmá lo que corresponda: solo lo confirmado se factura. (El cobro efectivo se hace con el bloque de pagos.)</p>
-      <div id="eventosComOut"><p class="muted">Cargando…</p></div>
-
-      <h2 style="margin-top:18px">Resumen a facturar (estimado)</h2>
-      <p class="muted">Suma, por oferente, lo que se le facturaría en el período según sus condiciones comerciales y los eventos <b>confirmados</b>. Es un estimado: el cobro real va con el bloque de pagos.</p>
-      <div class="row" style="margin-top:6px"><div><label>Período</label><input id="resPeriodo" type="month"></div><div style="display:flex;align-items:flex-end"><button class="sec mini" onclick="cargarResumenOfe()">Ver</button></div></div>
-      <div id="resumenOfeOut" style="margin-top:10px"><p class="muted">Elegí un período y tocá Ver.</p></div>
-    </div>
-
-    <div class="card hidden" id="secCreditos">
-      <h2>Solicitudes de crédito</h2>
-      <p class="muted">Solicitudes de los empleados sobre ofertas financieras. La decisión la toma el prestador; acá las aprobás o rechazás en su nombre. El empleado autorizó compartir su ingreso y antigüedad. El préstamo y su cobro son pasos siguientes.</p>
-      <div id="creditosOut"><p class="muted">Cargando…</p></div>
-    </div>
-
-    <div class="card hidden" id="secFirma">
-      <h2>Firma de recibos — proveedores</h2>
-      <p class="muted">Proveedores de firma electrónica avanzada por país. La firma simple (acuse con sello de tiempo) no necesita proveedor. La integración real con cada proveedor es una fase aparte; mientras tanto quedan listados como informativos. "Integrado" marca los que ya están operativos.</p>
-      <div id="firmaProvOut"><p class="muted">Cargando…</p></div>
-      <div class="row" style="margin-top:10px">
-        <div><label>País</label><input id="fpPais" maxlength="2" placeholder="UY"></div>
-        <div><label>Nombre</label><input id="fpNombre" placeholder="Abitab"></div>
-        <div style="flex:1"><label>Sitio (opcional)</label><input id="fpSitio" placeholder="https://..."></div>
-        <div><label>Orden</label><input id="fpOrden" type="number" value="0" style="width:80px"></div>
-      </div>
-      <div style="margin-top:10px" class="inline"><button onclick="crearFirmaProveedorUI()">Agregar proveedor</button></div>
-      <div id="fpMsg" class="msg" style="margin-top:8px"></div>
-    </div>
-
-    <div class="card hidden" id="secIndustrias">
-      <h2>Industrias / rubros de empresa</h2>
-      <p class="muted">Catálogo de rubros que las empresas eligen al configurarse. Sirve para segmentar campañas por actividad. Es un catálogo global, no por país.</p>
-      <div id="industriasOut"><p class="muted">Cargando…</p></div>
-      <div class="row" style="margin-top:10px">
-        <div style="flex:1"><label>Nombre</label><input id="inNombre" placeholder="Industria textil"></div>
-        <div><label>Orden</label><input id="inOrden" type="number" value="0" style="width:80px"></div>
-      </div>
-      <div style="margin-top:10px" class="inline"><button onclick="crearIndustriaUI()">Agregar industria</button></div>
-      <div id="inMsg" class="msg" style="margin-top:8px"></div>
-    </div>
-
-    <div id="secOperadores" class="card hidden">
-      <h2>Operadores</h2>
-      <div id="operadoresOut"><p class="muted">Cargando…</p></div>
-
-      <h2 style="margin-top:18px">Nuevo operador</h2>
-      <div class="row">
-        <div><label>Usuario</label><input id="oUsuario"></div>
-        <div><label>Nombre</label><input id="oNombre"></div>
-        <div><label>Contraseña</label><input id="oPass" type="password" autocomplete="new-password"></div>
-      </div>
-      <label style="margin-top:12px">Privilegios</label>
-      <div id="capsChecks" class="checks"></div>
-      <div class="checks"><label><input type="checkbox" id="oSuper" onchange="toggleSuper()"> Superadmin (todos los privilegios, incluido gestionar operadores)</label></div>
-      <div style="margin-top:12px" class="inline">
-        <button onclick="crearOperadorUI()">Crear operador</button>
-        <span id="opMsg" class="msg"></span>
-      </div>
-    </div>
-
-    <div class="card hidden" id="secTarifasIa">
-      <h2>Tarifas de IA</h2>
-      <p class="muted">Precio por millón de tokens de cada modelo, para costear el uso del asistente conversacional. Versionado por fecha: al guardar una tarifa nueva de un modelo se cierra la anterior. Cargá la tarifa en la MISMA moneda que el plan que la cobra (la conversión entre monedas todavía no está).</p>
-      <div id="tarifasIaOut"><p class="muted">Cargando…</p></div>
-      <h2 style="margin-top:18px">Nueva tarifa</h2>
-      <div class="row">
-        <div><label>Modelo</label><input id="tModelo" placeholder="claude-opus-4-8"></div>
-        <div><label>Moneda</label><input id="tMoneda" value="USD" maxlength="3"></div>
-        <div><label>Precio input (por millón)</label><input id="tInput" type="number" step="0.000001" min="0" value="0"></div>
-        <div><label>Precio output (por millón)</label><input id="tOutput" type="number" step="0.000001" min="0" value="0"></div>
-        <div><label>Vigente desde</label><input id="tDesde" type="date"></div>
-      </div>
-      <div style="margin-top:12px" class="inline">
-        <button onclick="guardarTarifaIaUI()">Guardar tarifa</button>
-        <span id="tarifaMsg" class="msg"></span>
-      </div>
-    </div>
-
-    <div class="card hidden" id="secCatalogosPago">
-      <h2>Catálogos de pago</h2>
-      <p class="muted">Bancos y tipos de cuenta bancaria por país. Son los que la empresa elige al cargar el medio de pago de un empleado.</p>
-      <div class="inline" style="margin-bottom:12px">
-        <label style="margin:0">País</label>
-        <select id="catPais" onchange="cargarCatalogosPago()"><option value="UY">Uruguay</option><option value="PY">Paraguay</option></select>
-      </div>
-      <div id="catBancosOut"></div>
-      <div id="catTiposOut"></div>
-    </div>
-
-    <div class="card hidden" id="secAuditoria">
-      <h2>Auditoría de accesos</h2>
-      <p class="muted" style="margin-top:-4px">Ingresos, envíos de código (OTP) y recuperos de contraseña de todas las empresas. Solo lectura; nunca se guardan códigos ni contraseñas.</p>
-      <div class="row" style="margin-top:10px">
-        <div style="flex:2"><label>Buscar</label><input id="audQ" placeholder="email, empresa, IP, acción…" onkeydown="if(event.key==='Enter')buscarAuditoria()"></div>
-        <div><label>Mostrar</label><select id="audTipo"><option value="ingresos">Ingresos y OTP</option><option value="todo">Todo</option></select></div>
-        <div><label>Desde</label><input id="audDesde" type="date"></div>
-        <div><label>Hasta</label><input id="audHasta" type="date"></div>
-      </div>
-      <div class="inline" style="margin-top:10px"><button onclick="buscarAuditoria()">Buscar</button> <button class="sec mini" onclick="limpiarAuditoria()">Limpiar</button></div>
-      <div id="auditoriaOut" style="margin-top:12px"><p class="muted">Cargando…</p></div>
-    </div>
-
-    <div class="card hidden" id="secPasarelas">
-      <h2>Medios de pago</h2>
-      <p class="muted">Configurá cada pasarela con sus credenciales y dejala activa. Los secretos se guardan cifrados; al editar, dejalos vacíos para no cambiarlos.</p>
-      <div id="pasarelasOut"><p class="muted">Cargando…</p></div>
-      <div id="pruebaOrdenOut" style="margin-top:10px"></div>
-
-      <h2 id="gTitulo" style="margin-top:18px">Configurar pasarela</h2>
-      <div class="row">
-        <div><label>Proveedor</label><select id="gProveedor"><option value="paypal">PayPal</option><option value="stripe">Stripe</option><option value="mercadopago">Mercado Pago</option><option value="dlocal">dLocal</option></select></div>
-        <div><label>Nombre</label><input id="gNombre" placeholder="PayPal producción"></div>
-        <div><label>Modo</label><select id="gModo"><option value="sandbox">Sandbox (pruebas)</option><option value="produccion">Producción</option></select></div>
-        <div><label>Moneda</label><input id="gMoneda" value="USD" maxlength="3"></div>
-      </div>
-      <div class="row">
-        <div><label>Client ID</label><input id="gClientId" autocomplete="off"></div>
-        <div><label>Client Secret</label><input id="gClientSecret" type="password" autocomplete="off" placeholder="vacío = no cambiar"></div>
-        <div><label>Webhook Secret</label><input id="gWebhookSecret" type="password" autocomplete="off" placeholder="opcional"></div>
-      </div>
-      <div style="margin-top:12px" class="inline">
-        <button onclick="guardarPasarelaUI()">Guardar pasarela</button>
-        <button class="sec hidden" id="gCancelar" onclick="cancelarPasarela()">Cancelar</button>
-        <span id="gMsg" class="msg"></span>
-      </div>
-    </div>
-
-    <div class="card hidden" id="secIntegracion">
-      <h2>Facturación de empresas (Nodum)</h2>
-      <p class="muted">Elegí cómo MiFirmaNG le entrega los comprobantes al ERP Nodum. La credencial se guarda cifrada; al editar, dejala vacía para no cambiarla. El detalle fino de cada modo (endpoint exacto o layout del archivo) se completa cuando se confirme la integración.</p>
-      <div id="intOut"><p class="muted">Cargando…</p></div>
-
-      <h2 style="margin-top:18px">Configurar</h2>
-      <div class="row">
-        <div><label>Modo de entrega</label><select id="intModo" onchange="intToggleCampos()"><option value="archivo">Vía archivo / lote</option><option value="api">Vía API</option></select></div>
-      </div>
-      <div class="row" id="intCamposApi">
-        <div><label>URL de la API</label><input id="intApiUrl" autocomplete="off" placeholder="https://..."></div>
-        <div><label>Credencial / token</label><input id="intApiCred" type="password" autocomplete="off" placeholder="vacío = no cambiar"></div>
-      </div>
-      <div class="row" id="intCamposArchivo">
-        <div><label>Formato del archivo</label><input id="intArchivoFormato" autocomplete="off" placeholder="ej. CSV, XML"></div>
-      </div>
-      <div style="margin-top:12px" class="inline">
-        <button onclick="guardarIntegracionUI()">Guardar</button>
-        <span id="intMsg" class="msg"></span>
-      </div>
-    </div>
-
-    <div class="card hidden" id="secCorreo">
-      <h2>Correo / Email</h2>
-      <p class="muted">Casilla saliente de la plataforma para enviar los recibos a los funcionarios. La contraseña se guarda cifrada; al editar, dejala vacía para no cambiarla. Con Gmail necesitás verificación en dos pasos y una "contraseña de aplicación" (la contraseña normal de la cuenta no sirve para SMTP).</p>
-      <div id="correoEstado" class="muted" style="margin:8px 0">Cargando…</div>
-
-      <div class="row">
-        <div><label>Proveedor</label><select id="cProveedor" onchange="aplicarPresetCorreo()"><option value="gmail">Gmail</option><option value="smtp">SMTP genérico</option></select></div>
-        <div><label>Host</label><input id="cHost" placeholder="smtp.gmail.com"></div>
-        <div><label>Puerto</label><input id="cPuerto" type="number" value="465"></div>
-        <div><label>Seguridad</label><select id="cSeg"><option value="ssl">SSL (465)</option><option value="starttls">STARTTLS (587)</option></select></div>
-      </div>
-      <div class="row">
-        <div><label>Usuario (cuenta SMTP)</label><input id="cUsuario" autocomplete="off" placeholder="tucuenta@gmail.com"></div>
-        <div><label>Contraseña (App Password)</label><input id="cPassword" type="password" autocomplete="new-password" placeholder="vacío = no cambiar"></div>
-      </div>
-      <div class="row">
-        <div><label>Remitente — nombre</label><input id="cRemNombre" placeholder="MiFirma"></div>
-        <div><label>Remitente — email</label><input id="cRemEmail" placeholder="tucuenta@gmail.com"></div>
-      </div>
-      <div style="margin-top:12px" class="inline">
-        <button onclick="guardarCorreoUI()">Guardar conexión</button>
-        <button class="sec hidden" id="cToggle" onclick="toggleCorreoUI()">Activar</button>
-        <span id="cMsg" class="msg"></span>
-      </div>
-
-      <h2 style="margin-top:18px">Enviar prueba</h2>
-      <p class="muted">Manda un correo de prueba para verificar que la conexión funciona. Requiere que la conexión esté activa.</p>
-      <div class="inline">
-        <input id="cPrueba" placeholder="destino@ejemplo.com" style="max-width:280px">
-        <button class="sec" onclick="enviarPruebaUI()">Enviar prueba</button>
-        <span id="cPruebaMsg" class="msg"></span>
-      </div>
-    </div>
-
-    <div class="card hidden" id="secTwilio">
-      <h2>SMS / WhatsApp (Twilio)</h2>
-      <p class="muted">Cuenta de Twilio de la plataforma para mandar el código de login por SMS o WhatsApp, cuando el usuario elige ese canal. El código lo genera el sistema; Twilio solo lo transporta. El Auth Token se guarda cifrado; al editar, dejalo vacío para no cambiarlo. WhatsApp necesita una plantilla aprobada (Content SID) para mensajes de OTP; sin ella solo funciona en el entorno de pruebas (sandbox) de Twilio.</p>
-      <div id="twEstado" class="muted" style="margin:8px 0">Cargando…</div>
-
-      <div class="row">
-        <div><label>Account SID</label><input id="twSid" autocomplete="off" placeholder="ACxxxxxxxxxxxx"></div>
-        <div><label>Auth Token</label><input id="twToken" type="password" autocomplete="new-password" placeholder="vacío = no cambiar"></div>
-      </div>
-      <div class="row">
-        <div><label>Número SMS (E.164)</label><input id="twSms" placeholder="+59899123456"></div>
-        <div><label>Remitente WhatsApp (E.164)</label><input id="twWa" placeholder="+14155238886"></div>
-        <div><label>WhatsApp Content SID (plantilla OTP)</label><input id="twWaSid" placeholder="HXxxxxxxxx (opcional)"></div>
-      </div>
-      <div style="margin-top:12px" class="inline">
-        <button onclick="guardarTwilioUI()">Guardar conexión</button>
-        <button class="sec hidden" id="twToggle" onclick="toggleTwilioUI()">Activar</button>
-        <span id="twMsg" class="msg"></span>
-      </div>
-
-      <h2 style="margin-top:18px">Enviar prueba</h2>
-      <p class="muted">Manda un código de ejemplo para verificar la conexión. Requiere que esté activa.</p>
-      <div class="inline">
-        <select id="twPruebaCanal"><option value="sms">SMS</option><option value="whatsapp">WhatsApp</option></select>
-        <input id="twPrueba" placeholder="+59899123456" style="max-width:240px">
-        <button class="sec" onclick="enviarPruebaTwilioUI()">Enviar prueba</button>
-        <span id="twPruebaMsg" class="msg"></span>
-      </div>
-    </div>
-
-    <div class="card hidden" id="secI18n">
-      <h2>Etiquetas / Traducciones</h2>
-      <p class="muted">Editá los textos de la interfaz por idioma. Tu cambio pisa el texto original (que queda como respaldo); el botón ↺ lo vuelve al original. Sirve para corregir el texto sin tocar el código, o para completar el guaraní desde acá. Importante: respetá las variables entre llaves como {email} o {canal}; si las borrás, el cambio se rechaza.</p>
-      <div class="inline" style="margin:10px 0">
-        <select id="i18nLang" onchange="cargarI18n()">
-          <option value="es">Español</option>
-          <option value="en">English</option>
-          <option value="pt">Português</option>
-          <option value="gn">Guaraní</option>
-        </select>
-        <input id="i18nBuscar" placeholder="Buscar clave o texto…" oninput="filtrarI18n()" style="max-width:340px">
-        <span id="i18nMsg" class="msg"></span>
-      </div>
-      <div id="i18nLista" class="muted">Cargando…</div>
-    </div>
-    </div><!-- /consola-main -->
-    </div><!-- /consola-layout -->
-  </div>
-
 </div>
-<script>
-  var $ = function(id){ return document.getElementById(id); };
-  function getCookie(name){ var m = document.cookie.match('(?:^|; )'+name+'=([^;]*)'); return m ? decodeURIComponent(m[1]) : ''; }
-  // Fase B: la sesión vive en la cookie httpOnly sess_op; las mutaciones mandan
-  // X-CSRF-Token = csrf_op. TOKEN pasa a ser SOLO un flag de "sesión activa".
-  var TOKEN = null;
-  var SESION = null;
-  var CATALOGO = [];
-  var PLANES = [];
-  var editando = null;
-  var PLANES_E = [];
-  var editandoE = null;
-  var PLANES_E_CARGADO = false;
-  var ESTUDIOS_CARGADO = false;
-  var I18N_ITEMS = [];
-  var I18N_CARGADO = false;
-  var OFERTAS_CARGADO = false;
-  var CREDITOS_CARGADO = false;
-  var TARIFAS_IA_CARGADO = false;
-  var FIRMA_CARGADO = false;
-  var INDUSTRIAS_CARGADO = false;
-  var AUDITORIA_CARGADO = false;
-  var LABELS = {
-    gestionar_planes: 'Gestionar planes y precios',
-    gestionar_empresas: 'Gestionar empresas (suscribir, facturar, marcar pagada)',
-    gestionar_operadores: 'Gestionar operadores',
-    gestionar_pagos: 'Gestionar medios de pago',
-    gestionar_ofertas: 'Gestionar ofertas y beneficios',
-    gestionar_firma: 'Gestionar proveedores de firma',
-    gestionar_industrias: 'Gestionar industrias / rubros',
-    gestionar_creditos: 'Gestionar solicitudes de crédito',
-    ver_auditoria: 'Ver auditoría de accesos'
-  };
 
-  function esc(s){ return String(s==null?'':s).replace(/[&<>"]/g, function(c){ return {'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]; }); }
-  function fmt(n){ var x=Number(n); return isNaN(x)?esc(n):x.toLocaleString('es-UY',{minimumFractionDigits:2,maximumFractionDigits:2}); }
-  function mesActual(){ var d=new Date(); return d.getFullYear()+'-'+String(d.getMonth()+1).padStart(2,'0'); }
-  function periodoActual(per){ var d=new Date(); var y=d.getFullYear(); if (per==='anual') return ''+y; if (per==='semestral') return y+'-S'+(d.getMonth()<6?1:2); return y+'-'+String(d.getMonth()+1).padStart(2,'0'); }
-  function fmtFormato(per){ return per==='anual'?'YYYY':(per==='semestral'?'YYYY-S1/S2':'YYYY-MM'); }
-  function modoPlanCambio(){ var fijo=$('pModo').value==='fijo'; $('wrapFijo').classList.toggle('hidden',!fijo); $('wrapFranjas').classList.toggle('hidden',fijo); }
-  function filaFranja(desde, hasta, precio){
-    var tr=document.createElement('tr');
-    tr.innerHTML='<td><input type="number" min="0" class="fDesde" value="'+(desde!=null?desde:'')+'" style="width:90px"></td>'+
-                 '<td><input type="number" min="0" class="fHasta" value="'+(hasta!=null?hasta:'')+'" placeholder="sin tope" style="width:90px"></td>'+
-                 '<td><input type="number" min="0" step="0.01" class="fPrecio" value="'+(precio!=null?precio:0)+'" style="width:110px"></td>'+
-                 '<td class="num"><button type="button" class="sec mini" onclick="this.closest(\'tr\').remove()">Quitar</button></td>';
-    return tr;
-  }
-  function agregarFranja(desde, hasta, precio){ $('tablaFranjas').getElementsByTagName('tbody')[0].appendChild(filaFranja(desde, hasta, precio)); }
-  function limpiarFranjas(){ $('tablaFranjas').getElementsByTagName('tbody')[0].innerHTML=''; }
-  function recolectarFranjas(){
-    var filas=$('tablaFranjas').getElementsByTagName('tbody')[0].getElementsByTagName('tr');
-    var out=[];
-    for (var i=0;i<filas.length;i++){
-      var d=filas[i].getElementsByClassName('fDesde')[0].value;
-      var h=filas[i].getElementsByClassName('fHasta')[0].value;
-      var p=filas[i].getElementsByClassName('fPrecio')[0].value;
-      if (d==='' && p===''){ continue; }
-      out.push({ desde: Number(d||0), hasta: (h===''?null:Number(h)), precio: Number(p||0) });
-    }
-    return out;
-  }
-  function puede(cap){ return SESION && (SESION.es_superadmin || (SESION.capacidades||[]).indexOf(cap) >= 0); }
+<!-- ============ Consola ============ -->
+<aside id="lateral" class="hidden">
+  <div class="logo"><img src="/logo-blanco.svg" alt="MiFirma" /><span>operador</span></div>
+  <nav class="menu">
+    <button onclick="ir('correo')" data-v="correo">
+      <svg viewBox="0 0 24 24"><path d="M3 7a2 2 0 012-2h14a2 2 0 012 2v10a2 2 0 01-2 2H5a2 2 0 01-2-2z"/><path d="M3 7l9 6 9-6"/></svg>
+      Correo
+    </button>
+    <button onclick="ir('twilio')" data-v="twilio">
+      <svg viewBox="0 0 24 24"><path d="M21 15a2 2 0 01-2 2H7l-4 4V5a2 2 0 012-2h14a2 2 0 012 2z"/></svg>
+      SMS y WhatsApp
+    </button>
+    <button onclick="ir('planes')" data-v="planes">
+      <svg viewBox="0 0 24 24"><path d="M3 6a2 2 0 012-2h14a2 2 0 012 2v12a2 2 0 01-2 2H5a2 2 0 01-2-2z"/><path d="M3 10h18M8 15h4"/></svg>
+      Planes y precios
+    </button>
+  </nav>
+  <div class="pie">
+    <b id="pieOperador">…</b>
+    <span id="pieRol"></span>
+    <button onclick="salir()">Cerrar sesión</button>
+  </div>
+</aside>
 
-  async function api(path, method, body){
-    method = method || 'GET';
-    var opt = { method: method, credentials:'same-origin', headers: {} };
-    if (body){ opt.headers['Content-Type']='application/json'; opt.body=JSON.stringify(body); }
-    // La sesión viaja en la cookie httpOnly (no header). Mutaciones: double-submit CSRF.
-    if (method==='POST' || method==='PUT' || method==='DELETE'){ opt.headers['X-CSRF-Token']=getCookie('csrf_op'); }
-    var r = await fetch(path, opt);
-    if (r.status === 401){ salir(); throw new Error('Sesión vencida'); }
-    var txt = await r.text();
-    var data; try { data = txt ? JSON.parse(txt) : {}; } catch(e){ data = { error: txt }; }
-    if (!r.ok) throw new Error(data.error || ('HTTP '+r.status));
-    return data;
-  }
+<main id="contenido" class="hidden">
 
-  async function entrar(){
-    var usuario = $('lUsuario').value.trim();
-    var password = $('lPass').value;
-    if (!usuario || !password){ $('loginMsg').innerHTML='<span class="off">Usuario y contraseña.</span>'; return; }
-    $('loginMsg').textContent = 'Verificando…';
-    try {
-      var r = await fetch('/operador/login', { method:'POST', credentials:'same-origin', headers:{'Content-Type':'application/json'}, body:JSON.stringify({usuario:usuario,password:password}) });
-      var d = await r.json();
-      if (!r.ok) throw new Error(d.error || ('HTTP '+r.status));
-      // /operador/login ya dejó sess_op + csrf_op en cookies; no guardamos el token.
-      $('loginMsg').textContent = '';
-      $('lPass').value = '';
-      await iniciar();
-    } catch(e){ $('loginMsg').innerHTML='<span class="off">'+esc(e.message)+'</span>'; }
-  }
+  <!-- ============ Correo ============ -->
+  <section id="vCorreo" class="hidden">
+    <div class="cab"><div>
+      <h1>Correo saliente</h1>
+      <p>Una sola casilla manda por todas las cuentas. Sin esto no sale ningún código de acceso:
+         el segundo factor del login viaja por correo.</p>
+    </div></div>
+    <div class="panel" style="max-width:640px">
+      <div class="cabPanel">
+        <div><b>Conexión SMTP</b><span id="estadoCorreo"></span></div>
+        <div class="acc" id="accCorreo"></div>
+      </div>
+      <div class="cuerpo">
+        <label for="cPreset">Proveedor</label>
+        <select id="cPreset" onchange="aplicarPreset()">
+          <option value="icloud">iCloud (smtp.mail.me.com)</option>
+          <option value="gmail">Gmail / Workspace (smtp.gmail.com)</option>
+          <option value="otro">Otro servidor SMTP</option>
+        </select>
 
-  // Logout por endpoint: borra sess_op + csrf_op y muestra el login (misma página). NO
-  // recarga, para no entrar en loop con el bootstrap cuando no hay sesión.
-  async function salir(){
-    TOKEN = null;
-    try { await fetch('/operador/logout', { method:'POST', credentials:'same-origin' }); } catch(e){}
-    $('login').classList.remove('hidden'); $('consola').classList.add('hidden');
-    $('who').classList.add('hidden'); $('btnSalir').classList.add('hidden');
-    $('lPass').value = ''; $('loginMsg').textContent = '';
-  }
+        <div class="tres">
+          <div><label for="cHost">Servidor</label><input id="cHost" /></div>
+          <div><label for="cPuerto">Puerto</label><input id="cPuerto" inputmode="numeric" /></div>
+          <div><label for="cSeg">Seguridad</label>
+            <select id="cSeg">
+              <option value="tls">TLS directo (465)</option>
+              <option value="starttls">STARTTLS (587)</option>
+              <option value="ninguna">Ninguna</option>
+            </select>
+          </div>
+        </div>
 
-  async function iniciar(){
-    var yo;
-    try { yo = await api('/operador/yo'); }
-    catch(e){ $('login').classList.remove('hidden'); $('consola').classList.add('hidden'); return; }
-    // Sesión previa a la cookie CSRF (ventana Fase A–B): sin csrf_op no se puede mutar -> re-login.
-    if (!getCookie('csrf_op')){ salir(); return; }
-    TOKEN = true; // flag de sesión activa (la sesión real es la cookie)
-    SESION = yo; CATALOGO = yo.catalogo || [];
-    $('login').classList.add('hidden');
-    $('consola').classList.remove('hidden');
-    $('who').textContent = yo.usuario + (yo.es_superadmin ? ' · superadmin' : '');
-    $('who').classList.remove('hidden');
-    $('btnSalir').classList.remove('hidden');
-    $('formPlan').classList.toggle('hidden', !puede('gestionar_planes'));
-    $('grpAdmin').classList.toggle('hidden', !(puede('gestionar_operadores') || puede('ver_auditoria')));
-    $('grpConfig').classList.toggle('hidden', !puede('gestionar_pagos'));
-    construirChecks();
-    if (puede('gestionar_planes')) cancelarEdicion();
-    await cargarPlanes();
-    cargarEmpresas();
-    if (puede('gestionar_operadores')) cargarOperadores();
-    if (puede('gestionar_pagos')) cargarPasarelas();
-    if (puede('gestionar_pagos')) cargarIntegracion();
-    if (puede('gestionar_pagos')) cargarCorreo();
-    if (puede('gestionar_pagos')) cargarTwilio();
-    ver('planes');
-  }
+        <div class="dos">
+          <div><label for="cUsuario">Casilla que se autentica</label>
+               <input id="cUsuario" type="email" placeholder="vos@empresa.com" /></div>
+          <div><label for="cPassword">Contraseña de aplicación</label>
+               <input id="cPassword" type="password" autocomplete="new-password" /></div>
+        </div>
+        <p class="pista">Es una contraseña de aplicación, no la de tu cuenta: con verificación en dos pasos
+           activada, la normal la rechazan. Se guarda cifrada y no vuelve nunca a esta pantalla —
+           dejala vacía para no cambiarla.</p>
 
-  // ---- Ofertas / beneficios ----
-  var OFERENTES = [];
-  async function toggleOfertas(id, habilitado){
-    try { await api('/operador/empresas/'+id+'/ofertas','POST',{habilitado:habilitado}); cargarEmpresas(); }
-    catch(e){ alert('No se pudo cambiar: '+e.message); cargarEmpresas(); }
-  }
-  async function cargarOfertasSec(){ await cargarCatIndustrias(); await cargarOferentes(); await cargarOfertasAdmin(); await cargarEventosComerciales(); if ($('resPeriodo') && !$('resPeriodo').value) $('resPeriodo').value = periodoActualStr(); await cargarResumenOfe(); }
-  function periodoActualStr(){ var d=new Date(); return d.getFullYear()+'-'+String(d.getMonth()+1).padStart(2,'0'); }
-  async function cargarResumenOfe(){
-    var cont=$('resumenOfeOut'); if (!cont) return;
-    var periodo = ($('resPeriodo').value||'').trim();
-    cont.innerHTML='<p class="muted">Cargando…</p>';
-    try {
-      var d = await api('/operador/facturacion-oferentes'+(periodo?('?periodo='+encodeURIComponent(periodo)):''));
-      var ofs = d.oferentes||[];
-      if (!ofs.length){ cont.innerHTML='<div class="empty">Sin actividad facturable en '+esc(d.periodo)+'.</div>'; return; }
-      var CONCEPTO_LABEL = { pauta:'Pauta', venta:'Venta', solicitudes:'Solicitudes', prestamos:'Préstamos' };
-      var h='<table><thead><tr><th>Oferente</th><th>A facturar (estimado)</th><th>Desglose por concepto</th><th>Sin condición</th></tr></thead><tbody>';
-      for (var i=0;i<ofs.length;i++){ var o=ofs[i];
-        var tot = (o.totales && o.totales.length) ? o.totales.map(function(t){ return esc(t.total)+' '+esc(t.moneda); }).join('<br>') : '<span class="muted">—</span>';
-        var desg = (o.lineas && o.lineas.length) ? o.lineas.map(function(l){ return esc(CONCEPTO_LABEL[l.concepto]||l.concepto)+': '+esc(l.total)+' '+esc(l.moneda)+' <span class="muted" style="font-size:11px">('+l.cantidad+')</span>'; }).join('<br>') : '<span class="muted">—</span>';
-        var sc = o.sin_condicion>0 ? '<span class="off" title="Actividad sin condición comercial aplicable">'+o.sin_condicion+'</span>' : '0';
-        h+='<tr><td data-label="Oferente">'+esc(o.nombre)+'</td><td data-label="A facturar">'+tot+'</td><td data-label="Desglose">'+desg+'</td><td data-label="Sin condición">'+sc+'</td></tr>';
-      }
-      cont.innerHTML=h+'</tbody></table>';
-    } catch(e){ cont.innerHTML='<div class="off">'+esc(e.message)+'</div>'; }
-  }
-  async function cargarEventosComerciales(){
-    var cont=$('eventosComOut'); if (!cont) return;
-    try {
-      var d = await api('/operador/eventos-comerciales?pendientes=1'); var evs = d.eventos || [];
-      if (!evs.length){ cont.innerHTML='<div class="empty">No hay ventas ni préstamos pendientes de confirmar.</div>'; return; }
-      var gestiona = puede('gestionar_ofertas');
-      var h='<table><thead><tr><th>Oferente</th><th>Oferta</th><th>Tipo</th><th>Período</th><th>Monto</th><th>Referencia</th>'+(gestiona?'<th></th>':'')+'</tr></thead><tbody>';
-      for (var j=0;j<evs.length;j++){ var e=evs[j];
-        var tipoT = e.tipo==='prestamo'?'Préstamo':e.tipo==='venta'?'Venta':esc(e.tipo);
-        var montoT = e.monto!=null ? (Number(e.monto)+(e.moneda?(' '+esc(e.moneda)):'')) : '—';
-        var acc = gestiona ? ('<button class="sec mini" onclick="confirmarEventoUI(\''+e.id+'\')">Confirmar</button> <button class="sec mini" onclick="rechazarEventoUI(\''+e.id+'\')">Rechazar</button>') : '';
-        h+='<tr><td data-label="Oferente">'+esc(e.oferente_nombre)+'</td><td data-label="Oferta">'+esc(e.oferta_titulo)+'</td><td data-label="Tipo">'+tipoT+'</td><td data-label="Período">'+esc(e.periodo)+'</td><td data-label="Monto">'+montoT+'</td><td data-label="Referencia">'+(e.referencia?esc(e.referencia):'<span class="muted">—</span>')+'</td>'+(gestiona?'<td class="num">'+acc+'</td>':'')+'</tr>';
-      }
-      cont.innerHTML=h+'</tbody></table>';
-    } catch(e){ cont.innerHTML='<div class="off">'+esc(e.message)+'</div>'; }
-  }
-  async function confirmarEventoUI(id){
-    try { await api('/operador/eventos-comerciales/'+id+'/confirmar','POST'); cargarEventosComerciales(); }
-    catch(e){ alert(e.message); }
-  }
-  async function rechazarEventoUI(id){
-    var nota = prompt('Motivo del rechazo (lo ve el oferente):','');
-    if (nota===null) return;
-    if (!nota.trim()){ alert('Poné un motivo.'); return; }
-    try { await api('/operador/eventos-comerciales/'+id+'/rechazar','POST',{ nota:nota.trim() }); cargarEventosComerciales(); }
-    catch(e){ alert(e.message); }
-  }
-  async function cargarOferentes(){
-    var cont=$('oferentesOut');
-    try {
-      var d = await api('/operador/oferentes'); OFERENTES = d.oferentes || [];
-      var sel=$('ofOferente'); if (sel){ var o=''; for (var i=0;i<OFERENTES.length;i++){ o+='<option value="'+esc(OFERENTES[i].id)+'">'+esc(OFERENTES[i].nombre)+'</option>'; } sel.innerHTML=o; }
-      if (!OFERENTES.length){ cont.innerHTML='<div class="empty">No hay oferentes.</div>'; return; }
-      var gestiona = puede('gestionar_ofertas');
-      var h='<table><thead><tr><th>Nombre</th><th>Tipo</th><th>País</th><th>Estado</th><th>Verificación</th><th>Crédito</th>'+(gestiona?'<th></th>':'')+'</tr></thead><tbody>';
-      for (var j=0;j<OFERENTES.length;j++){ var e=OFERENTES[j];
-        var acc='';
-        if (gestiona){
-          var ev = e.estado_verificacion || 'pendiente';
-          var btnVerif = ev==='verificado'
-            ? '<button class="sec mini" onclick="verificarOferenteUI(\''+e.id+'\',\'pendiente\')">Marcar pendiente</button>'
-            : '<button class="sec mini" onclick="verificarOferenteUI(\''+e.id+'\',\'verificado\')">Verificar</button>';
-          var btnRech = '<button class="sec mini" onclick="rechazarOferenteUI(\''+e.id+'\')">Rechazar</button>';
-          acc = btnVerif+' '+btnRech+' '+
-                '<button class="sec mini" onclick="toggleCreditoOferente(\''+e.id+'\','+(!e.credito_habilitado)+')">'+(e.credito_habilitado?'Quitar crédito':'Habilitar crédito')+'</button> '+
-                '<button class="sec mini" onclick="toggleOferente(\''+e.id+'\','+(!e.activo)+')">'+(e.activo?'Desactivar':'Activar')+'</button> '+
-                '<button class="sec mini" onclick="editarComercialOferente(\''+e.id+'\')">Comercial (default)</button> '+
-                '<button class="sec mini" onclick="editarFacturacion(\''+e.id+'\')">Facturación</button> '+
-                '<button class="sec mini" onclick="borrarOferenteUI(\''+e.id+'\')">Borrar</button>';
-        }
-        h+='<tr><td data-label="Nombre">'+esc(e.nombre)+'</td><td data-label="Tipo">'+esc(e.tipo)+'</td><td data-label="País">'+(e.pais?esc(e.pais):'<span class="muted">todos</span>')+'</td><td data-label="Estado">'+(e.activo?'activo':'<span class="muted">inactivo</span>')+'</td><td data-label="Verificación">'+badgeVerif(e.estado_verificacion)+(e.verificacion_nota?' <span class="muted" title="'+esc(e.verificacion_nota)+'">ⓘ</span>':'')+'</td><td data-label="Crédito">'+(e.credito_habilitado?'<span class="ok">habilitado</span>':'<span class="muted">no</span>')+'</td>'+(gestiona?'<td class="num">'+acc+'</td>':'')+'</tr>';
-      }
-      cont.innerHTML=h+'</tbody></table>';
-    } catch(e){ cont.innerHTML='<div class="off">'+esc(e.message)+'</div>'; }
-  }
-  async function crearOferenteUI(){
-    var msg=$('ofeMsg');
-    try {
-      await api('/operador/oferentes','POST',{ nombre:$('ofeNombre').value, tipo:$('ofeTipo').value, pais:($('ofePais').value||'').trim()||null });
-      $('ofeNombre').value=''; $('ofePais').value='';
-      msg.innerHTML='<span class="ok">Oferente agregado.</span>'; cargarOferentes();
-    } catch(e){ msg.innerHTML='<span class="off">'+esc(e.message)+'</span>'; }
-  }
-  async function toggleOferente(id, activo){
-    try { await api('/operador/oferentes/'+id,'PUT',{activo:activo}); cargarOferentes(); }
-    catch(e){ alert(e.message); }
-  }
-  async function borrarOferenteUI(id){
-    if (!confirm('¿Borrar el oferente y todas sus ofertas?')) return;
-    try { await api('/operador/oferentes/'+id,'DELETE'); cargarOferentes(); cargarOfertasAdmin(); }
-    catch(e){ alert(e.message); }
-  }
-  function badgeVerif(ev){
-    ev = ev || 'pendiente';
-    if (ev==='verificado') return '<span class="ok">verificado</span>';
-    if (ev==='rechazado') return '<span class="off">rechazado</span>';
-    return '<span class="muted">pendiente</span>';
-  }
-  async function verificarOferenteUI(id, estado){
-    try { await api('/operador/oferentes/'+id+'/verificacion','PUT',{ estado:estado }); cargarOferentes(); }
-    catch(e){ alert(e.message); }
-  }
-  async function rechazarOferenteUI(id){
-    var nota = prompt('Motivo del rechazo de la verificación (opcional):','');
-    if (nota===null) return;
-    try { await api('/operador/oferentes/'+id+'/verificacion','PUT',{ estado:'rechazado', nota:nota||null }); cargarOferentes(); }
-    catch(e){ alert(e.message); }
-  }
-  async function toggleCreditoOferente(id, habilitado){
-    try { await api('/operador/oferentes/'+id+'/credito','PUT',{ habilitado:habilitado }); cargarOferentes(); }
-    catch(e){ alert(e.message); }
-  }
-  var FACT_EDIT_ID = null;
-  async function editarFacturacion(id){
-    FACT_EDIT_ID = id;
-    var box = $('ofeFactBox');
-    var f = null;
-    try { var d = await api('/operador/oferentes/'+id+'/facturacion'); f = d.facturacion || null; } catch(e){}
-    function val(k){ return (f && f[k]!=null) ? esc(String(f[k])) : ''; }
-    var medio = (f && f.medio_pago) ? f.medio_pago : '';
-    function selM(v){ return medio===v?' selected':''; }
-    var h = '<p style="font-weight:600;margin:0 0 6px">Datos de facturación del oferente</p>'+
-            '<p class="muted" style="font-size:12px;margin:0 0 10px">Para poder facturarle. Es interno: el cliente no lo ve. No guardamos números de tarjeta.</p>';
-    h += '<div class="row"><div style="flex:1"><label>Razón social</label><input id="faRazon" value="'+val('razon_social')+'"></div><div><label>Identificación fiscal (RUT/RUC)</label><input id="faFiscal" value="'+val('id_fiscal')+'"></div></div>';
-    h += '<div class="row"><div style="flex:1"><label>Domicilio</label><input id="faDom" value="'+val('domicilio')+'"></div></div>';
-    h += '<div class="row"><div><label>Email de facturación</label><input id="faEmail" value="'+val('email')+'"></div><div><label>Contacto</label><input id="faContacto" value="'+val('contacto')+'"></div><div><label>Moneda</label><input id="faMoneda" maxlength="3" value="'+val('moneda')+'" placeholder="UYU"></div></div>';
-    h += '<div class="row"><div><label>Medio de pago</label><select id="faMedio"><option value=""'+(medio===''?' selected':'')+'>—</option><option value="transferencia"'+selM('transferencia')+'>Transferencia</option><option value="tarjeta"'+selM('tarjeta')+'>Tarjeta</option><option value="otro"'+selM('otro')+'>Otro</option></select></div><div style="flex:1"><label>Datos del medio (sin número de tarjeta)</label><input id="faDetalle" value="'+val('pago_detalle')+'" placeholder="banco, cuenta, titular…"></div></div>';
-    h += '<div class="row"><div style="flex:1"><label>Notas</label><input id="faNotas" value="'+val('notas')+'"></div></div>';
-    h += '<div style="margin-top:12px"><button onclick="guardarFacturacion()">Guardar</button> <button class="sec mini" onclick="cerrarFacturacion()">Cancelar</button></div><div id="faMsg" class="msg" style="margin-top:8px"></div>';
-    box.innerHTML = h; box.classList.remove('hidden');
-    if (box.scrollIntoView) box.scrollIntoView({ behavior:'smooth', block:'nearest' });
-  }
-  async function guardarFacturacion(){
-    if (!FACT_EDIT_ID) return;
-    var g = function(id){ var v=($(id).value||'').trim(); return v===''?null:v; };
-    var body = {
-      razon_social: g('faRazon'), id_fiscal: g('faFiscal'), domicilio: g('faDom'),
-      email: g('faEmail'), contacto: g('faContacto'), moneda: g('faMoneda'),
-      medio_pago: ($('faMedio').value||'')||null, pago_detalle: g('faDetalle'), notas: g('faNotas')
-    };
-    try {
-      await api('/operador/oferentes/'+FACT_EDIT_ID+'/facturacion','PUT',body);
-      cerrarFacturacion();
-    } catch(e){ var m=$('faMsg'); if (m) m.innerHTML='<span class="off">'+esc(e.message)+'</span>'; }
-  }
-  function cerrarFacturacion(){ FACT_EDIT_ID=null; var box=$('ofeFactBox'); if (box){ box.classList.add('hidden'); box.innerHTML=''; } }
-  async function cargarOfertasAdmin(){
-    var cont=$('ofertasOut');
-    try {
-      var d = await api('/operador/ofertas'); var ofertas = d.ofertas || []; OFERTAS_ADMIN = ofertas;
-      if (!ofertas.length){ cont.innerHTML='<div class="empty">No hay ofertas.</div>'; return; }
-      var gestiona = puede('gestionar_ofertas');
-      var h='<table><thead><tr><th>Título</th><th>Oferente</th><th>Tipo</th><th>País</th><th>Consent.</th><th>Banner</th><th>Industrias</th><th>Salario</th><th>Estado</th>'+(gestiona?'<th></th>':'')+'</tr></thead><tbody>';
-      for (var j=0;j<ofertas.length;j++){ var o=ofertas[j];
-        var acc='';
-        if (gestiona){
-          var rev = '';
-          if (o.estado==='en_revision'){
-            rev = '<button class="sec mini" onclick="aprobarOfertaUI(\''+o.id+'\')">Aprobar</button> '+
-                  '<button class="sec mini" onclick="rechazarOfertaUI(\''+o.id+'\')">Rechazar</button> ';
-          }
-          acc = rev + '<button class="sec mini" onclick="toggleOferta(\''+o.id+'\','+(!o.activo)+')">'+(o.activo?'Desactivar':'Activar')+'</button> '+
-                '<button class="sec mini" onclick="editarOfertaUI(\''+o.id+'\')">Editar</button> '+
-                '<button class="sec mini" onclick="editarSegmentacion(\''+o.id+'\')">Segmentación</button> '+
-                '<button class="sec mini" onclick="editarComercial(\''+o.id+'\')">Comercial</button> '+
-                (o.tipo==='financiero' ? '<button class="sec mini" onclick="editarFormularios(\''+o.id+'\')">Form./Docs</button> ' : '')+
-                '<button class="sec mini" onclick="subirBanner(\''+o.id+'\')">'+(o.tiene_imagen?'Cambiar banner':'Subir banner')+'</button>'+
-                (o.tiene_imagen?' <button class="sec mini" onclick="quitarBanner(\''+o.id+'\')">Quitar banner</button>':'')+
-                ' <button class="sec mini" onclick="borrarOfertaUI(\''+o.id+'\')">Borrar</button>';
-        }
-        var indTxt = (o.industrias && o.industrias.length) ? o.industrias.map(function(x){ return esc(x.nombre); }).join(', ') : '<span class="muted">todas</span>';
-        var sn = o.salario_min!=null?Number(o.salario_min):null, sx = o.salario_max!=null?Number(o.salario_max):null;
-        var salTxt = (sn==null&&sx==null) ? '<span class="muted">—</span>' : (sn!=null&&sx!=null ? (sn+'–'+sx) : (sn!=null ? ('≥ '+sn) : ('≤ '+sx)));
-        h+='<tr><td data-label="Título">'+esc(o.titulo)+'</td><td data-label="Oferente">'+esc(o.oferente_nombre)+'</td><td data-label="Tipo">'+esc(o.tipo)+'</td><td data-label="País">'+(o.pais?esc(o.pais):'<span class="muted">todos</span>')+'</td><td data-label="Consent.">'+(o.requiere_consentimiento?'sí':'no')+'</td><td data-label="Banner">'+(o.tiene_imagen?'sí':'<span class="muted">no</span>')+'</td><td data-label="Industrias">'+indTxt+'</td><td data-label="Salario">'+salTxt+'</td><td data-label="Estado">'+badgeEstadoOferta(o.estado)+' <span class="muted" style="font-size:11px">'+(o.activo?'· visible':'· oculta')+'</span>'+(o.estado==='rechazada'&&o.revision_nota?' <span class="muted" title="'+esc(o.revision_nota)+'">ⓘ</span>':'')+'</td>'+(gestiona?'<td class="num">'+acc+'</td>':'')+'</tr>';
-      }
-      cont.innerHTML=h+'</tbody></table>';
-    } catch(e){ cont.innerHTML='<div class="off">'+esc(e.message)+'</div>'; }
-  }
-  async function crearOfertaUI(){
-    var msg=$('ofMsg');
-    try {
-      var body={
-        oferente_id:$('ofOferente').value,
-        tipo:$('ofTipo').value,
-        titulo:$('ofTitulo').value,
-        descripcion:($('ofDescripcion').value||'').trim()||null,
-        cta_texto:($('ofCtaTexto').value||'').trim()||null,
-        cta_url:($('ofCtaUrl').value||'').trim()||null,
-        pais:($('ofPais').value||'').trim()||null,
-        requiere_consentimiento:$('ofConsent').checked,
-        vigente_desde:$('ofDesde').value||null,
-        vigente_hasta:$('ofHasta').value||null,
-        orden:Number($('ofOrden').value||0)
-      };
-      if (!body.oferente_id){ msg.innerHTML='<span class="off">Primero agregá un oferente.</span>'; return; }
-      await api('/operador/ofertas','POST',body);
-      $('ofTitulo').value=''; $('ofDescripcion').value=''; $('ofCtaTexto').value=''; $('ofCtaUrl').value='';
-      msg.innerHTML='<span class="ok">Oferta agregada.</span>'; cargarOfertasAdmin();
-    } catch(e){ msg.innerHTML='<span class="off">'+esc(e.message)+'</span>'; }
-  }
-  function badgeEstadoOferta(estado){
-    if (estado==='aprobada') return '<span class="ok">aprobada</span>';
-    if (estado==='en_revision') return '<span style="color:#1a5482;font-weight:600">en revisión</span>';
-    if (estado==='rechazada') return '<span class="off">rechazada</span>';
-    return '<span class="muted">borrador</span>';
-  }
-  async function aprobarOfertaUI(id){
-    if (!confirm('¿Aprobar y publicar esta oferta? Quedará visible para los empleados.')) return;
-    try { await api('/operador/ofertas/'+id+'/aprobar','POST'); cargarOfertasAdmin(); }
-    catch(e){ alert(e.message); }
-  }
-  async function rechazarOfertaUI(id){
-    var nota = prompt('Motivo del rechazo (lo ve el oferente):','');
-    if (nota===null) return;
-    if (!nota.trim()){ alert('Poné un motivo.'); return; }
-    try { await api('/operador/ofertas/'+id+'/rechazar','POST',{ nota:nota.trim() }); cargarOfertasAdmin(); }
-    catch(e){ alert(e.message); }
-  }
-  async function toggleOferta(id, activo){
-    try { await api('/operador/ofertas/'+id,'PUT',{activo:activo}); cargarOfertasAdmin(); }
-    catch(e){ alert(e.message); }
-  }
-  async function borrarOfertaUI(id){
-    if (!confirm('¿Borrar la oferta?')) return;
-    try { await api('/operador/ofertas/'+id,'DELETE'); cargarOfertasAdmin(); }
-    catch(e){ alert(e.message); }
-  }
-  function achicarBanner(file, maxAncho, calidad){
-    return new Promise(function(resolve, reject){
-      if (file.type === 'image/svg+xml') {
-        var rd = new FileReader();
-        rd.onload = function(){ resolve({ dataUrl: String(rd.result), mime: 'image/svg+xml' }); };
-        rd.onerror = function(){ reject(new Error('No se pudo leer el archivo.')); };
-        rd.readAsDataURL(file);
-        return;
-      }
-      var url = URL.createObjectURL(file);
-      var im = new Image();
-      im.onload = function(){
-        URL.revokeObjectURL(url);
-        var escala = Math.min(1, maxAncho / im.width);
-        var w = Math.max(1, Math.round(im.width * escala)), h = Math.max(1, Math.round(im.height * escala));
-        var cv = document.createElement('canvas');
-        cv.width = w; cv.height = h;
-        cv.getContext('2d').drawImage(im, 0, 0, w, h);
-        resolve({ dataUrl: cv.toDataURL('image/jpeg', calidad), mime: 'image/jpeg' });
-      };
-      im.onerror = function(){ URL.revokeObjectURL(url); reject(new Error('Imagen inválida.')); };
-      im.src = url;
-    });
-  }
-  function subirBanner(id){
-    var inp = document.createElement('input'); inp.type='file'; inp.accept='image/png,image/jpeg,image/webp,image/svg+xml';
-    inp.onchange = async function(){
-      var f = inp.files && inp.files[0]; if (!f) return;
-      try {
-        var r = await achicarBanner(f, 1280, 0.85);
-        var base64 = r.dataUrl.indexOf(',')>=0 ? r.dataUrl.split(',')[1] : r.dataUrl;
-        await api('/operador/ofertas/'+id+'/imagen','PUT',{base64:base64, mime:r.mime}); cargarOfertasAdmin();
-      } catch(e){ alert(e.message); }
-    };
-    inp.click();
-  }
-  async function quitarBanner(id){
-    if (!confirm('¿Quitar el banner de esta oferta?')) return;
-    try { await api('/operador/ofertas/'+id+'/imagen','DELETE'); cargarOfertasAdmin(); }
-    catch(e){ alert(e.message); }
-  }
-  var CAT_INDUSTRIAS = [];
-  var OFERTAS_ADMIN = [];
-  var IND_EDIT_ID = null;
-  async function cargarCatIndustrias(){
-    try { var d = await api('/operador/industrias'); CAT_INDUSTRIAS = d.industrias || []; }
-    catch(e){ CAT_INDUSTRIAS = []; }
-  }
-  async function editarSegmentacion(id){
-    IND_EDIT_ID = id;
-    var box = $('ofIndBox');
-    var of = null; for (var z=0;z<OFERTAS_ADMIN.length;z++){ if (OFERTAS_ADMIN[z].id===id){ of=OFERTAS_ADMIN[z]; break; } }
-    var actuales = [];
-    try { var d = await api('/operador/ofertas/'+id+'/industrias'); actuales = d.industria_ids || []; } catch(e){}
-    var marc = {}; for (var k=0;k<actuales.length;k++){ marc[actuales[k]] = true; }
-    var smin = (of && of.salario_min!=null) ? Number(of.salario_min) : '';
-    var smax = (of && of.salario_max!=null) ? Number(of.salario_max) : '';
-    var h = '<p style="font-weight:600;margin:0 0 6px">Segmentación de la oferta</p>'+
-            '<p class="muted" style="font-size:12px;margin:0 0 10px">La oferta se muestra a quienes cumplan TODOS los criterios definidos. Sin criterios = todos.</p>';
-    h += '<div style="font-weight:600;font-size:13px;margin:8px 0 2px">Industrias</div>'+
-         '<p class="muted" style="font-size:12px;margin:0 0 6px">Ninguna marcada = todas las industrias.</p>';
-    if (!CAT_INDUSTRIAS.length){ h += '<div class="empty">No hay industrias en el catálogo.</div>'; }
-    for (var i=0;i<CAT_INDUSTRIAS.length;i++){ var c=CAT_INDUSTRIAS[i];
-      h += '<label style="display:block;margin:3px 0;cursor:pointer"><input type="checkbox" class="ofIndChk" value="'+esc(c.id)+'"'+(marc[c.id]?' checked':'')+'> '+esc(c.nombre)+(c.activo?'':' <span class="muted">(inactiva)</span>')+'</label>';
-    }
-    h += '<div style="font-weight:600;font-size:13px;margin:14px 0 2px">Franja salarial</div>'+
-         '<p class="muted" style="font-size:12px;margin:0 0 6px">Bruto mensual del último recibo, en la moneda de la empresa. Dejá vacío lo que no quieras limitar.</p>';
-    h += '<div class="row"><div><label>Mínimo</label><input type="number" id="ofSalMin" value="'+smin+'" placeholder="sin mínimo"></div><div><label>Máximo</label><input type="number" id="ofSalMax" value="'+smax+'" placeholder="sin máximo"></div></div>';
-    h += '<div style="margin-top:12px"><button onclick="guardarSegmentacion()">Guardar</button> <button class="sec mini" onclick="cerrarSegmentacion()">Cancelar</button></div><div id="ofIndMsg" class="msg" style="margin-top:8px"></div>';
-    box.innerHTML = h; box.classList.remove('hidden');
-    if (box.scrollIntoView) box.scrollIntoView({ behavior:'smooth', block:'nearest' });
-  }
-  async function guardarSegmentacion(){
-    if (!IND_EDIT_ID) return;
-    var chks = document.querySelectorAll('#ofIndBox .ofIndChk');
-    var ids = []; for (var i=0;i<chks.length;i++){ if (chks[i].checked) ids.push(chks[i].value); }
-    var minV = ($('ofSalMin').value||'').trim(); var maxV = ($('ofSalMax').value||'').trim();
-    var smin = minV==='' ? null : Number(minV);
-    var smax = maxV==='' ? null : Number(maxV);
-    if (smin!=null && (isNaN(smin) || smin<0)){ return segError('Mínimo inválido.'); }
-    if (smax!=null && (isNaN(smax) || smax<0)){ return segError('Máximo inválido.'); }
-    if (smin!=null && smax!=null && smin>smax){ return segError('El mínimo no puede ser mayor que el máximo.'); }
-    try {
-      await api('/operador/ofertas/'+IND_EDIT_ID,'PUT',{ salario_min: smin, salario_max: smax });
-      await api('/operador/ofertas/'+IND_EDIT_ID+'/industrias','PUT',{ industria_ids: ids });
-      cerrarSegmentacion(); cargarOfertasAdmin();
-    } catch(e){ segError(e.message); }
-  }
-  function segError(msg){ var m=$('ofIndMsg'); if (m) m.innerHTML='<span class="off">'+esc(msg)+'</span>'; }
-  function cerrarSegmentacion(){ IND_EDIT_ID=null; var box=$('ofIndBox'); if (box){ box.classList.add('hidden'); box.innerHTML=''; } }
+        <div class="dos">
+          <div><label for="cRemNombre">Nombre del remitente</label><input id="cRemNombre" placeholder="MiFirma" /></div>
+          <div><label for="cRemEmail">Dirección del remitente</label><input id="cRemEmail" type="email" /></div>
+        </div>
+        <p class="pista">Es lo que ve quien recibe un documento para firmar. Si no coincide con el dominio
+           que autentica, muchos servidores lo mandan a spam.</p>
 
-  // ---- Etapa 2A: formularios del banco y documentos que pide el préstamo ----
-  var FORM_EDIT_ID = null;
-  function leerArchivoOp(file){
-    return new Promise(function(resolve, reject){
-      var rd = new FileReader();
-      rd.onload = function(){ resolve(String(rd.result||'')); };
-      rd.onerror = function(){ reject(new Error('No se pudo leer el archivo.')); };
-      rd.readAsDataURL(file);
-    });
-  }
-  async function editarFormularios(id){
-    FORM_EDIT_ID = id;
-    var of = null; for (var z=0;z<OFERTAS_ADMIN.length;z++){ if (OFERTAS_ADMIN[z].id===id){ of=OFERTAS_ADMIN[z]; break; } }
-    var box = $('ofFormBox');
-    box.innerHTML = '<p style="font-weight:600;margin:0 0 6px">Formularios y documentos · '+esc(of?of.titulo:'')+'</p>'+
-      '<p class="muted" style="font-size:12px;margin:0 0 10px">Los formularios que el banco entrega para firmar y los documentos que pide el préstamo. El empleado los verá al solicitar el crédito.</p>'+
-      '<div style="font-weight:600;font-size:13px;margin:8px 0 4px">Formularios para firmar</div>'+
-      '<div id="ofFormList"><p class="muted">Cargando…</p></div>'+
-      '<div class="row" style="margin-top:8px"><div style="flex:1"><label>Nombre del formulario</label><input id="ofFormNombre" placeholder="ej. Solicitud de préstamo"></div></div>'+
-      '<label style="margin-top:6px;display:block">Archivo (PDF o imagen)</label><input type="file" id="ofFormArch" accept="application/pdf,image/png,image/jpeg,image/webp">'+
-      '<label style="margin-top:6px;display:block">Cómo lo firma el empleado</label><select id="ofFormFirma"><option value="autografa">Firma autógrafa (firma a mano y escanea/foto)</option><option value="digital">Firma digital (firma electrónica sobre el PDF)</option><option value="avanzada">Firma digital avanzada (certificado reconocido)</option><option value="sin_firma">Sin firma (solo completar y subir)</option></select>'+
-      '<div style="margin-top:8px"><button onclick="subirFormularioOferta()">Agregar formulario</button></div>'+
-      '<div id="ofFormMsg" class="msg" style="margin-top:6px"></div>'+
-      '<div style="font-weight:600;font-size:13px;margin:16px 0 4px">Documentos que pide el préstamo</div>'+
-      '<div id="ofReqList"><p class="muted">Cargando…</p></div>'+
-      '<div class="row" style="margin-top:8px"><div style="flex:1"><label>Nombre del documento</label><input id="ofReqNombre" placeholder="ej. Cédula de identidad"></div><div style="align-self:end"><button onclick="agregarRequisitoOferta()">Agregar</button></div></div>'+
-      '<div id="ofReqMsg" class="msg" style="margin-top:6px"></div>'+
-      '<div style="margin-top:12px"><button class="sec mini" onclick="cerrarFormularios()">Cerrar</button></div>';
-    box.classList.remove('hidden');
-    if (box.scrollIntoView) box.scrollIntoView({ behavior:'smooth', block:'nearest' });
-    recargarFormularios(); recargarRequisitos();
-  }
-  function cerrarFormularios(){ FORM_EDIT_ID=null; var box=$('ofFormBox'); if (box){ box.classList.add('hidden'); box.innerHTML=''; } }
-  function etiquetaFirmaOp(m){
-    if(m==='digital') return 'firma digital';
-    if(m==='avanzada') return 'firma digital avanzada';
-    if(m==='sin_firma') return 'sin firma';
-    return 'firma autógrafa';
-  }
-  async function recargarFormularios(){
-    var cont=$('ofFormList'); if (!cont) return;
-    try {
-      var d = await api('/operador/ofertas/'+FORM_EDIT_ID+'/formularios'); var fs = d.formularios||[];
-      if (!fs.length){ cont.innerHTML='<p class="muted">Todavía no hay formularios.</p>'; return; }
-      var h='<ul style="margin:0;padding-left:18px">';
-      for (var i=0;i<fs.length;i++){ var f=fs[i];
-        h+='<li style="margin:3px 0">'+esc(f.nombre)+' <span class="muted">· '+esc(etiquetaFirmaOp(f.metodoFirma))+'</span> <button class="sec mini" onclick="descargarFormulario(\''+f.id+'\')">Ver</button> <button class="sec mini" onclick="borrarFormulario(\''+f.id+'\')">Borrar</button></li>';
-      }
-      cont.innerHTML=h+'</ul>';
-    } catch(e){ cont.innerHTML='<div class="off">'+esc(e.message)+'</div>'; }
-  }
-  async function subirFormularioOferta(){
-    var msg=$('ofFormMsg'); var nombre=($('ofFormNombre').value||'').trim();
-    if (!nombre){ msg.innerHTML='<span class="off">Poné un nombre.</span>'; return; }
-    var f = $('ofFormArch').files && $('ofFormArch').files[0];
-    if (!f){ msg.innerHTML='<span class="off">Elegí un archivo.</span>'; return; }
-    try {
-      var dataUrl = await leerArchivoOp(f);
-      var base64 = dataUrl.indexOf(',')>=0 ? dataUrl.split(',')[1] : dataUrl;
-      var firmaSel = $('ofFormFirma'); var metodoFirma = firmaSel ? firmaSel.value : 'autografa';
-      await api('/operador/ofertas/'+FORM_EDIT_ID+'/formularios','POST',{ nombre:nombre, archivo:{ base64:base64, mime:f.type, nombre:f.name }, metodo_firma:metodoFirma });
-      $('ofFormNombre').value=''; $('ofFormArch').value=''; if(firmaSel) firmaSel.value='autografa';
-      msg.innerHTML='<span class="ok">Formulario agregado.</span>'; recargarFormularios();
-    } catch(e){ msg.innerHTML='<span class="off">'+esc(e.message)+'</span>'; }
-  }
-  async function borrarFormulario(fid){
-    if (!confirm('¿Borrar el formulario?')) return;
-    try { await api('/operador/ofertas/formularios/'+fid,'DELETE'); recargarFormularios(); }
-    catch(e){ alert(e.message); }
-  }
-  async function descargarFormulario(fid){
-    try {
-      var r = await fetch('/operador/ofertas/formularios/'+fid+'/archivo', { credentials:'same-origin' });
-      if (!r.ok){ throw new Error('No se pudo abrir el archivo'); }
-      var blob = await r.blob(); var url=URL.createObjectURL(blob); window.open(url,'_blank'); setTimeout(function(){URL.revokeObjectURL(url);},60000);
-    } catch(e){ alert(e.message); }
-  }
-  async function recargarRequisitos(){
-    var cont=$('ofReqList'); if (!cont) return;
-    try {
-      var d = await api('/operador/ofertas/'+FORM_EDIT_ID+'/requisitos'); var rs=d.requisitos||[];
-      if (!rs.length){ cont.innerHTML='<p class="muted">Todavía no hay documentos requeridos.</p>'; return; }
-      var h='<ul style="margin:0;padding-left:18px">';
-      for (var i=0;i<rs.length;i++){ var rq=rs[i];
-        h+='<li style="margin:3px 0">'+esc(rq.nombre)+' <button class="sec mini" onclick="borrarRequisito(\''+rq.id+'\')">Quitar</button></li>';
-      }
-      cont.innerHTML=h+'</ul>';
-    } catch(e){ cont.innerHTML='<div class="off">'+esc(e.message)+'</div>'; }
-  }
-  async function agregarRequisitoOferta(){
-    var msg=$('ofReqMsg'); var nombre=($('ofReqNombre').value||'').trim();
-    if (!nombre){ msg.innerHTML='<span class="off">Poné el nombre del documento.</span>'; return; }
-    try {
-      await api('/operador/ofertas/'+FORM_EDIT_ID+'/requisitos','POST',{ nombre:nombre });
-      $('ofReqNombre').value=''; msg.innerHTML='<span class="ok">Agregado.</span>'; recargarRequisitos();
-    } catch(e){ msg.innerHTML='<span class="off">'+esc(e.message)+'</span>'; }
-  }
-  async function borrarRequisito(rid){
-    try { await api('/operador/ofertas/requisitos/'+rid,'DELETE'); recargarRequisitos(); }
-    catch(e){ alert(e.message); }
-  }
-  var COM_EDIT_ID = null;
-  // Opciones del modo de un cargo (— / Fija / Porcentaje), para los cargos de financiera.
-  function cargoModoOpts(sel){
-    return '<option value=""'+(sel===''?' selected':'')+'>— (sin cargo)</option>'+
-           '<option value="fijo"'+(sel==='fijo'?' selected':'')+'>Fija</option>'+
-           '<option value="porcentaje"'+(sel==='porcentaje'?' selected':'')+'>Porcentaje</option>';
-  }
-  function comToggle(){
-    var modelo = $('comModelo') ? $('comModelo').value : '';
-    if ($('comPauta')) $('comPauta').style.display = (modelo==='pauta') ? '' : 'none';
-    if ($('comComision')) $('comComision').style.display = (modelo==='comision_venta') ? '' : 'none';
-    var fin = (modelo==='comision_prestamo') ? '' : 'none';
-    if ($('comSolCargo')) $('comSolCargo').style.display = fin;
-    if ($('comPreCargo')) $('comPreCargo').style.display = fin;
-  }
-  async function editarComercial(id){
-    COM_EDIT_ID = id;
-    var box = $('ofComBox');
-    var of = null; for (var z=0;z<OFERTAS_ADMIN.length;z++){ if (OFERTAS_ADMIN[z].id===id){ of=OFERTAS_ADMIN[z]; break; } }
-    var c = null, defOfe = null;
-    try { var d = await api('/operador/ofertas/'+id+'/comercial'); c = d.condicion || null; defOfe = d.default_oferente || null; } catch(e){}
-    var modelo = c ? c.modelo : ((of && of.tipo==='financiero') ? 'comision_prestamo' : (of && of.tipo==='venta') ? 'comision_venta' : 'pauta');
-    var unidad = (c && c.unidad) ? c.unidad : 'salida';
-    var tarifa = (c && c.tarifa!=null) ? Number(c.tarifa) : '';
-    var pct = (c && c.porcentaje!=null) ? Number(c.porcentaje) : '';
-    var fijo = (c && c.monto_fijo!=null) ? Number(c.monto_fijo) : '';
-    var solModo = (c && c.solicitud_modo) ? c.solicitud_modo : '';
-    var solVal = (c && c.solicitud_valor!=null) ? Number(c.solicitud_valor) : '';
-    var preModo = '', preVal = '';
-    if (c && c.porcentaje!=null){ preModo='porcentaje'; preVal=Number(c.porcentaje); }
-    else if (c && c.monto_fijo!=null){ preModo='fijo'; preVal=Number(c.monto_fijo); }
-    var moneda = (c && c.moneda) ? c.moneda : '';
-    var notas = (c && c.notas) ? c.notas : '';
-    function selU(v){ return unidad===v?' selected':''; }
-    var aviso = '';
-    if (!c && defOfe){ aviso = '<p class="muted" style="font-size:12px;margin:0 0 10px;padding:8px 10px;background:#eef4fa;border-radius:8px">Esta oferta <b>hereda del oferente</b>: '+esc(resumenComercial(defOfe))+'. Si guardás acá, creás una condición propia que reemplaza ese default para esta oferta.</p>'; }
-    else if (!c && !defOfe){ aviso = '<p class="muted" style="font-size:12px;margin:0 0 10px">Sin condición propia ni default del oferente. Cargá una acá, o definí el default en el oferente para que todas sus ofertas lo hereden.</p>'; }
-    var h = '<p style="font-weight:600;margin:0 0 6px">Condición comercial</p>'+
-            '<p class="muted" style="font-size:12px;margin:0 0 10px">Cuánto y cómo nos paga el oferente por esta oferta. Es interno: el cliente no lo ve.</p>'+aviso;
-    h += '<div class="row"><div><label>Modelo de cobro</label><select id="comModelo" onchange="comToggle()">'+
-         '<option value="pauta"'+(modelo==='pauta'?' selected':'')+'>Pauta (publicidad)</option>'+
-         '<option value="comision_venta"'+(modelo==='comision_venta'?' selected':'')+'>Comisión de venta</option>'+
-         '<option value="comision_prestamo"'+(modelo==='comision_prestamo'?' selected':'')+'>Comisión por préstamo</option>'+
-         '</select></div><div><label>Moneda</label><input id="comMoneda" maxlength="3" value="'+esc(moneda)+'" placeholder="UYU"></div></div>';
-    h += '<div id="comPauta"><div class="row"><div><label>Unidad</label><select id="comUnidad"><option value="salida"'+selU('salida')+'>Por salida</option><option value="persona"'+selU('persona')+'>Por persona</option><option value="periodo"'+selU('periodo')+'>Por período</option></select></div><div><label>Tarifa</label><input type="number" id="comTarifa" value="'+tarifa+'" placeholder="0"></div></div></div>';
-    h += '<div id="comComision"><div class="row"><div><label>Porcentaje (%)</label><input type="number" id="comPct" value="'+pct+'" placeholder="ej. 2.5"></div><div><label>o Monto fijo</label><input type="number" id="comFijo" value="'+fijo+'" placeholder="alternativa al %"></div></div></div>';
-    h += '<div id="comSolCargo"><p style="font-weight:600;margin:10px 0 4px;font-size:13px">Cargo por solicitud</p><div class="row"><div><label>Modo</label><select id="comSolModo">'+cargoModoOpts(solModo)+'</select></div><div><label>Valor</label><input type="number" id="comSolValor" value="'+solVal+'" placeholder="fija: monto por solicitud · %: sobre el monto solicitado"></div></div></div>';
-    h += '<div id="comPreCargo"><p style="font-weight:600;margin:10px 0 4px;font-size:13px">Cargo por préstamo aprobado</p><div class="row"><div><label>Modo</label><select id="comPreModo">'+cargoModoOpts(preModo)+'</select></div><div><label>Valor</label><input type="number" id="comPreValor" value="'+preVal+'" placeholder="fija: monto por préstamo · %: sobre el capital"></div></div></div>';
-    h += '<div class="row"><div style="flex:1"><label>Notas</label><input id="comNotas" value="'+esc(notas)+'" placeholder="referencia del acuerdo"></div></div>';
-    h += '<div style="margin-top:12px"><button onclick="guardarComercial()">Guardar</button> <button class="sec mini" onclick="cerrarComercial()">Cancelar</button>'+(c?' <button class="sec mini" onclick="borrarComercial()">Quitar condición</button>':'')+'</div><div id="comMsg" class="msg" style="margin-top:8px"></div>';
-    box.innerHTML = h; box.classList.remove('hidden'); comToggle();
-    if (box.scrollIntoView) box.scrollIntoView({ behavior:'smooth', block:'nearest' });
-  }
-  async function guardarComercial(){
-    if (!COM_EDIT_ID) return;
-    var modelo = $('comModelo').value;
-    var body = { modelo: modelo, moneda: ($('comMoneda').value||'').trim()||null, notas: ($('comNotas').value||'').trim()||null };
-    if (modelo==='pauta'){
-      body.unidad = $('comUnidad').value;
-      var t = ($('comTarifa').value||'').trim(); body.tarifa = t===''?null:Number(t);
-    } else if (modelo==='comision_venta'){
-      var p = ($('comPct').value||'').trim(); var f = ($('comFijo').value||'').trim();
-      body.porcentaje = p===''?null:Number(p);
-      body.monto_fijo = f===''?null:Number(f);
-    } else { // comision_prestamo: dos cargos opcionales (solicitud + préstamo)
-      var sm = $('comSolModo').value, sv = ($('comSolValor').value||'').trim();
-      body.solicitud_modo = sm || null;
-      body.solicitud_valor = (sm && sv!=='') ? Number(sv) : null;
-      var pm = $('comPreModo').value, pv = ($('comPreValor').value||'').trim();
-      body.porcentaje = (pm==='porcentaje' && pv!=='') ? Number(pv) : null;
-      body.monto_fijo = (pm==='fijo' && pv!=='') ? Number(pv) : null;
-    }
-    try {
-      await api('/operador/ofertas/'+COM_EDIT_ID+'/comercial','PUT',body);
-      cerrarComercial(); cargarOfertasAdmin();
-    } catch(e){ var m=$('comMsg'); if (m) m.innerHTML='<span class="off">'+esc(e.message)+'</span>'; }
-  }
-  async function borrarComercial(){
-    if (!COM_EDIT_ID) return;
-    if (!confirm('¿Quitar la condición comercial de esta oferta?')) return;
-    try { await api('/operador/ofertas/'+COM_EDIT_ID+'/comercial','DELETE'); cerrarComercial(); cargarOfertasAdmin(); }
-    catch(e){ var m=$('comMsg'); if (m) m.innerHTML='<span class="off">'+esc(e.message)+'</span>'; }
-  }
-  function cerrarComercial(){ COM_EDIT_ID=null; var box=$('ofComBox'); if (box){ box.classList.add('hidden'); box.innerHTML=''; } }
+        <div class="acc" style="margin-top:22px">
+          <button class="btn btn-p" onclick="guardarCorreo()">Guardar</button>
+          <button class="btn btn-s" onclick="probarCorreo()">Mandar un correo de prueba</button>
+        </div>
+        <div id="msgCorreo"></div>
+      </div>
+    </div>
+  </section>
 
-  // Resumen corto de una condición comercial (para el aviso de herencia).
-  function resumenComercial(c){
-    if (!c) return '—';
-    var mon = c.moneda ? (' '+esc(c.moneda)) : '';
-    if (c.modelo==='pauta'){
-      var u = c.unidad==='persona'?'por persona':c.unidad==='periodo'?'por período':'por salida';
-      return 'Pauta '+u+(c.tarifa!=null?(': '+Number(c.tarifa)+mon):'');
-    }
-    if (c.modelo==='comision_venta'){
-      if (c.porcentaje!=null) return 'Comisión de venta: '+Number(c.porcentaje)+'%';
-      if (c.monto_fijo!=null) return 'Comisión de venta: '+Number(c.monto_fijo)+mon+' fijo';
-      return 'Comisión de venta';
-    }
-    // comision_prestamo: cargo por solicitud y/o por préstamo (base del %: solicitud=monto solicitado, préstamo=capital).
-    var partes = [];
-    if (c.solicitud_valor!=null) partes.push('solicitud '+(c.solicitud_modo==='porcentaje' ? (Number(c.solicitud_valor)+'%') : (Number(c.solicitud_valor)+mon+' fija')));
-    if (c.porcentaje!=null) partes.push('préstamo '+Number(c.porcentaje)+'%');
-    else if (c.monto_fijo!=null) partes.push('préstamo '+Number(c.monto_fijo)+mon+' fijo');
-    return 'Comisión por préstamo'+(partes.length ? ' ('+partes.join(', ')+')' : '');
-  }
+  <!-- ============ Twilio ============ -->
+  <section id="vTwilio" class="hidden">
+    <div class="cab"><div>
+      <h1>SMS y WhatsApp</h1>
+      <p>Opcional. Sin esto el código de acceso sale por correo igual; con esto, quien tenga teléfono
+         cargado puede elegir por dónde recibirlo — y un SMS llega donde un correo a veces no.</p>
+    </div></div>
+    <div class="panel" style="max-width:640px">
+      <div class="cabPanel">
+        <div><b>Twilio</b><span id="estadoTwilio"></span></div>
+        <div class="acc" id="accTwilio"></div>
+      </div>
+      <div class="cuerpo">
+        <div class="dos">
+          <div><label for="tSid">Account SID</label><input id="tSid" placeholder="AC…" /></div>
+          <div><label for="tToken">Auth Token</label><input id="tToken" type="password" autocomplete="new-password" /></div>
+        </div>
+        <p class="pista">El token se guarda cifrado y no vuelve a esta pantalla. Vacío = no se cambia.</p>
 
-  // ---- Condición comercial POR DEFECTO del oferente (Fase 5) ----
-  var OCO_EDIT_ID = null;
-  function ocoToggle(){
-    var modelo = $('ocoModelo') ? $('ocoModelo').value : '';
-    if ($('ocoPauta')) $('ocoPauta').style.display = (modelo==='pauta') ? '' : 'none';
-    if ($('ocoComision')) $('ocoComision').style.display = (modelo==='comision_venta') ? '' : 'none';
-    var fin = (modelo==='comision_prestamo') ? '' : 'none';
-    if ($('ocoSolCargo')) $('ocoSolCargo').style.display = fin;
-    if ($('ocoPreCargo')) $('ocoPreCargo').style.display = fin;
-  }
-  async function editarComercialOferente(id){
-    OCO_EDIT_ID = id;
-    var box = $('ofeComBox');
-    var c = null;
-    try { var d = await api('/operador/oferentes/'+id+'/comercial'); c = d.condicion || null; } catch(e){}
-    var modelo = c ? c.modelo : 'pauta';
-    var unidad = (c && c.unidad) ? c.unidad : 'salida';
-    var tarifa = (c && c.tarifa!=null) ? Number(c.tarifa) : '';
-    var pct = (c && c.porcentaje!=null) ? Number(c.porcentaje) : '';
-    var fijo = (c && c.monto_fijo!=null) ? Number(c.monto_fijo) : '';
-    var solModo = (c && c.solicitud_modo) ? c.solicitud_modo : '';
-    var solVal = (c && c.solicitud_valor!=null) ? Number(c.solicitud_valor) : '';
-    var preModo = '', preVal = '';
-    if (c && c.porcentaje!=null){ preModo='porcentaje'; preVal=Number(c.porcentaje); }
-    else if (c && c.monto_fijo!=null){ preModo='fijo'; preVal=Number(c.monto_fijo); }
-    var moneda = (c && c.moneda) ? c.moneda : '';
-    var notas = (c && c.notas) ? c.notas : '';
-    function selU(v){ return unidad===v?' selected':''; }
-    var h = '<p style="font-weight:600;margin:0 0 6px">Condición comercial por defecto del oferente</p>'+
-            '<p class="muted" style="font-size:12px;margin:0 0 10px">Se aplica a TODAS las ofertas de este oferente que no tengan una condición propia. La condición por oferta (botón "Comercial" en cada oferta) siempre manda sobre este default.</p>';
-    h += '<div class="row"><div><label>Modelo de cobro</label><select id="ocoModelo" onchange="ocoToggle()">'+
-         '<option value="pauta"'+(modelo==='pauta'?' selected':'')+'>Pauta (publicidad)</option>'+
-         '<option value="comision_venta"'+(modelo==='comision_venta'?' selected':'')+'>Comisión de venta</option>'+
-         '<option value="comision_prestamo"'+(modelo==='comision_prestamo'?' selected':'')+'>Comisión por préstamo</option>'+
-         '</select></div><div><label>Moneda</label><input id="ocoMoneda" maxlength="3" value="'+esc(moneda)+'" placeholder="UYU"></div></div>';
-    h += '<div id="ocoPauta"><div class="row"><div><label>Unidad</label><select id="ocoUnidad"><option value="salida"'+selU('salida')+'>Por salida</option><option value="persona"'+selU('persona')+'>Por persona</option><option value="periodo"'+selU('periodo')+'>Por período</option></select></div><div><label>Tarifa</label><input type="number" id="ocoTarifa" value="'+tarifa+'" placeholder="0"></div></div></div>';
-    h += '<div id="ocoComision"><div class="row"><div><label>Porcentaje (%)</label><input type="number" id="ocoPct" value="'+pct+'" placeholder="ej. 2.5"></div><div><label>o Monto fijo</label><input type="number" id="ocoFijo" value="'+fijo+'" placeholder="alternativa al %"></div></div></div>';
-    h += '<div id="ocoSolCargo"><p style="font-weight:600;margin:10px 0 4px;font-size:13px">Cargo por solicitud</p><div class="row"><div><label>Modo</label><select id="ocoSolModo">'+cargoModoOpts(solModo)+'</select></div><div><label>Valor</label><input type="number" id="ocoSolValor" value="'+solVal+'" placeholder="fija: monto por solicitud · %: sobre el monto solicitado"></div></div></div>';
-    h += '<div id="ocoPreCargo"><p style="font-weight:600;margin:10px 0 4px;font-size:13px">Cargo por préstamo aprobado</p><div class="row"><div><label>Modo</label><select id="ocoPreModo">'+cargoModoOpts(preModo)+'</select></div><div><label>Valor</label><input type="number" id="ocoPreValor" value="'+preVal+'" placeholder="fija: monto por préstamo · %: sobre el capital"></div></div></div>';
-    h += '<div class="row"><div style="flex:1"><label>Notas</label><input id="ocoNotas" value="'+esc(notas)+'" placeholder="referencia del acuerdo"></div></div>';
-    h += '<div style="margin-top:12px"><button onclick="guardarComercialOferente()">Guardar</button> <button class="sec mini" onclick="cerrarComercialOferente()">Cancelar</button>'+(c?' <button class="sec mini" onclick="borrarComercialOferenteUI()">Quitar default</button>':'')+'</div><div id="ocoMsg" class="msg" style="margin-top:8px"></div>';
-    box.innerHTML = h; box.classList.remove('hidden'); ocoToggle();
-    if (box.scrollIntoView) box.scrollIntoView({ behavior:'smooth', block:'nearest' });
-  }
-  async function guardarComercialOferente(){
-    if (!OCO_EDIT_ID) return;
-    var modelo = $('ocoModelo').value;
-    var body = { modelo: modelo, moneda: ($('ocoMoneda').value||'').trim()||null, notas: ($('ocoNotas').value||'').trim()||null };
-    if (modelo==='pauta'){
-      body.unidad = $('ocoUnidad').value;
-      var t = ($('ocoTarifa').value||'').trim(); body.tarifa = t===''?null:Number(t);
-    } else if (modelo==='comision_venta'){
-      var p = ($('ocoPct').value||'').trim(); var f = ($('ocoFijo').value||'').trim();
-      body.porcentaje = p===''?null:Number(p);
-      body.monto_fijo = f===''?null:Number(f);
-    } else { // comision_prestamo: dos cargos opcionales (solicitud + préstamo)
-      var sm = $('ocoSolModo').value, sv = ($('ocoSolValor').value||'').trim();
-      body.solicitud_modo = sm || null;
-      body.solicitud_valor = (sm && sv!=='') ? Number(sv) : null;
-      var pm = $('ocoPreModo').value, pv = ($('ocoPreValor').value||'').trim();
-      body.porcentaje = (pm==='porcentaje' && pv!=='') ? Number(pv) : null;
-      body.monto_fijo = (pm==='fijo' && pv!=='') ? Number(pv) : null;
-    }
-    try { await api('/operador/oferentes/'+OCO_EDIT_ID+'/comercial','PUT',body); cerrarComercialOferente(); }
-    catch(e){ var m=$('ocoMsg'); if (m) m.innerHTML='<span class="off">'+esc(e.message)+'</span>'; }
-  }
-  async function borrarComercialOferenteUI(){
-    if (!OCO_EDIT_ID) return;
-    if (!confirm('¿Quitar la condición comercial por defecto de este oferente?')) return;
-    try { await api('/operador/oferentes/'+OCO_EDIT_ID+'/comercial','DELETE'); cerrarComercialOferente(); }
-    catch(e){ var m=$('ocoMsg'); if (m) m.innerHTML='<span class="off">'+esc(e.message)+'</span>'; }
-  }
-  function cerrarComercialOferente(){ OCO_EDIT_ID=null; var box=$('ofeComBox'); if (box){ box.classList.add('hidden'); box.innerHTML=''; } }
+        <div class="dos">
+          <div><label for="tSms">Número para SMS</label><input id="tSms" placeholder="+15551234567" /></div>
+          <div><label for="tWa">Número para WhatsApp</label><input id="tWa" placeholder="+15551234567" /></div>
+        </div>
+        <label for="tContent">Content SID de WhatsApp <span style="font-weight:400;color:var(--mut)">(opcional)</span></label>
+        <input id="tContent" placeholder="HX…" />
+        <p class="pista">WhatsApp exige una plantilla aprobada para escribirle a alguien que no te escribió antes.
+           Ese es su identificador.</p>
 
-  // ---- Editar oferta (campos básicos) ----
-  var ED_OF_ID = null;
-  function editarOfertaUI(id){
-    if (!puede('gestionar_ofertas')) return;
-    var box = $('ofEditBox'); if (!box) return;
-    var of = null; for (var z=0;z<OFERTAS_ADMIN.length;z++){ if (OFERTAS_ADMIN[z].id===id){ of=OFERTAS_ADMIN[z]; break; } }
-    if (!of) return;
-    ED_OF_ID = id;
-    var ofOpts=''; for (var i=0;i<OFERENTES.length;i++){ ofOpts += '<option value="'+esc(OFERENTES[i].id)+'"'+(OFERENTES[i].id===of.oferente_id?' selected':'')+'>'+esc(OFERENTES[i].nombre)+'</option>'; }
-    var tipos=['publicidad','venta','financiero']; var etq={publicidad:'Publicidad',venta:'Venta de productos o servicios',financiero:'Financiero'};
-    var tipoOpts=''; for (var t=0;t<tipos.length;t++){ tipoOpts += '<option value="'+tipos[t]+'"'+(tipos[t]===of.tipo?' selected':'')+'>'+etq[tipos[t]]+'</option>'; }
-    var h = '<p style="font-weight:600;margin:0 0 6px">Editar oferta</p>'+
-      '<div class="row">'+
-        '<div><label>Oferente</label><select id="edOferente">'+ofOpts+'</select></div>'+
-        '<div><label>Tipo</label><select id="edTipo">'+tipoOpts+'</select></div>'+
-        '<div><label>Título</label><input id="edTitulo" value="'+esc(of.titulo||'')+'"></div>'+
-        '<div><label>País (vacío = todos)</label><input id="edPais" maxlength="2" value="'+esc(of.pais||'')+'"></div>'+
-      '</div>'+
-      '<div class="row"><div style="flex:1"><label>Descripción</label><input id="edDescripcion" value="'+esc(of.descripcion||'')+'"></div></div>'+
-      '<div class="row">'+
-        '<div><label>Texto del botón</label><input id="edCtaTexto" value="'+esc(of.cta_texto||'')+'"></div>'+
-        '<div style="flex:1"><label>Link del botón</label><input id="edCtaUrl" value="'+esc(of.cta_url||'')+'"></div>'+
-      '</div>'+
-      '<div class="row">'+
-        '<div><label>Vigente desde</label><input id="edDesde" type="date" value="'+esc((of.vigente_desde||'').slice(0,10))+'"></div>'+
-        '<div><label>Vigente hasta</label><input id="edHasta" type="date" value="'+esc((of.vigente_hasta||'').slice(0,10))+'"></div>'+
-        '<div><label>Orden</label><input id="edOrden" type="number" value="'+(of.orden!=null?of.orden:0)+'" style="width:80px"></div>'+
-      '</div>'+
-      '<div style="margin-top:10px"><label style="cursor:pointer"><input type="checkbox" id="edConsent"'+(of.requiere_consentimiento?' checked':'')+'> Requiere consentimiento del empleado (usa sus datos)</label></div>'+
-      '<p class="muted" style="margin:8px 0 0;font-size:12px">El rango salarial y las industrias se editan en Segmentación.</p>'+
-      '<div style="margin-top:12px"><button onclick="guardarOfertaEdit()">Guardar cambios</button> <button class="sec mini" onclick="cerrarOfertaEdit()">Cancelar</button></div>'+
-      '<div id="edMsg" class="msg" style="margin-top:8px"></div>';
-    box.innerHTML = h; box.classList.remove('hidden');
-  }
-  async function guardarOfertaEdit(){
-    if (!ED_OF_ID) return;
-    var msg=$('edMsg');
-    try {
-      var body={
-        oferente_id:$('edOferente').value,
-        tipo:$('edTipo').value,
-        titulo:$('edTitulo').value,
-        descripcion:($('edDescripcion').value||'').trim()||null,
-        cta_texto:($('edCtaTexto').value||'').trim()||null,
-        cta_url:($('edCtaUrl').value||'').trim()||null,
-        pais:($('edPais').value||'').trim()||null,
-        requiere_consentimiento:$('edConsent').checked,
-        vigente_desde:$('edDesde').value||null,
-        vigente_hasta:$('edHasta').value||null,
-        orden:Number($('edOrden').value||0)
-      };
-      if (!(body.titulo||'').trim()){ msg.innerHTML='<span class="off">El título no puede quedar vacío.</span>'; return; }
-      await api('/operador/ofertas/'+ED_OF_ID,'PUT',body);
-      cerrarOfertaEdit(); cargarOfertasAdmin();
-    } catch(e){ msg.innerHTML='<span class="off">'+esc(e.message)+'</span>'; }
-  }
-  function cerrarOfertaEdit(){ ED_OF_ID=null; var box=$('ofEditBox'); if (box){ box.classList.add('hidden'); box.innerHTML=''; } }
-  async function cargarCreditos(){
-    var cont=$('creditosOut');
-    try {
-      var d = await api('/operador/solicitudes-credito'); var ss = d.solicitudes || [];
-      if (!ss.length){ cont.innerHTML='<div class="empty">No hay solicitudes.</div>'; return; }
-      var gestiona = puede('gestionar_creditos');
-      var h='<table><thead><tr><th>Fecha</th><th>Empresa</th><th>Solicitante</th><th>Oferente</th><th>Oferta</th><th class="num">Monto</th><th class="num">Plazo</th><th class="num">Ingreso</th><th class="num">Antig.</th><th>Descuento</th><th>Estado</th>'+(gestiona?'<th></th>':'')+'</tr></thead><tbody>';
-      for (var j=0;j<ss.length;j++){ var s=ss[j];
-        var acc='';
-        if (gestiona && s.estado==='pendiente'){
-          acc = '<button class="sec mini" onclick="resolverCredito(\''+s.id+'\',\'aprobada\')">Aprobar</button> '+
-                '<button class="sec mini" onclick="resolverCredito(\''+s.id+'\',\'rechazada\')">Rechazar</button>';
-        } else if (s.prestamo_id){
-          acc = '<button class="sec mini" onclick="verCuotasOperador(\''+s.prestamo_id+'\')">Ver cuotas</button>';
-        }
-        if (gestiona){
-          var docsBtn = '<button class="sec mini" onclick="verDocsOperador(\''+s.id+'\')">Documentación</button>';
-          acc = docsBtn + (acc ? ' ' + acc : '');
-        }
-        var fecha = s.created_at ? String(s.created_at).slice(0,10) : '';
-        var ing = s.ingreso_verificado!=null ? Number(s.ingreso_verificado) : null;
-        var antig = s.antiguedad_meses!=null ? (s.antiguedad_meses+' m') : '—';
-        h+='<tr><td data-label="Fecha">'+esc(fecha)+'</td>'+
-           '<td data-label="Empresa">'+esc(s.empresa_nombre||'')+'</td>'+
-           '<td data-label="Solicitante">'+esc(s.solicitante||'—')+(s.documento?' <span class="muted">('+esc(s.documento)+')</span>':'')+'</td>'+
-           '<td data-label="Oferente">'+esc(s.oferente_nombre||'')+'</td>'+
-           '<td data-label="Oferta">'+esc(s.oferta_titulo||'')+'</td>'+
-           '<td class="num" data-label="Monto">'+Number(s.monto)+'</td>'+
-           '<td class="num" data-label="Plazo">'+esc(String(s.plazo_meses))+' m</td>'+
-           '<td class="num" data-label="Ingreso">'+(ing!=null?ing:'<span class="muted">s/d</span>')+'</td>'+
-           '<td class="num" data-label="Antig.">'+esc(antig)+'</td>'+
-           '<td data-label="Descuento">'+(s.consent_descuento?'sí':'no')+'</td>'+
-           '<td data-label="Estado">'+esc(s.estado)+(s.nota?' <span class="muted">('+esc(s.nota)+')</span>':'')+(s.prestamo_id&&s.cuota!=null?' <span class="muted">· cuota '+Number(s.cuota)+'</span>':'')+'</td>'+
-           (gestiona?'<td class="num">'+acc+'</td>':'')+'</tr>';
-      }
-      cont.innerHTML=h+'</tbody></table><div id="cronoOut"></div><div id="docsOpOut"></div>';
-    } catch(e){ cont.innerHTML='<div class="off">'+esc(e.message)+'</div>'; }
-  }
-  async function resolverCredito(id, estado){
-    if (estado==='rechazada'){
-      var notaR = prompt('Motivo del rechazo (opcional):') || null;
-      try { await api('/operador/solicitudes-credito/'+id,'PUT',{ estado:'rechazada', nota: notaR }); cargarCreditos(); }
-      catch(e){ alert(e.message); }
-      return;
-    }
-    var tasaStr = prompt('Tasa mensual en % (ej. 5 = 5% por mes):');
-    if (tasaStr===null) return;
-    var tasa = Number(String(tasaStr).replace(',','.'));
-    if (!isFinite(tasa) || tasa<0){ alert('Tasa inválida.'); return; }
-    var prox = new Date(); prox.setMonth(prox.getMonth()+1);
-    var fecha = prompt('Fecha de la primera cuota (AAAA-MM-DD):', prox.toISOString().slice(0,10));
-    if (fecha===null) return;
-    if (!/^\d{4}-\d{2}-\d{2}$/.test(fecha)){ alert('Fecha inválida. Usá AAAA-MM-DD.'); return; }
-    var notaA = prompt('Nota para el solicitante (opcional):') || null;
-    try { await api('/operador/solicitudes-credito/'+id,'PUT',{ estado:'aprobada', nota: notaA, tasa_mensual: tasa, fecha_primera_cuota: fecha }); cargarCreditos(); }
-    catch(e){ alert(e.message); }
-  }
-  async function verCuotasOperador(prestamoId){
-    var out=$('cronoOut'); if(!out) return;
-    out.innerHTML='<p class="muted">Cargando cuotas…</p>';
-    try {
-      var d = await api('/operador/prestamos/'+prestamoId+'/cronograma');
-      var cs = d.cuotas || [];
-      if (!cs.length){ out.innerHTML='<div class="empty">Sin cuotas.</div>'; return; }
-      var h='<h3 style="margin:18px 0 8px">Cronograma de cuotas</h3><table><thead><tr><th class="num">#</th><th>Vence</th><th class="num">Capital</th><th class="num">Interés</th><th class="num">Cuota</th><th class="num">Saldo</th><th>Estado</th></tr></thead><tbody>';
-      for (var i=0;i<cs.length;i++){ var c=cs[i];
-        h+='<tr><td class="num" data-label="#">'+c.numero+'</td>'+
-           '<td data-label="Vence">'+esc(c.vencimiento)+'</td>'+
-           '<td class="num" data-label="Capital">'+Number(c.capital)+'</td>'+
-           '<td class="num" data-label="Interés">'+Number(c.interes)+'</td>'+
-           '<td class="num" data-label="Cuota">'+Number(c.monto)+'</td>'+
-           '<td class="num" data-label="Saldo">'+Number(c.saldo)+'</td>'+
-           '<td data-label="Estado">'+esc(c.estado)+'</td></tr>';
-      }
-      out.innerHTML=h+'</tbody></table>';
-      out.scrollIntoView({ behavior:'smooth' });
-    } catch(e){ out.innerHTML='<div class="off">'+esc(e.message)+'</div>'; }
-  }
+        <div class="acc" style="margin-top:22px">
+          <button class="btn btn-p" onclick="guardarTwilio()">Guardar</button>
+          <button class="btn btn-s" onclick="probarTwilio()">Mandar un mensaje de prueba</button>
+        </div>
+        <div id="msgTwilio"></div>
+      </div>
+    </div>
+  </section>
 
-  async function verDocsOperador(id){
-    var out=$('docsOpOut'); if(!out) return;
-    out.innerHTML='<p class="muted" style="padding:8px 0">Cargando documentación…</p>';
-    try {
-      var d = await api('/operador/solicitudes-credito/'+id+'/documentacion');
-      var fs=(d&&d.formularios)||[]; var ds=(d&&d.documentos)||[];
-      if(!fs.length && !ds.length){ out.innerHTML='<div class="card" style="margin-top:12px"><p class="muted" style="margin:0">Esta oferta no pide formularios ni documentos.</p><div style="margin-top:8px"><button class="sec mini" onclick="cerrarDocsOperador()">Cerrar</button></div></div>'; out.scrollIntoView({behavior:'smooth'}); return; }
-      var h='<div class="card" style="margin-top:12px"><p style="font-weight:600;margin:0 0 6px">Documentación de la solicitud</p>';
-      if(fs.length){
-        h+='<div style="font-weight:600;font-size:13px;margin:8px 0 4px">Formularios</div><ul style="margin:0;padding-left:18px">';
-        for(var i=0;i<fs.length;i++){ var f=fs[i];
-          var est = f.firmado
-            ? ('<span style="color:#1c7c4a">&#10003; firmado</span>'+(f.firmadoAt?' <span class="muted">('+String(f.firmadoAt).slice(0,10)+')</span>':'')+' <button class="sec mini" onclick="verDocOpArchivo(\'f\',\''+f.instanciaId+'\')">Ver</button>')
-            : '<span class="muted">pendiente</span>';
-          var met = f.metodoFirma ? ' <span class="muted">· '+esc(etiquetaFirmaOp(f.metodoFirma))+'</span>' : '';
-          h+='<li style="margin:3px 0">'+esc(f.nombre)+met+' &mdash; '+est+'</li>';
-        }
-        h+='</ul>';
-      }
-      if(ds.length){
-        h+='<div style="font-weight:600;font-size:13px;margin:12px 0 4px">Documentos</div><ul style="margin:0;padding-left:18px">';
-        for(var j=0;j<ds.length;j++){ var dc=ds[j];
-          var est2 = dc.aportado
-            ? ('<span style="color:#1c7c4a">&#10003; aportado'+(dc.origen==='legajo'?' (del legajo)':'')+'</span> <button class="sec mini" onclick="verDocOpArchivo(\'d\',\''+dc.instanciaId+'\')">Ver</button>')
-            : '<span class="muted">pendiente</span>';
-          h+='<li style="margin:3px 0">'+esc(dc.nombre)+' &mdash; '+est2+'</li>';
-        }
-        h+='</ul>';
-      }
-      h+='<div style="margin-top:12px"><button class="sec mini" onclick="cerrarDocsOperador()">Cerrar</button></div></div>';
-      out.innerHTML=h; out.scrollIntoView({behavior:'smooth'});
-    } catch(e){ out.innerHTML='<div class="off">'+esc(e.message)+'</div>'; }
-  }
-  function cerrarDocsOperador(){ var out=$('docsOpOut'); if(out){ out.innerHTML=''; } }
-  async function verDocOpArchivo(tipo, iid){
-    var path = tipo==='f' ? '/operador/solicitudes-credito/formularios/'+iid+'/archivo' : '/operador/solicitudes-credito/documentos/'+iid+'/archivo';
-    try {
-      var r = await fetch(path, { credentials:'same-origin' });
-      if(!r.ok){ throw new Error('No se pudo abrir el archivo.'); }
-      var blob = await r.blob(); var url=URL.createObjectURL(blob); window.open(url,'_blank'); setTimeout(function(){URL.revokeObjectURL(url);},60000);
-    } catch(e){ alert(e.message); }
-  }
+  <!-- ============ Planes y precios ============ -->
+  <section id="vPlanes" class="hidden">
+    <div class="cab">
+      <div>
+        <h1>Planes y precios</h1>
+        <p>Ni un monto vive en el código. Un plan sin precio cargado para un país no se ofrece ahí:
+           cargar el precio <b>es</b> habilitar el país.</p>
+      </div>
+      <button class="btn btn-p" onclick="abrirPlan(null)">Nuevo plan</button>
+    </div>
 
-  // ---- Firma: proveedores ----
-  async function cargarFirmaProveedores(){
-    var cont=$('firmaProvOut');
-    try {
-      var d = await api('/operador/firma-proveedores'); var provs = d.proveedores || [];
-      if (!provs.length){ cont.innerHTML='<div class="empty">No hay proveedores cargados.</div>'; return; }
-      var gestiona = puede('gestionar_firma');
-      var h='<table><thead><tr><th>País</th><th>Nombre</th><th>Sitio</th><th>Integrado</th><th>Estado</th>'+(gestiona?'<th></th>':'')+'</tr></thead><tbody>';
-      for (var j=0;j<provs.length;j++){ var p=provs[j];
-        var acc='';
-        if (gestiona){
-          acc = '<button class="sec mini" onclick="toggleFirmaIntegrado(\''+p.id+'\','+(!p.integrado)+')">'+(p.integrado?'Marcar no integrado':'Marcar integrado')+'</button> '+
-                '<button class="sec mini" onclick="toggleFirmaActivo(\''+p.id+'\','+(!p.activo)+')">'+(p.activo?'Desactivar':'Activar')+'</button> '+
-                '<button class="sec mini" onclick="borrarFirmaProveedorUI(\''+p.id+'\')">Borrar</button>';
-        }
-        var sitio = p.sitio_url ? '<a href="'+esc(p.sitio_url)+'" target="_blank" rel="noopener">'+esc(p.sitio_url.replace(/^https?:\/\//,''))+'</a>' : '<span class="muted">—</span>';
-        h+='<tr><td data-label="País">'+esc(p.pais)+'</td><td data-label="Nombre">'+esc(p.nombre)+'</td><td data-label="Sitio">'+sitio+'</td><td data-label="Integrado">'+(p.integrado?'sí':'<span class="muted">no</span>')+'</td><td data-label="Estado">'+(p.activo?'activo':'<span class="muted">inactivo</span>')+'</td>'+(gestiona?'<td class="num">'+acc+'</td>':'')+'</tr>';
-      }
-      cont.innerHTML=h+'</tbody></table>';
-    } catch(e){ cont.innerHTML='<div class="off">'+esc(e.message)+'</div>'; }
-  }
-  async function crearFirmaProveedorUI(){
-    var msg=$('fpMsg');
-    try {
-      await api('/operador/firma-proveedores','POST',{ pais:$('fpPais').value, nombre:$('fpNombre').value, sitio_url:($('fpSitio').value||'').trim()||null, orden:Number($('fpOrden').value||0) });
-      $('fpNombre').value=''; $('fpSitio').value='';
-      msg.innerHTML='<span class="ok">Proveedor agregado.</span>'; cargarFirmaProveedores();
-    } catch(e){ msg.innerHTML='<span class="off">'+esc(e.message)+'</span>'; }
-  }
-  async function toggleFirmaActivo(id, activo){
-    try { await api('/operador/firma-proveedores/'+id,'PUT',{activo:activo}); cargarFirmaProveedores(); }
-    catch(e){ alert(e.message); }
-  }
-  async function toggleFirmaIntegrado(id, integrado){
-    try { await api('/operador/firma-proveedores/'+id,'PUT',{integrado:integrado}); cargarFirmaProveedores(); }
-    catch(e){ alert(e.message); }
-  }
-  async function borrarFirmaProveedorUI(id){
-    if (!confirm('¿Borrar este proveedor?')) return;
-    try { await api('/operador/firma-proveedores/'+id,'DELETE'); cargarFirmaProveedores(); }
-    catch(e){ alert(e.message); }
-  }
+    <div class="panel" style="margin-bottom:22px">
+      <table>
+        <thead><tr><th>Plan</th><th>Estado</th><th>Países con precio</th><th></th></tr></thead>
+        <tbody id="tPlanes"></tbody>
+      </table>
+    </div>
 
-  // ---- Industrias / rubros ----
-  async function cargarIndustrias(){
-    var cont=$('industriasOut');
-    try {
-      var d = await api('/operador/industrias'); var inds = d.industrias || [];
-      if (!inds.length){ cont.innerHTML='<div class="empty">No hay industrias cargadas.</div>'; return; }
-      var gestiona = puede('gestionar_industrias');
-      var h='<table><thead><tr><th>Nombre</th><th class="num">Orden</th><th>Estado</th>'+(gestiona?'<th></th>':'')+'</tr></thead><tbody>';
-      for (var j=0;j<inds.length;j++){ var x=inds[j];
-        var acc='';
-        if (gestiona){
-          acc = '<button class="sec mini" onclick="toggleIndustria(\''+x.id+'\','+(!x.activo)+')">'+(x.activo?'Desactivar':'Activar')+'</button> '+
-                '<button class="sec mini" onclick="borrarIndustriaUI(\''+x.id+'\')">Borrar</button>';
-        }
-        h+='<tr><td data-label="Nombre">'+esc(x.nombre)+'</td><td class="num" data-label="Orden">'+(x.orden!=null?x.orden:0)+'</td><td data-label="Estado">'+(x.activo?'activo':'<span class="muted">inactivo</span>')+'</td>'+(gestiona?'<td class="num">'+acc+'</td>':'')+'</tr>';
-      }
-      cont.innerHTML=h+'</tbody></table>';
-    } catch(e){ cont.innerHTML='<div class="off">'+esc(e.message)+'</div>'; }
-  }
-  async function crearIndustriaUI(){
-    var msg=$('inMsg');
-    try {
-      await api('/operador/industrias','POST',{ nombre:$('inNombre').value, orden:Number($('inOrden').value||0) });
-      $('inNombre').value='';
-      msg.innerHTML='<span class="ok">Industria agregada.</span>'; cargarIndustrias();
-    } catch(e){ msg.innerHTML='<span class="off">'+esc(e.message)+'</span>'; }
-  }
-  async function toggleIndustria(id, activo){
-    try { await api('/operador/industrias/'+id,'PUT',{activo:activo}); cargarIndustrias(); }
-    catch(e){ alert(e.message); }
-  }
-  async function borrarIndustriaUI(id){
-    if (!confirm('¿Borrar esta industria? Las empresas que la tengan quedarán sin rubro.')) return;
-    try { await api('/operador/industrias/'+id,'DELETE'); cargarIndustrias(); }
-    catch(e){ alert(e.message); }
-  }
+    <div class="panel" id="panelPrecios">
+      <div class="cabPanel">
+        <div><b id="nomPrecios">Elegí un plan</b><span id="subPrecios"></span></div>
+        <div class="acc">
+          <select id="paisPrecio" onchange="pintarPrecios()" style="width:auto">
+            <option value="UY">🇺🇾 Uruguay · UYU</option>
+            <option value="PY">🇵🇾 Paraguay · PYG</option>
+            <option value="BR">🇧🇷 Brasil · BRL</option>
+          </select>
+        </div>
+      </div>
+      <table>
+        <thead><tr><th>Qué se cobra</th><th>Nivel de firma</th><th>Moneda</th><th>Precio</th><th></th></tr></thead>
+        <tbody id="tPrecios"></tbody>
+      </table>
+      <div id="msgPrecios" style="padding:0 18px 18px"></div>
+    </div>
+  </section>
 
-  // ---- Auditoría de accesos ----
-  function audAccionLabel(a){
-    var m={ 'login.ok':'Ingreso', 'login.fallido':'Ingreso fallido', 'otp.enviado':'Código enviado', 'otp.fallido':'Código no enviado', 'password.reset_solicitado':'Recupero pedido', 'password.reset':'Clave cambiada', 'push.enviado':'Aviso enviado', 'push.fallido':'Aviso no enviado' };
-    return m[a]||a;
-  }
-  function audEsFallo(a){ return a==='login.fallido' || a==='otp.fallido' || a==='push.fallido'; }
-  function audMotivoLabel(m){
-    var x={ password_incorrecta:'contraseña incorrecta', usuario_inexistente:'usuario inexistente', inhabilitado:'usuario inhabilitado', sin_password:'sin contraseña', limite_excedido:'demasiados intentos', envio_fallido:'no se pudo enviar', correo_no_disponible:'correo no configurado', sin_vapid:'push sin configurar o claves VAPID inválidas', sin_suscripcion:'sin dispositivo suscripto', error:'error interno al enviar' };
-    return x[m]||m||'';
-  }
-  function audDetalle(ev){
-    var d=ev.detalle||{};
-    if (typeof d!=='object') return String(d);
-    if (ev.accion==='login.ok') return d.via==='otp'?'con código':'con contraseña';
-    if (ev.accion==='login.fallido') return audMotivoLabel(d.motivo);
-    if (ev.accion==='otp.enviado') return (d.canal||'')+(d.destino?' · '+d.destino:'');
-    if (ev.accion==='otp.fallido') return audMotivoLabel(d.motivo)+(d.canal?' ('+d.canal+')':'');
-    if (ev.accion==='push.enviado') return (d.titulo?d.titulo+' · ':'')+'enviadas '+(d.enviadas||0)+(d.fallidas?(', fallidas '+d.fallidas):'');
-    if (ev.accion==='push.fallido') return audMotivoLabel(d.motivo)+(d.titulo?' · '+d.titulo:'');
-    var ks=Object.keys(d); return ks.length?ks.map(function(k){return k+': '+d[k];}).join(', '):'';
-  }
-  function uaResumen(ua){
-    if (!ua) return '';
-    var nav=/Edg/.test(ua)?'Edge':/Chrome/.test(ua)?'Chrome':/Firefox/.test(ua)?'Firefox':/Safari/.test(ua)?'Safari':'';
-    var os=/iPhone|iPad|iOS/.test(ua)?'iOS':/Android/.test(ua)?'Android':/Mac OS X|Macintosh/.test(ua)?'Mac':/Windows/.test(ua)?'Windows':/Linux/.test(ua)?'Linux':'';
-    var r=[nav,os].filter(Boolean).join(' · ');
-    return r||ua.slice(0,40);
-  }
-  async function cargarAuditoria(){
-    var cont=$('auditoriaOut'); if (!cont) return;
-    cont.innerHTML='<p class="muted">Cargando…</p>';
-    try {
-      var p=new URLSearchParams();
-      var q=($('audQ')&&$('audQ').value||'').trim(); if (q) p.set('q', q);
-      var tipo=$('audTipo')?$('audTipo').value:'ingresos'; if (tipo) p.set('tipo', tipo);
-      var desde=$('audDesde')?$('audDesde').value:''; if (desde) p.set('desde', desde);
-      var hasta=$('audHasta')?$('audHasta').value:''; if (hasta) p.set('hasta', hasta);
-      var d=await api('/operador/auditoria?'+p.toString());
-      var evs=(d&&d.eventos)||[];
-      if (!evs.length){ cont.innerHTML='<div class="empty">No hay eventos para esos filtros.</div>'; return; }
-      var h='<table><thead><tr><th>Fecha</th><th>Empresa</th><th>Usuario</th><th>Evento</th><th>Detalle</th><th>IP</th><th>Equipo</th></tr></thead><tbody>';
-      for (var i=0;i<evs.length;i++){ var e=evs[i];
-        var f=new Date(e.creado_at); var fs=isNaN(f.getTime())?esc(e.creado_at):f.toLocaleString('es-UY');
-        var ev='<span class="'+(audEsFallo(e.accion)?'off':'ok')+'">'+esc(audAccionLabel(e.accion))+'</span>';
-        h+='<tr><td data-label="Fecha">'+esc(fs)+'</td>'+
-           '<td data-label="Empresa">'+(e.empresa_nombre?esc(e.empresa_nombre):'<span class="muted">—</span>')+'</td>'+
-           '<td data-label="Usuario">'+(e.usuario_email?esc(e.usuario_email):'<span class="muted">—</span>')+'</td>'+
-           '<td data-label="Evento">'+ev+'</td>'+
-           '<td data-label="Detalle">'+esc(audDetalle(e))+'</td>'+
-           '<td data-label="IP">'+(e.ip?esc(e.ip):'<span class="muted">—</span>')+'</td>'+
-           '<td data-label="Equipo">'+esc(uaResumen(e.user_agent))+'</td></tr>';
-      }
-      cont.innerHTML=h+'</tbody></table>';
-    } catch(e){ cont.innerHTML='<div class="off">'+esc(e.message)+'</div>'; }
-  }
-  function buscarAuditoria(){ cargarAuditoria(); }
-  function limpiarAuditoria(){ if($('audQ'))$('audQ').value=''; if($('audTipo'))$('audTipo').value='ingresos'; if($('audDesde'))$('audDesde').value=''; if($('audHasta'))$('audHasta').value=''; cargarAuditoria(); }
+</main>
 
-  function toggleMenu(){ var sb=$('sidebar'); if (sb) sb.classList.toggle('abierto'); }
-
-  function ver(sec){
-    var mapa={planes:'secPlanes',empresas:'secEmpresas',planes_estudio:'secPlanesEstudio',estudios:'secEstudios',ofertas:'secOfertas',creditos:'secCreditos',firma:'secFirma',industrias:'secIndustrias',tarifas_ia:'secTarifasIa',catalogos_pago:'secCatalogosPago',operadores:'secOperadores',auditoria:'secAuditoria',pasarelas:'secPasarelas',integracion:'secIntegracion',correo:'secCorreo',twilio:'secTwilio',i18n:'secI18n',cuenta:'secCuenta',asistente:'secAsistente'};
-    for (var k in mapa){ var el=$(mapa[k]); if (el) el.classList.toggle('hidden', k!==sec); }
-    $('ntFacturacion').classList.toggle('activo', sec==='planes'||sec==='empresas'||sec==='planes_estudio'||sec==='estudios'||sec==='ofertas'||sec==='creditos');
-    $('ntAdmin').classList.toggle('activo', sec==='operadores'||sec==='auditoria');
-    $('ntConfig').classList.toggle('activo', sec==='pasarelas'||sec==='integracion'||sec==='correo'||sec==='twilio'||sec==='i18n'||sec==='firma'||sec==='industrias'||sec==='tarifas_ia');
-    $('ntAyuda').classList.toggle('activo', sec==='asistente');
-    $('ntCuenta').classList.toggle('activo', sec==='cuenta');
-    // Resaltar el ítem activo del menú lateral
-    var links=document.querySelectorAll('#sidebar a[data-sec]');
-    for (var li=0; li<links.length; li++){ links[li].classList.toggle('activo', links[li].getAttribute('data-sec')===sec); }
-    // En mobile, al elegir una sección se cierra el menú desplegable
-    var sb=$('sidebar'); if (sb && window.innerWidth<=720) sb.classList.remove('abierto');
-    if (sec==='i18n' && !I18N_CARGADO){ I18N_CARGADO=true; cargarI18n(); }
-    if (sec==='planes_estudio' && !PLANES_E_CARGADO){ PLANES_E_CARGADO=true; cargarPlanesEstudio(); }
-    if (sec==='estudios' && !ESTUDIOS_CARGADO){ ESTUDIOS_CARGADO=true; cargarEstudiosOp(); }
-    if (sec==='ofertas' && !OFERTAS_CARGADO){ OFERTAS_CARGADO=true; cargarOfertasSec(); }
-    if (sec==='creditos' && !CREDITOS_CARGADO){ CREDITOS_CARGADO=true; cargarCreditos(); }
-    if (sec==='firma' && !FIRMA_CARGADO){ FIRMA_CARGADO=true; cargarFirmaProveedores(); }
-    if (sec==='industrias' && !INDUSTRIAS_CARGADO){ INDUSTRIAS_CARGADO=true; cargarIndustrias(); }
-    if (sec==='tarifas_ia' && !TARIFAS_IA_CARGADO){ TARIFAS_IA_CARGADO=true; cargarTarifasIa(); }
-    if (sec==='auditoria' && !AUDITORIA_CARGADO){ AUDITORIA_CARGADO=true; cargarAuditoria(); }
-  }
-
-  var ASIST_HIST = [];
-  function asistBurbuja(role, html){
-    var mio = role==='user';
-    return '<div style="align-self:'+(mio?'flex-end':'flex-start')+';max-width:85%;background:'+(mio?'#e7f3ef':'#fff')+';border:1px solid var(--line);border-radius:12px;padding:9px 12px;font-size:14px;line-height:1.55">'+html+'</div>';
-  }
-  async function enviarAsistente(){
-    var inp=$('asistInput'); var q=(inp.value||'').trim(); if(!q) return;
-    var hist=$('asistHist'); var btn=$('asistBtn');
-    hist.insertAdjacentHTML('beforeend', asistBurbuja('user', esc(q)));
-    inp.value=''; btn.disabled=true;
-    hist.insertAdjacentHTML('beforeend', '<div id="asistPend" style="align-self:flex-start;color:#888;font-size:14px;padding:4px 6px">Pensando…</div>');
-    hist.scrollTop=hist.scrollHeight;
-    try{
-      var r=await api('/operador/asistente','POST',{ pregunta:q, historial:ASIST_HIST.slice(-10) });
-      var resp=(r && r.respuesta) || 'Sin respuesta.';
-      ASIST_HIST.push({role:'user',content:q});
-      ASIST_HIST.push({role:'assistant',content:resp});
-      var pend=$('asistPend'); if(pend) pend.remove();
-      hist.insertAdjacentHTML('beforeend', asistBurbuja('assistant', esc(resp).replace(/\n/g,'<br>')));
-    }catch(e){
-      var pend2=$('asistPend'); if(pend2) pend2.remove();
-      hist.insertAdjacentHTML('beforeend', asistBurbuja('assistant', '<span class="off">'+esc(e.message||'No se pudo responder.')+'</span>'));
-    }
-    btn.disabled=false; hist.scrollTop=hist.scrollHeight;
-  }
-
-  async function cambiarMiClaveOp(){
-    var actual=$('opActual').value, nueva=$('opNueva').value, rep=$('opNueva2').value;
-    var msg=$('opPassMsg');
-    if(!actual || !nueva){ msg.innerHTML='<span class="off">Completá la contraseña actual y la nueva.</span>'; return; }
-    if(nueva!==rep){ msg.innerHTML='<span class="off">Las contraseñas nuevas no coinciden.</span>'; return; }
-    try{
-      await api('/operador/yo/password','PUT',{actual:actual,nueva:nueva});
-      msg.innerHTML='<span class="ok">Contraseña actualizada.</span>';
-      $('opActual').value=''; $('opNueva').value=''; $('opNueva2').value='';
-    }catch(e){ msg.innerHTML='<span class="off">'+esc(e.message)+'</span>'; }
-  }
-
-  // ---- Planes ----
-  async function cargarPlanes(){
-    var cont = $('planesOut');
-    try {
-      var d = await api('/operador/planes');
-      PLANES = d.planes || [];
-      if (!PLANES.length){ cont.innerHTML='<div class="empty">Todavía no hay planes.</div>'; return; }
-      var editable = puede('gestionar_planes');
-      var h = '<table><thead><tr><th>Código</th><th>Nombre</th><th>Modalidad</th><th>Precio</th><th>Periodicidad</th><th class="num">Empresas</th><th>Estado</th><th></th></tr></thead><tbody>';
-      for (var i=0;i<PLANES.length;i++){ var p=PLANES[i];
-        var est = p.activo ? '<span class="ok">activo</span>' : '<span class="off">inactivo</span>';
-        var acc = '';
-        if (editable){
-          acc = '<button class="sec mini" onclick="editar(\''+esc(p.codigo)+'\')">Editar</button>';
-          if (Number(p.empresas)===0){ acc += ' <button class="sec mini" onclick="borrarPlan(\''+esc(p.codigo)+'\')">Borrar</button>'; }
-        }
-        var modal = (p.modo_precio==='fijo') ? 'Precio fijo' : 'Por funcionario';
-        var precio;
-        if (p.modo_precio==='fijo'){ precio = esc(p.moneda)+' '+fmt(p.precio_fijo); }
-        else if (p.tramos && p.tramos.length){
-          var parts=[]; for (var z=0;z<p.tramos.length;z++){ var trf=p.tramos[z]; parts.push(trf.desde+'-'+(trf.hasta!=null?trf.hasta:'∞')+': '+fmt(trf.precio_por_funcionario!=null?trf.precio_por_funcionario:trf.precio)); }
-          precio = esc(p.moneda)+' · '+parts.join(' · ');
-        }
-        else { precio = esc(p.moneda)+' '+fmt(p.precio_por_funcionario)+'/func'+(Number(p.funcionarios_gratis)>0?(' · '+p.funcionarios_gratis+' gratis'):''); }
-        h += '<tr><td data-label="Código">'+esc(p.codigo)+'</td><td data-label="Nombre">'+esc(p.nombre)+'</td><td data-label="Modalidad">'+modal+'</td><td data-label="Precio">'+precio+'</td><td data-label="Periodicidad">'+esc(p.periodo)+'</td><td class="num" data-label="Empresas">'+(p.empresas!=null?p.empresas:0)+'</td><td data-label="Estado">'+est+'</td><td class="num" data-label="Acciones">'+acc+'</td></tr>';
-      }
-      cont.innerHTML = h + '</tbody></table>';
-    } catch(e){ cont.innerHTML='<div class="off">'+esc(e.message)+'</div>'; }
-  }
-  function editar(codigo){
-    var p=null; for (var i=0;i<PLANES.length;i++){ if (PLANES[i].codigo===codigo) p=PLANES[i]; }
-    if (!p) return;
-    editando = codigo;
-    $('formTitulo').textContent='Editar plan: '+codigo;
-    $('pCodigo').value=p.codigo; $('pCodigo').disabled=true;
-    $('pNombre').value=p.nombre; $('pMoneda').value=p.moneda;
-    $('pPeriodo').value=p.periodo||'mensual';
-    $('pModo').value=p.modo_precio||'por_funcionario';
-    $('pFijo').value=p.precio_fijo!=null?p.precio_fijo:0;
-    limpiarFranjas();
-    if (p.tramos && p.tramos.length){ for (var t=0;t<p.tramos.length;t++){ agregarFranja(p.tramos[t].desde, p.tramos[t].hasta, p.tramos[t].precio); } }
-    else { agregarFranja(0, '', p.precio_por_funcionario!=null?p.precio_por_funcionario:0); }
-    modoPlanCambio();
-    $('pIaHab').value = (p.asistente_ia===false) ? 'no' : 'si';
-    $('pIaCobra').value = p.ia_cobra ? 'si' : 'no';
-    $('pIaMargen').value = p.ia_margen_pct!=null ? p.ia_margen_pct : 0;
-    $('pIaIncluido').value = p.ia_incluido!=null ? p.ia_incluido : 0;
-    $('btnGuardarPlan').textContent='Guardar cambios';
-    $('btnCancelar').classList.remove('hidden');
-    window.scrollTo(0, document.body.scrollHeight);
-  }
-  function cancelarEdicion(){
-    editando=null;
-    $('formTitulo').textContent='Nuevo plan';
-    $('pCodigo').disabled=false; $('pCodigo').value='';
-    $('pNombre').value=''; $('pMoneda').value='USD';
-    $('pPeriodo').value='mensual'; $('pModo').value='por_funcionario';
-    $('pFijo').value='0';
-    limpiarFranjas(); agregarFranja(0, '', 0);
-    modoPlanCambio();
-    $('pIaHab').value='si'; $('pIaCobra').value='no'; $('pIaMargen').value='0'; $('pIaIncluido').value='0';
-    $('btnGuardarPlan').textContent='Crear plan';
-    $('btnCancelar').classList.add('hidden');
-    $('planMsg').textContent='';
-  }
-  async function guardarPlan(){
-    var msg=$('planMsg');
-    var modo=$('pModo').value;
-    var body={ nombre:$('pNombre').value.trim(), moneda:$('pMoneda').value.trim().toUpperCase(), periodo:$('pPeriodo').value, modo_precio:modo };
-    body.asistente_ia = $('pIaHab').value==='si';
-    body.ia_cobra = $('pIaCobra').value==='si';
-    body.ia_margen_pct = parseFloat($('pIaMargen').value)||0;
-    body.ia_incluido = parseFloat($('pIaIncluido').value)||0;
-    if (modo==='fijo'){ body.precio_fijo=$('pFijo').value; }
-    else { body.tramos=recolectarFranjas(); }
-    try {
-      if (editando){ await api('/operador/planes/'+encodeURIComponent(editando),'PATCH',body); msg.innerHTML='<span class="ok">Plan actualizado.</span>'; }
-      else { body.codigo=$('pCodigo').value.trim(); await api('/operador/planes','POST',body); msg.innerHTML='<span class="ok">Plan creado.</span>'; }
-      cancelarEdicion(); await cargarPlanes(); cargarEmpresas();
-    } catch(e){ msg.innerHTML='<span class="off">'+esc(e.message)+'</span>'; }
-  }
-
-  async function borrarPlan(codigo){
-    if (!confirm('¿Borrar el plan "'+codigo+'"? No se puede deshacer.')) return;
-    try { await api('/operador/planes/'+encodeURIComponent(codigo),'DELETE'); await cargarPlanes(); cargarEmpresas(); }
-    catch(e){ alert(e.message); }
-  }
-
-  // ---- Tarifas de IA ----
-  async function cargarTarifasIa(){
-    var cont=$('tarifasIaOut');
-    try {
-      var d = await api('/operador/tarifas-ia');
-      var t = d.tarifas || [];
-      if (!t.length){ cont.innerHTML='<div class="empty">Todavía no hay tarifas cargadas.</div>'; return; }
-      var editable = puede('gestionar_planes');
-      var h='<table><thead><tr><th>Modelo</th><th>Moneda</th><th class="num">Input / millón</th><th class="num">Output / millón</th><th>Vigencia</th><th></th></tr></thead><tbody>';
-      for (var i=0;i<t.length;i++){ var x=t[i];
-        var vig = esc(x.vigente_desde) + ' → ' + (x.vigente_hasta ? esc(x.vigente_hasta) : 'vigente');
-        var acc = editable ? '<button class="sec mini" onclick="borrarTarifaIa(\''+esc(x.id)+'\')">Borrar</button>' : '';
-        h += '<tr><td data-label="Modelo">'+esc(x.modelo)+'</td><td data-label="Moneda">'+esc(x.moneda)+'</td><td class="num" data-label="Input">'+fmt(x.precio_input_millon)+'</td><td class="num" data-label="Output">'+fmt(x.precio_output_millon)+'</td><td data-label="Vigencia">'+vig+'</td><td class="num">'+acc+'</td></tr>';
-      }
-      cont.innerHTML = h + '</tbody></table>';
-    } catch(e){ cont.innerHTML='<div class="off">'+esc(e.message)+'</div>'; }
-  }
-  async function guardarTarifaIaUI(){
-    var msg=$('tarifaMsg');
-    var body={ modelo:$('tModelo').value.trim(), moneda:$('tMoneda').value.trim().toUpperCase(), precio_input_millon:parseFloat($('tInput').value)||0, precio_output_millon:parseFloat($('tOutput').value)||0 };
-    if ($('tDesde').value) body.vigente_desde=$('tDesde').value;
-    if (!body.modelo){ msg.innerHTML='<span class="off">Indicá el modelo.</span>'; return; }
-    try { await api('/operador/tarifas-ia','POST',body); msg.innerHTML='<span class="ok">Tarifa guardada.</span>'; $('tModelo').value=''; $('tInput').value='0'; $('tOutput').value='0'; $('tDesde').value=''; await cargarTarifasIa(); }
-    catch(e){ msg.innerHTML='<span class="off">'+esc(e.message)+'</span>'; }
-  }
-  async function borrarTarifaIa(id){
-    if (!confirm('¿Borrar esta tarifa?')) return;
-    try { await api('/operador/tarifas-ia/'+encodeURIComponent(id),'DELETE'); await cargarTarifasIa(); }
-    catch(e){ alert(e.message); }
-  }
-
-  async function setIaEmpresa(id){
-    // "Hereda" (vacío) manda null => limpia el override y la empresa vuelve a tomar el valor
-    // del plan. Un valor concreto fija el override. Los controles ya vienen precargados con
-    // el estado actual, así que guardar sin tocar no cambia nada.
-    var hab=$('iaHab_'+id).value;
-    var cobra=$('iaCobra_'+id).value;
-    var m=$('iaMargen_'+id).value.trim();
-    var inc=$('iaIncl_'+id).value.trim();
-    var body={
-      asistente_ia: hab==='' ? null : (hab==='si'),
-      ia_cobra: cobra==='' ? null : (cobra==='si'),
-      ia_margen_pct: m==='' ? null : (parseFloat(m)||0),
-      ia_incluido: inc==='' ? null : (parseFloat(inc)||0)
-    };
-    try { await api('/operador/empresas/'+id+'/ia','PATCH',body); await cargarEmpresas(); }
-    catch(e){ alert(e.message); }
-  }
-
-  // ---- Catálogos de pago (banco / tipo de cuenta) ----
-  async function cargarCatalogosPago(){
-    var pais = $('catPais').value;
-    renderCatalogoPago('banco', 'catBancosOut', 'Bancos', pais);
-    renderCatalogoPago('tipo_cuenta_bancaria', 'catTiposOut', 'Tipos de cuenta', pais);
-  }
-  async function renderCatalogoPago(tabla, contId, titulo, pais){
-    var el = $(contId);
-    el.innerHTML = '<h2 style="margin-top:16px">'+titulo+'</h2><p class="muted">Cargando…</p>';
-    try {
-      var d = await api('/operador/catalogos-pago/'+tabla+'?pais='+encodeURIComponent(pais));
-      var items = d.items || [];
-      var editable = puede('gestionar_planes');
-      var h = '<h2 style="margin-top:16px">'+titulo+'</h2>';
-      if (!items.length){ h += '<div class="empty">Sin ítems para este país.</div>'; }
-      else {
-        h += '<table><thead><tr><th>Nombre</th><th class="num">Orden</th><th>Estado</th><th></th></tr></thead><tbody>';
-        for (var i=0;i<items.length;i++){ var x=items[i];
-          var estado = x.activo ? 'Activo' : '<span class="muted">Inactivo</span>';
-          var acc = editable ?
-            '<button class="sec mini" onclick="toggleCatalogoPago(\''+tabla+'\',\''+esc(x.id)+'\','+(!x.activo)+')">'+(x.activo?'Desactivar':'Activar')+'</button> '+
-            '<button class="sec mini" onclick="borrarCatalogoPago(\''+tabla+'\',\''+esc(x.id)+'\')">Borrar</button>' : '';
-          h += '<tr><td>'+esc(x.nombre)+'</td><td class="num">'+esc(x.orden)+'</td><td>'+estado+'</td><td class="num">'+acc+'</td></tr>';
-        }
-        h += '</tbody></table>';
-      }
-      if (editable){
-        h += '<div class="inline" style="margin-top:8px">'+
-             '<input id="newCat_'+tabla+'" placeholder="Nuevo nombre" style="width:220px">'+
-             '<input id="newCatOrden_'+tabla+'" type="number" placeholder="orden" value="0" style="width:80px">'+
-             '<button class="mini" onclick="agregarCatalogoPago(\''+tabla+'\')">Agregar</button>'+
-             '</div>';
-      }
-      el.innerHTML = h;
-    } catch(e){ el.innerHTML = '<h2 style="margin-top:16px">'+titulo+'</h2><div class="off">'+esc(e.message)+'</div>'; }
-  }
-  async function agregarCatalogoPago(tabla){
-    var pais = $('catPais').value;
-    var nombre = ($('newCat_'+tabla).value||'').trim();
-    if (!nombre){ alert('Ingresá el nombre.'); return; }
-    var orden = parseInt($('newCatOrden_'+tabla).value)||0;
-    try { await api('/operador/catalogos-pago/'+tabla,'POST',{ pais:pais, nombre:nombre, orden:orden }); cargarCatalogosPago(); }
-    catch(e){ alert(e.message); }
-  }
-  async function toggleCatalogoPago(tabla, id, activar){
-    try { await api('/operador/catalogos-pago/'+tabla+'/'+encodeURIComponent(id),'PATCH',{ activo:activar }); cargarCatalogosPago(); }
-    catch(e){ alert(e.message); }
-  }
-  async function borrarCatalogoPago(tabla, id){
-    if (!confirm('¿Borrar este ítem del catálogo? Si ya está en uso, mejor desactivalo en vez de borrarlo.')) return;
-    try { await api('/operador/catalogos-pago/'+tabla+'/'+encodeURIComponent(id),'DELETE'); cargarCatalogosPago(); }
-    catch(e){ alert(e.message); }
-  }
-
-  // ---- Empresas ----
-  async function cargarEmpresas(){
-    var cont=$('empresasOut');
-    try {
-      var d = await api('/operador/empresas');
-      var empresas = d.empresas || [];
-      if (!empresas.length){ cont.innerHTML='<div class="empty">No hay empresas.</div>'; return; }
-      var gestiona = puede('gestionar_empresas');
-      var opciones=''; for (var i=0;i<PLANES.length;i++){ opciones += '<option value="'+esc(PLANES[i].codigo)+'">'+esc(PLANES[i].codigo)+'</option>'; }
-      var h='<table><thead><tr><th>Empresa</th><th>País</th><th>Plan</th><th>Estado</th><th class="num">Func.</th><th>Acciones</th></tr></thead><tbody>';
-      for (var j=0;j<empresas.length;j++){ var e=empresas[j];
-        var plan = e.plan_codigo ? esc(e.plan_codigo) : '<span class="muted">sin plan</span>';
-        var est = e.estado ? esc(e.estado) : '—';
-        var acc;
-        if (gestiona){
-          acc = '<div class="inline" style="margin-bottom:6px"><select id="sel_'+e.id+'">'+opciones+'</select>'+
-                '<button class="sec mini" onclick="asignar(\''+e.id+'\')">Asignar</button></div>'+
-                '<div class="inline"><input id="per_'+e.id+'" value="'+periodoActual(e.plan_periodo||'mensual')+'" title="Formato '+fmtFormato(e.plan_periodo||'mensual')+'" style="width:104px">'+
-                '<button class="mini" onclick="facturar(\''+e.id+'\')">Facturar</button>'+
-                '<button class="sec mini" onclick="verFacturas(\''+e.id+'\')">Facturas</button></div>'+
-                '<div id="fac_'+e.id+'"></div>';
-          var iaHabEf = (e.ia_asistente_ovr!=null? e.ia_asistente_ovr : e.ia_asistente_plan);
-          var iaCobraEf = (e.ia_cobra_ovr!=null? e.ia_cobra_ovr : e.ia_cobra_plan);
-          var iaMargenEf = (e.ia_margen_ovr!=null? e.ia_margen_ovr : e.ia_margen_plan);
-          var iaResumen = (iaHabEf===false) ? 'deshabilitado' : (iaCobraEf ? ('cobra '+fmt(iaMargenEf)+'%') : 'incluido sin cargo');
-          var iaHabV = (e.ia_asistente_ovr==null) ? '' : (e.ia_asistente_ovr ? 'si' : 'no');
-          var iaCobraV = (e.ia_cobra_ovr==null) ? '' : (e.ia_cobra_ovr ? 'si' : 'no');
-          var iaMargenV = (e.ia_margen_ovr==null) ? '' : e.ia_margen_ovr;
-          var iaInclV = (e.ia_incluido_ovr==null) ? '' : e.ia_incluido_ovr;
-          acc += '<div style="margin-top:8px;padding-top:8px;border-top:1px solid var(--line)">'+
-                 '<div class="muted" style="font-size:11px;margin-bottom:4px">Asistente IA · actual: '+iaResumen+' (Hereda = toma el valor del plan)</div>'+
-                 '<div class="inline">'+
-                 '<select id="iaHab_'+e.id+'" style="width:auto"><option value=""'+(iaHabV===''?' selected':'')+'>Hereda</option><option value="si"'+(iaHabV==='si'?' selected':'')+'>Incluido</option><option value="no"'+(iaHabV==='no'?' selected':'')+'>Deshabilitado</option></select>'+
-                 '<select id="iaCobra_'+e.id+'" style="width:auto"><option value=""'+(iaCobraV===''?' selected':'')+'>Hereda</option><option value="si"'+(iaCobraV==='si'?' selected':'')+'>Cobra</option><option value="no"'+(iaCobraV==='no'?' selected':'')+'>No cobra</option></select>'+
-                 '<input id="iaMargen_'+e.id+'" type="number" step="0.01" min="0" placeholder="margen %" value="'+esc(iaMargenV)+'" style="width:88px">'+
-                 '<input id="iaIncl_'+e.id+'" type="number" step="0.01" min="0" placeholder="incluido" value="'+esc(iaInclV)+'" style="width:88px">'+
-                 '<button class="sec mini" onclick="setIaEmpresa(\''+e.id+'\')">Guardar IA</button>'+
-                 '</div></div>';
-        } else {
-          acc = '<button class="sec mini" onclick="verFacturas(\''+e.id+'\')">Facturas</button><div id="fac_'+e.id+'"></div>';
-        }
-        if (SESION && SESION.es_superadmin){
-          acc += '<div style="margin-top:6px"><button class="sec mini" onclick="borrarEmpresaUI(\''+e.id+'\')" title="Borrar la empresa por completo (irreversible)">🗑 Borrar empresa</button></div>';
-        }
-        if (puede('gestionar_ofertas')){
-          acc += '<div style="margin-top:6px"><label style="font-size:13px;cursor:pointer"><input type="checkbox" '+(e.ofertas_habilitado?'checked':'')+' onchange="toggleOfertas(\''+e.id+'\', this.checked)"> Ofertas habilitadas</label></div>';
-        }
-        h += '<tr><td data-label="Empresa">'+esc(e.nombre)+'<div class="muted" style="font-size:11px">'+esc(e.id)+'</div></td><td data-label="País">'+esc(e.pais)+'</td><td data-label="Plan">'+plan+'</td><td data-label="Estado">'+est+'</td><td class="num" data-label="Func.">'+e.funcionarios+'</td><td data-label="Acciones">'+acc+'</td></tr>';
-      }
-      cont.innerHTML = h + '</tbody></table>';
-      if (gestiona){ for (var k=0;k<empresas.length;k++){ var e2=empresas[k]; if (e2.plan_codigo){ var s=$('sel_'+e2.id); if (s) s.value=e2.plan_codigo; } } }
-    } catch(e){ cont.innerHTML='<div class="off">'+esc(e.message)+'</div>'; }
-  }
-  async function asignar(id){
-    try { await api('/operador/empresas/'+id+'/suscripcion','POST',{plan_codigo:$('sel_'+id).value}); $('empMsg').innerHTML='<span class="ok">Plan asignado.</span>'; cargarEmpresas(); }
-    catch(e){ $('empMsg').innerHTML='<span class="off">'+esc(e.message)+'</span>'; }
-  }
-  async function facturar(id){
-    var periodo=$('per_'+id).value.trim();
-    try { var r=await api('/operador/empresas/'+id+'/facturar','POST',{periodo:periodo}); var extra=r.ya_existia?' (ya existía)':''; $('empMsg').innerHTML='<span class="ok">Factura '+esc(periodo)+': '+esc(r.moneda||'')+' '+fmt(r.monto)+extra+'.</span>'; verFacturas(id,true); }
-    catch(e){ $('empMsg').innerHTML='<span class="off">'+esc(e.message)+'</span>'; }
-  }
-  async function verFacturas(id, forzar){
-    var box=$('fac_'+id);
-    if (!forzar && box.innerHTML.trim()){ box.innerHTML=''; return; }
-    try {
-      var d=await api('/operador/empresas/'+id+'/facturas'); var fs=d.facturas||[];
-      if (!fs.length){ box.innerHTML='<div class="muted" style="font-size:12px;padding:6px 0">Sin facturas.</div>'; return; }
-      var gestiona = puede('gestionar_empresas');
-      var h='<table style="margin-top:6px"><thead><tr><th>Período</th><th class="num">Monto</th><th>Estado</th><th></th></tr></thead><tbody>';
-      for (var i=0;i<fs.length;i++){ var f=fs[i];
-        var pagar = f.estado==='pagada' ? '<span class="ok">pagada</span>' : (gestiona ? '<button class="sec mini" onclick="pagar(\''+id+'\',\''+esc(f.periodo)+'\')">Marcar pagada</button>' : esc(f.estado));
-        h += '<tr><td data-label="Período">'+esc(f.periodo)+'</td><td class="num" data-label="Monto">'+esc(f.moneda)+' '+fmt(f.monto)+'</td><td data-label="Estado">'+esc(f.estado)+'</td><td class="num" data-label="Acción">'+pagar+'</td></tr>';
-      }
-      box.innerHTML = h + '</tbody></table>';
-    } catch(e){ box.innerHTML='<div class="off" style="font-size:12px">'+esc(e.message)+'</div>'; }
-  }
-  async function pagar(id, periodo){
-    try { await api('/operador/empresas/'+id+'/facturas/'+encodeURIComponent(periodo)+'/pagar','POST',{}); verFacturas(id,true); }
-    catch(e){ $('empMsg').innerHTML='<span class="off">'+esc(e.message)+'</span>'; }
-  }
-  async function borrarEmpresaUI(id){
-    var nombre = prompt('Esta acción es IRREVERSIBLE y borra TODA la empresa (personas, usuarios, organigrama, liquidaciones no emitidas, etc.).\n\nPara confirmar, escribí EXACTAMENTE el nombre de la empresa:');
-    if (nombre === null) return;
-    nombre = nombre.trim();
-    if (!nombre) return;
-    try {
-      var r = await api('/operador/empresas/'+id, 'DELETE', { confirmar_nombre: nombre });
-      $('empMsg').innerHTML='<span class="ok">Empresa «'+esc(r.empresa_nombre)+'» borrada ('+r.filas_borradas+' filas).</span>';
-      cargarEmpresas();
-    } catch(e){ $('empMsg').innerHTML='<span class="off">'+esc(e.message)+'</span>'; }
-  }
-
-  // ---- Planes de estudio ----
-  function filaFranjaE(desde, hasta, precio){
-    var tr=document.createElement('tr');
-    tr.innerHTML='<td><input type="number" min="0" class="feDesde" value="'+(desde!=null?desde:'')+'" style="width:90px"></td>'+
-                 '<td><input type="number" min="0" class="feHasta" value="'+(hasta!=null?hasta:'')+'" placeholder="sin tope" style="width:90px"></td>'+
-                 '<td><input type="number" min="0" step="0.01" class="fePrecio" value="'+(precio!=null?precio:0)+'" style="width:110px"></td>'+
-                 '<td class="num"><button type="button" class="sec mini" onclick="this.closest(\'tr\').remove()">Quitar</button></td>';
-    return tr;
-  }
-  function agregarFranjaE(desde, hasta, precio){ $('tablaFranjasE').getElementsByTagName('tbody')[0].appendChild(filaFranjaE(desde, hasta, precio)); }
-  function limpiarFranjasE(){ $('tablaFranjasE').getElementsByTagName('tbody')[0].innerHTML=''; }
-  function recolectarFranjasE(){
-    var filas=$('tablaFranjasE').getElementsByTagName('tbody')[0].getElementsByTagName('tr');
-    var out=[];
-    for (var i=0;i<filas.length;i++){
-      var d=filas[i].getElementsByClassName('feDesde')[0].value;
-      var h=filas[i].getElementsByClassName('feHasta')[0].value;
-      var p=filas[i].getElementsByClassName('fePrecio')[0].value;
-      if (d==='' && p===''){ continue; }
-      out.push({ desde: Number(d||0), hasta: (h===''?null:Number(h)), precio: Number(p||0) });
-    }
-    return out;
-  }
-  async function cargarPlanesEstudio(){
-    $('formPlanE').classList.toggle('hidden', !puede('gestionar_planes'));
-    if (puede('gestionar_planes') && !$('tablaFranjasE').getElementsByTagName('tbody')[0].children.length) cancelarEdicionE();
-    var cont=$('planesEstudioOut');
-    try {
-      var d=await api('/operador/planes-estudio');
-      PLANES_E=d.planes||[];
-      if (!PLANES_E.length){ cont.innerHTML='<div class="empty">Todavía no hay planes de estudio.</div>'; return; }
-      var editable=puede('gestionar_planes');
-      var h='<table><thead><tr><th>Código</th><th>Nombre</th><th>Precio</th><th>Tope</th><th>Periodicidad</th><th class="num">Estudios</th><th>Estado</th><th></th></tr></thead><tbody>';
-      for (var i=0;i<PLANES_E.length;i++){ var p=PLANES_E[i];
-        var est=p.activo?'<span class="ok">activo</span>':'<span class="off">inactivo</span>';
-        var acc='';
-        if (editable){
-          acc='<button class="sec mini" onclick="editarE(\''+esc(p.codigo)+'\')">Editar</button>';
-          if (Number(p.estudios)===0){ acc+=' <button class="sec mini" onclick="borrarPlanEstudio(\''+esc(p.codigo)+'\')">Borrar</button>'; }
-        }
-        var precio;
-        if (p.tramos && p.tramos.length){
-          var parts=[]; for (var z=0;z<p.tramos.length;z++){ var trf=p.tramos[z]; parts.push(trf.desde+'-'+(trf.hasta!=null?trf.hasta:'∞')+': '+fmt(trf.precio_por_empresa!=null?trf.precio_por_empresa:trf.precio)); }
-          precio=esc(p.moneda)+' · '+parts.join(' · ');
-        } else {
-          precio=esc(p.moneda)+' '+fmt(p.precio_por_empresa)+'/empresa'+(Number(p.empresas_gratis)>0?(' · '+p.empresas_gratis+' gratis'):'');
-        }
-        var tope=(p.limite_empresas!=null)?String(p.limite_empresas):'∞';
-        h+='<tr><td data-label="Código">'+esc(p.codigo)+'</td><td data-label="Nombre">'+esc(p.nombre)+'</td><td data-label="Precio">'+precio+'</td><td data-label="Tope">'+tope+'</td><td data-label="Periodicidad">'+esc(p.periodo)+'</td><td class="num" data-label="Estudios">'+(p.estudios!=null?p.estudios:0)+'</td><td data-label="Estado">'+est+'</td><td class="num" data-label="Acciones">'+acc+'</td></tr>';
-      }
-      cont.innerHTML=h+'</tbody></table>';
-    } catch(e){ cont.innerHTML='<div class="off">'+esc(e.message)+'</div>'; }
-  }
-  function editarE(codigo){
-    var p=null; for (var i=0;i<PLANES_E.length;i++){ if (PLANES_E[i].codigo===codigo) p=PLANES_E[i]; }
-    if (!p) return;
-    editandoE=codigo;
-    $('formTituloE').textContent='Editar plan: '+codigo;
-    $('peCodigo').value=p.codigo; $('peCodigo').disabled=true;
-    $('peNombre').value=p.nombre; $('peMoneda').value=p.moneda;
-    $('pePeriodo').value=p.periodo||'mensual';
-    $('peLimite').value=(p.limite_empresas!=null)?p.limite_empresas:'';
-    limpiarFranjasE();
-    if (p.tramos && p.tramos.length){ for (var t=0;t<p.tramos.length;t++){ agregarFranjaE(p.tramos[t].desde, p.tramos[t].hasta, p.tramos[t].precio); } }
-    else { agregarFranjaE(0, '', p.precio_por_empresa!=null?p.precio_por_empresa:0); }
-    $('btnGuardarPlanE').textContent='Guardar cambios';
-    $('btnCancelarE').classList.remove('hidden');
-    window.scrollTo(0, document.body.scrollHeight);
-  }
-  function cancelarEdicionE(){
-    editandoE=null;
-    $('formTituloE').textContent='Nuevo plan';
-    $('peCodigo').disabled=false; $('peCodigo').value='';
-    $('peNombre').value=''; $('peMoneda').value='USD';
-    $('pePeriodo').value='mensual'; $('peLimite').value='';
-    limpiarFranjasE(); agregarFranjaE(0, '', 0);
-    $('btnGuardarPlanE').textContent='Crear plan';
-    $('btnCancelarE').classList.add('hidden');
-    $('planEMsg').textContent='';
-  }
-  async function guardarPlanEstudio(){
-    var msg=$('planEMsg');
-    var lim=$('peLimite').value.trim();
-    var body={ nombre:$('peNombre').value.trim(), moneda:$('peMoneda').value.trim().toUpperCase(), periodo:$('pePeriodo').value, limite_empresas:(lim===''?null:Number(lim)), tramos:recolectarFranjasE() };
-    try {
-      if (editandoE){ await api('/operador/planes-estudio/'+encodeURIComponent(editandoE),'PATCH',body); msg.innerHTML='<span class="ok">Plan actualizado.</span>'; }
-      else { body.codigo=$('peCodigo').value.trim(); await api('/operador/planes-estudio','POST',body); msg.innerHTML='<span class="ok">Plan creado.</span>'; }
-      cancelarEdicionE(); await cargarPlanesEstudio(); cargarEstudiosOp();
-    } catch(e){ msg.innerHTML='<span class="off">'+esc(e.message)+'</span>'; }
-  }
-  async function borrarPlanEstudio(codigo){
-    if (!confirm('¿Borrar el plan de estudio "'+codigo+'"? No se puede deshacer.')) return;
-    try { await api('/operador/planes-estudio/'+encodeURIComponent(codigo),'DELETE'); await cargarPlanesEstudio(); cargarEstudiosOp(); }
-    catch(e){ alert(e.message); }
-  }
-
-  // ---- Estudios (cartera) ----
-  async function cargarEstudiosOp(){
-    var cont=$('estudiosOpOut');
-    try {
-      if (!PLANES_E.length){ try { var dp=await api('/operador/planes-estudio'); PLANES_E=dp.planes||[]; } catch(e2){} }
-      var d=await api('/operador/estudios');
-      var estudios=d.estudios||[];
-      if (!estudios.length){ cont.innerHTML='<div class="empty">No hay estudios.</div>'; return; }
-      var gestiona=puede('gestionar_planes');
-      var opciones=''; for (var i=0;i<PLANES_E.length;i++){ opciones+='<option value="'+esc(PLANES_E[i].codigo)+'">'+esc(PLANES_E[i].codigo)+'</option>'; }
-      var h='<table><thead><tr><th>Estudio</th><th>País</th><th>Plan</th><th>Estado</th><th class="num">Empresas</th><th>Acciones</th></tr></thead><tbody>';
-      for (var j=0;j<estudios.length;j++){ var e=estudios[j];
-        var plan=e.plan_codigo?esc(e.plan_codigo):'<span class="muted">sin plan</span>';
-        var est=e.estado?esc(e.estado):'—';
-        var acc='';
-        if (gestiona){
-          acc='<div class="inline"><select id="sele_'+e.id+'">'+opciones+'</select>'+
-              '<button class="sec mini" onclick="asignarEstudio(\''+e.id+'\')">Asignar</button></div>';
-        }
-        h+='<tr><td data-label="Estudio">'+esc(e.nombre)+'<div class="muted" style="font-size:11px">'+esc(e.id)+'</div></td><td data-label="País">'+esc(e.pais)+'</td><td data-label="Plan">'+plan+'</td><td data-label="Estado">'+est+'</td><td class="num" data-label="Empresas">'+(e.empresas!=null?e.empresas:0)+'</td><td data-label="Acciones">'+acc+'</td></tr>';
-      }
-      cont.innerHTML=h+'</tbody></table>';
-      if (gestiona){ for (var k=0;k<estudios.length;k++){ var e3=estudios[k]; if (e3.plan_codigo){ var s=$('sele_'+e3.id); if (s) s.value=e3.plan_codigo; } } }
-    } catch(e){ cont.innerHTML='<div class="off">'+esc(e.message)+'</div>'; }
-  }
-  async function asignarEstudio(id){
-    try { await api('/operador/estudios/'+id+'/suscripcion','POST',{plan_codigo:$('sele_'+id).value}); $('estOpMsg').innerHTML='<span class="ok">Plan asignado.</span>'; cargarEstudiosOp(); }
-    catch(e){ $('estOpMsg').innerHTML='<span class="off">'+esc(e.message)+'</span>'; }
-  }
-
-  // ---- Operadores ----
-  function construirChecks(){
-    var cont=$('capsChecks'); if (!cont) return;
-    var h='';
-    for (var i=0;i<CATALOGO.length;i++){ var c=CATALOGO[i]; h += '<label><input type="checkbox" class="capchk" value="'+esc(c)+'"> '+esc(LABELS[c]||c)+'</label>'; }
-    cont.innerHTML = h;
-  }
-  function toggleSuper(){
-    var sup=$('oSuper').checked;
-    var chk=document.getElementsByClassName('capchk');
-    for (var i=0;i<chk.length;i++){ chk[i].disabled = sup; if (sup) chk[i].checked=false; }
-  }
-  async function cargarOperadores(){
-    var cont=$('operadoresOut');
-    try {
-      var d=await api('/operador/operadores'); var ops=d.operadores||[];
-      if (!ops.length){ cont.innerHTML='<div class="empty">No hay operadores.</div>'; return; }
-      var h='<table><thead><tr><th>Usuario</th><th>Nombre</th><th>Tipo</th><th>Privilegios</th><th>Estado</th><th></th></tr></thead><tbody>';
-      for (var i=0;i<ops.length;i++){ var o=ops[i];
-        var tipo = o.es_superadmin ? '<span class="ok">superadmin</span>' : 'operador';
-        var privs=''; var caps=o.capacidades||[]; for (var k=0;k<caps.length;k++){ privs += '<span class="pill">'+esc(caps[k])+'</span>'; }
-        if (!privs) privs='<span class="muted">—</span>';
-        var estado = o.activo ? '<span class="ok">activo</span>' : '<span class="off">inactivo</span>';
-        var acc = o.activo ? '<button class="sec mini" onclick="toggleActivo(\''+o.id+'\',false)">Desactivar</button>' : '<button class="mini" onclick="toggleActivo(\''+o.id+'\',true)">Activar</button>';
-        acc += ' <button class="sec mini" onclick="resetClaveOp(\''+o.id+'\',\''+esc(o.usuario)+'\')">Resetear clave</button>';
-        h += '<tr><td data-label="Usuario">'+esc(o.usuario)+'</td><td data-label="Nombre">'+esc(o.nombre)+'</td><td data-label="Tipo">'+tipo+'</td><td data-label="Privilegios">'+privs+'</td><td data-label="Estado">'+estado+'</td><td class="num" data-label="Acciones">'+acc+'</td></tr>';
-      }
-      cont.innerHTML = h + '</tbody></table>';
-    } catch(e){ cont.innerHTML='<div class="off">'+esc(e.message)+'</div>'; }
-  }
-  async function crearOperadorUI(){
-    var msg=$('opMsg');
-    var caps=[]; var chk=document.getElementsByClassName('capchk');
-    for (var i=0;i<chk.length;i++){ if (chk[i].checked) caps.push(chk[i].value); }
-    var body={ usuario:$('oUsuario').value.trim(), nombre:$('oNombre').value.trim(), password:$('oPass').value, es_superadmin:$('oSuper').checked, capacidades:caps };
-    try {
-      await api('/operador/operadores','POST',body);
-      msg.innerHTML='<span class="ok">Operador creado.</span>';
-      $('oUsuario').value=''; $('oNombre').value=''; $('oPass').value=''; $('oSuper').checked=false; toggleSuper();
-      cargarOperadores();
-    } catch(e){ msg.innerHTML='<span class="off">'+esc(e.message)+'</span>'; }
-  }
-  async function toggleActivo(id, activo){
-    try { await api('/operador/operadores/'+id,'PATCH',{activo:activo}); cargarOperadores(); }
-    catch(e){ $('opMsg').innerHTML='<span class="off">'+esc(e.message)+'</span>'; }
-  }
-  async function resetClaveOp(id, usuario){
-    var nueva = prompt('Nueva contraseña para "'+usuario+'" (mínimo 8 caracteres):');
-    if (nueva === null) return;
-    if (nueva.length < 8){ $('opMsg').innerHTML='<span class="off">La contraseña debe tener al menos 8 caracteres.</span>'; return; }
-    try {
-      await api('/operador/operadores/'+id+'/password','POST',{nueva:nueva});
-      $('opMsg').innerHTML='<span class="ok">Contraseña de "'+esc(usuario)+'" actualizada.</span>';
-    } catch(e){ $('opMsg').innerHTML='<span class="off">'+esc(e.message)+'</span>'; }
-  }
-
-  // ---- Pasarelas de pago ----
-  var PASARELAS = [];
-  var PROV_LABEL = { paypal:'PayPal', stripe:'Stripe', mercadopago:'Mercado Pago', dlocal:'dLocal' };
-  function provLabel(p){ return PROV_LABEL[p] || p; }
-  async function cargarPasarelas(){
-    var cont=$('pasarelasOut');
-    try {
-      var d=await api('/operador/pasarelas'); PASARELAS=d.pasarelas||[];
-      if (!PASARELAS.length){ cont.innerHTML='<div class="empty">No hay pasarelas configuradas todavía.</div>'; return; }
-      var h='<table><thead><tr><th>Proveedor</th><th>Nombre</th><th>Modo</th><th>Moneda</th><th>Client ID</th><th>Secret</th><th>Estado</th><th></th></tr></thead><tbody>';
-      for (var i=0;i<PASARELAS.length;i++){ var p=PASARELAS[i];
-        var modo = p.modo==='produccion' ? '<span class="ok">producción</span>' : '<span class="muted">sandbox</span>';
-        var estado = p.activo ? '<span class="ok">activa</span>' : '<span class="off">inactiva</span>';
-        var toggle = p.activo ? '<button class="sec mini" onclick="togglePasarela(\''+esc(p.proveedor)+'\',false)">Desactivar</button>' : '<button class="mini" onclick="togglePasarela(\''+esc(p.proveedor)+'\',true)">Activar</button>';
-        // PayPal (Fase 1): dispara una orden de prueba en sandbox desde la consola.
-        var probar = p.proveedor==='paypal' ? ' <button class="sec mini" onclick="probarOrden(\'paypal\')">Probar orden (sandbox)</button>' : '';
-        h += '<tr><td>'+esc(provLabel(p.proveedor))+'</td><td>'+esc(p.nombre)+'</td><td>'+modo+'</td><td>'+esc(p.moneda)+'</td><td class="muted">'+esc(p.client_id||'—')+'</td><td class="muted">'+esc(p.client_secret_mask||'—')+'</td><td>'+estado+'</td>'+
-             '<td class="num"><button class="sec mini" onclick="editarPasarela(\''+esc(p.proveedor)+'\')">Editar</button> '+toggle+probar+' <button class="sec mini" onclick="borrarPasarela(\''+esc(p.proveedor)+'\')">Borrar</button></td></tr>';
-      }
-      cont.innerHTML = h + '</tbody></table>';
-    } catch(e){ cont.innerHTML='<div class="off">'+esc(e.message)+'</div>'; }
-  }
-  function editarPasarela(prov){
-    var p=null; for (var i=0;i<PASARELAS.length;i++){ if (PASARELAS[i].proveedor===prov) p=PASARELAS[i]; }
-    if (!p) return;
-    $('gTitulo').textContent='Editar pasarela: '+provLabel(prov);
-    $('gProveedor').value=p.proveedor; $('gProveedor').disabled=true;
-    $('gNombre').value=p.nombre; $('gModo').value=p.modo; $('gMoneda').value=p.moneda;
-    $('gClientId').value=p.client_id||'';
-    $('gClientSecret').value=''; $('gWebhookSecret').value='';
-    $('gCancelar').classList.remove('hidden');
-    window.scrollTo(0, document.body.scrollHeight);
-  }
-  function cancelarPasarela(){
-    $('gTitulo').textContent='Configurar pasarela';
-    $('gProveedor').disabled=false; $('gProveedor').value='paypal';
-    $('gNombre').value=''; $('gModo').value='sandbox'; $('gMoneda').value='USD';
-    $('gClientId').value=''; $('gClientSecret').value=''; $('gWebhookSecret').value='';
-    $('gCancelar').classList.add('hidden'); $('gMsg').textContent='';
-  }
-  async function guardarPasarelaUI(){
-    var msg=$('gMsg');
-    var body={ proveedor:$('gProveedor').value, nombre:$('gNombre').value.trim(), modo:$('gModo').value, moneda:$('gMoneda').value.trim().toUpperCase(), client_id:$('gClientId').value.trim() };
-    var cs=$('gClientSecret').value; if (cs) body.client_secret=cs;
-    var ws=$('gWebhookSecret').value; if (ws) body.webhook_secret=ws;
-    try { await api('/operador/pasarelas','POST',body); msg.innerHTML='<span class="ok">Pasarela guardada.</span>'; cancelarPasarela(); cargarPasarelas(); }
-    catch(e){ msg.innerHTML='<span class="off">'+esc(e.message)+'</span>'; }
-  }
-  async function togglePasarela(prov, activo){
-    try { await api('/operador/pasarelas/'+encodeURIComponent(prov),'PATCH',{activo:activo}); cargarPasarelas(); }
-    catch(e){ $('gMsg').innerHTML='<span class="off">'+esc(e.message)+'</span>'; }
-  }
-  async function borrarPasarela(prov){
-    if (!confirm('¿Borrar la configuración de '+provLabel(prov)+'?')) return;
-    try { await api('/operador/pasarelas/'+encodeURIComponent(prov),'DELETE'); cargarPasarelas(); }
-    catch(e){ $('gMsg').innerHTML='<span class="off">'+esc(e.message)+'</span>'; }
-  }
-  // Fase 1: crea una orden de prueba (sandbox) y muestra el link de aprobación + el estado.
-  async function probarOrden(prov){
-    var out=$('pruebaOrdenOut');
-    out.innerHTML='<span class="muted">Creando orden de prueba en '+esc(provLabel(prov))+' (sandbox)…</span>';
-    try {
-      var d=await api('/operador/pasarelas/'+encodeURIComponent(prov)+'/orden-prueba','POST',{ monto:'10.00', moneda:'USD' });
-      var link = d.link_aprobacion ? '<a href="'+esc(d.link_aprobacion)+'" target="_blank" rel="noopener">Abrir link de aprobación ↗</a>' : '<span class="muted">(sin link de aprobación)</span>';
-      out.innerHTML = '<div class="ok" style="margin-bottom:4px">Orden creada · estado: <b>'+esc(d.estado||'—')+'</b> · id: <span class="muted">'+esc(d.order_id||'—')+'</span></div>'+link;
-    } catch(e){ out.innerHTML='<span class="off">'+esc(e.message)+'</span>'; }
-  }
-
-  // ---- Integración de facturación (Nodum) ----
-  var INTEG = null;
-  async function cargarIntegracion(){
-    var cont=$('intOut');
-    try {
-      var d=await api('/operador/integracion-facturacion'); INTEG=d;
-      var modoTxt = d.modo==='api' ? 'Vía API' : 'Vía archivo / lote';
-      var estado = d.activo ? '<span class="ok">activa</span>' : '<span class="off">inactiva</span>';
-      var toggle = d.activo ? '<button class="sec mini" onclick="toggleIntegracion(false)">Desactivar</button>' : '<button class="mini" onclick="toggleIntegracion(true)">Activar</button>';
-      cont.innerHTML = '<table><tbody><tr><td>Proveedor</td><td>Nodum</td></tr><tr><td>Modo</td><td>'+esc(modoTxt)+'</td></tr>'+
-        '<tr><td>URL API</td><td class="muted">'+esc(d.api_url||'—')+'</td></tr>'+
-        '<tr><td>Credencial</td><td class="muted">'+esc(d.credencial_mask||'—')+'</td></tr>'+
-        '<tr><td>Formato archivo</td><td class="muted">'+esc(d.archivo_formato||'—')+'</td></tr>'+
-        '<tr><td>Estado</td><td>'+estado+' '+toggle+'</td></tr></tbody></table>';
-      $('intModo').value = d.modo || 'archivo';
-      $('intApiUrl').value = d.api_url || '';
-      $('intApiCred').value = '';
-      $('intArchivoFormato').value = d.archivo_formato || '';
-      intToggleCampos();
-    } catch(e){ cont.innerHTML='<div class="off">'+esc(e.message)+'</div>'; }
-  }
-  function intToggleCampos(){
-    var modo = $('intModo').value;
-    var a=$('intCamposApi'), f=$('intCamposArchivo');
-    if (a) a.style.display = modo==='api' ? '' : 'none';
-    if (f) f.style.display = modo==='archivo' ? '' : 'none';
-  }
-  async function guardarIntegracionUI(){
-    var msg=$('intMsg');
-    var body={ modo:$('intModo').value, api_url:$('intApiUrl').value.trim(), archivo_formato:$('intArchivoFormato').value.trim() };
-    var cred=$('intApiCred').value; if (cred) body.api_credencial=cred;
-    try { await api('/operador/integracion-facturacion','POST',body); msg.innerHTML='<span class="ok">Configuración guardada.</span>'; cargarIntegracion(); }
-    catch(e){ msg.innerHTML='<span class="off">'+esc(e.message)+'</span>'; }
-  }
-  async function toggleIntegracion(activo){
-    try { await api('/operador/integracion-facturacion','PATCH',{activo:activo}); cargarIntegracion(); }
-    catch(e){ $('intMsg').innerHTML='<span class="off">'+esc(e.message)+'</span>'; }
-  }
-
-  // ---- Correo / Email ----
-  var CORREO=null;
-  function aplicarPresetCorreo(){
-    if ($('cProveedor').value==='gmail'){ $('cHost').value='smtp.gmail.com'; $('cPuerto').value='465'; $('cSeg').value='ssl'; }
-  }
-  async function cargarCorreo(){
-    var est=$('correoEstado');
-    try {
-      var d=await api('/operador/correo'); CORREO=d.config;
-      if (!CORREO){ est.innerHTML='Sin conexión configurada todavía.'; $('cToggle').classList.add('hidden'); return; }
-      $('cProveedor').value=CORREO.proveedor||'gmail';
-      $('cHost').value=CORREO.host||''; $('cPuerto').value=CORREO.puerto||465; $('cSeg').value=CORREO.seguridad||'ssl';
-      $('cUsuario').value=CORREO.usuario||''; $('cRemNombre').value=CORREO.remitente_nombre||''; $('cRemEmail').value=CORREO.remitente_email||'';
-      $('cPassword').value='';
-      var estado = CORREO.activo ? '<span class="ok">activa</span>' : '<span class="off">inactiva</span>';
-      var sec = CORREO.tiene_password ? (' · contraseña '+esc(CORREO.password_mask||'••••')) : ' · <span class="off">sin contraseña</span>';
-      est.innerHTML='Conexión: '+estado+sec;
-      $('cToggle').classList.remove('hidden');
-      $('cToggle').textContent = CORREO.activo ? 'Desactivar' : 'Activar';
-    } catch(e){ est.innerHTML='<span class="off">'+esc(e.message)+'</span>'; }
-  }
-  async function guardarCorreoUI(){
-    var msg=$('cMsg');
-    var body={ proveedor:$('cProveedor').value, host:$('cHost').value.trim(), puerto:Number($('cPuerto').value), seguridad:$('cSeg').value, usuario:$('cUsuario').value.trim(), remitente_nombre:$('cRemNombre').value.trim(), remitente_email:$('cRemEmail').value.trim() };
-    var pw=$('cPassword').value; if (pw) body.password=pw;
-    try { await api('/operador/correo','POST',body); msg.innerHTML='<span class="ok">Conexión guardada.</span>'; cargarCorreo(); }
-    catch(e){ msg.innerHTML='<span class="off">'+esc(e.message)+'</span>'; }
-  }
-  async function toggleCorreoUI(){
-    if (!CORREO) return;
-    try { await api('/operador/correo','PATCH',{activo:!CORREO.activo}); cargarCorreo(); }
-    catch(e){ $('cMsg').innerHTML='<span class="off">'+esc(e.message)+'</span>'; }
-  }
-  async function enviarPruebaUI(){
-    var msg=$('cPruebaMsg'); var para=$('cPrueba').value.trim();
-    if (!para){ msg.innerHTML='<span class="off">Poné un email de destino.</span>'; return; }
-    msg.innerHTML='Enviando…';
-    try { await api('/operador/correo/prueba','POST',{para:para}); msg.innerHTML='<span class="ok">Enviado. Revisá la bandeja.</span>'; }
-    catch(e){ msg.innerHTML='<span class="off">'+esc(e.message)+'</span>'; }
-  }
-
-  // ---- Twilio (SMS / WhatsApp) ----
-  var TWILIO=null;
-  async function cargarTwilio(){
-    var est=$('twEstado');
-    try {
-      var d=await api('/operador/twilio'); TWILIO=d.config;
-      if (!TWILIO){ est.innerHTML='Sin conexión configurada todavía.'; $('twToggle').classList.add('hidden'); return; }
-      $('twSid').value=TWILIO.account_sid||''; $('twSms').value=TWILIO.from_sms||''; $('twWa').value=TWILIO.from_whatsapp||''; $('twWaSid').value=TWILIO.wa_content_sid||'';
-      $('twToken').value='';
-      var estado = TWILIO.activo ? '<span class="ok">activa</span>' : '<span class="off">inactiva</span>';
-      var sec = TWILIO.tiene_token ? (' · token '+esc(TWILIO.token_mask||'••••')) : ' · <span class="off">sin token</span>';
-      est.innerHTML='Conexión: '+estado+sec;
-      $('twToggle').classList.remove('hidden');
-      $('twToggle').textContent = TWILIO.activo ? 'Desactivar' : 'Activar';
-    } catch(e){ est.innerHTML='<span class="off">'+esc(e.message)+'</span>'; }
-  }
-  async function guardarTwilioUI(){
-    var msg=$('twMsg');
-    var body={ account_sid:$('twSid').value.trim(), from_sms:$('twSms').value.trim(), from_whatsapp:$('twWa').value.trim(), wa_content_sid:$('twWaSid').value.trim() };
-    var tk=$('twToken').value; if (tk) body.auth_token=tk;
-    try { await api('/operador/twilio','POST',body); msg.innerHTML='<span class="ok">Conexión guardada.</span>'; cargarTwilio(); }
-    catch(e){ msg.innerHTML='<span class="off">'+esc(e.message)+'</span>'; }
-  }
-  async function toggleTwilioUI(){
-    if (!TWILIO) return;
-    try { await api('/operador/twilio','PATCH',{activo:!TWILIO.activo}); cargarTwilio(); }
-    catch(e){ $('twMsg').innerHTML='<span class="off">'+esc(e.message)+'</span>'; }
-  }
-  async function enviarPruebaTwilioUI(){
-    var msg=$('twPruebaMsg'); var tel=$('twPrueba').value.trim(); var canal=$('twPruebaCanal').value;
-    if (!tel){ msg.innerHTML='<span class="off">Poné un teléfono de destino.</span>'; return; }
-    msg.innerHTML='Enviando…';
-    try { await api('/operador/twilio/prueba','POST',{canal:canal,telefono:tel}); msg.innerHTML='<span class="ok">Enviado. Revisá el teléfono.</span>'; }
-    catch(e){ msg.innerHTML='<span class="off">'+esc(e.message)+'</span>'; }
-  }
-
-  // ---- Etiquetas / Traducciones (i18n editable) ----
-  async function cargarI18n(){
-    var cont=$('i18nLista'); cont.innerHTML='Cargando…';
-    try {
-      var d=await api('/operador/i18n?idioma='+encodeURIComponent($('i18nLang').value));
-      I18N_ITEMS = d.items || [];
-      renderI18n();
-    } catch(e){ cont.innerHTML='<span class="off">'+esc(e.message)+'</span>'; }
-  }
-  function filtrarI18n(){ renderI18n(); }
-  function autosizeI18n(el){ el.style.height='auto'; el.style.height=(el.scrollHeight+2)+'px'; }
-  function renderI18n(){
-    var cont=$('i18nLista');
-    if (!cont._wired){
-      cont._wired=true;
-      cont.addEventListener('input', function(e){ if (e.target && e.target.matches && e.target.matches('textarea[data-i18nedit]')) autosizeI18n(e.target); });
-      cont.addEventListener('focusin', function(e){ if (e.target && e.target.matches && e.target.matches('textarea[data-i18nedit]')) autosizeI18n(e.target); });
-      cont.addEventListener('click', function(e){
-        var t=e.target;
-        var s=t.closest ? t.closest('[data-i18nsave]') : null; if (s){ guardarI18n(s.getAttribute('data-i18nsave')); return; }
-        var r=t.closest ? t.closest('[data-i18nreset]') : null; if (r){ resetI18n(r.getAttribute('data-i18nreset')); }
-      });
-    }
-    var q=($('i18nBuscar').value||'').toLowerCase();
-    var rows=I18N_ITEMS.filter(function(it){
-      return !q || it.clave.toLowerCase().indexOf(q)>=0 || (it.def||'').toLowerCase().indexOf(q)>=0 || (it.ov||'').toLowerCase().indexOf(q)>=0;
-    });
-    var cab='<div class="muted" style="margin:0 0 8px;font-size:12px">Mostrando '+rows.length+' de '+I18N_ITEMS.length+'</div>';
-    if (!rows.length){ cont.innerHTML=cab+'<span class="off">Sin resultados.</span>'; return; }
-    var html='';
-    for (var i=0;i<rows.length;i++){
-      var it=rows[i];
-      var val = it.ov!=null ? it.ov : '';
-      var marca = it.ov!=null ? ' <span class="ok" title="Con cambio">●</span>' : '';
-      var btnReset = it.ov!=null ? '<button class="sec mini" data-i18nreset="'+esc(it.clave)+'" title="Volver al original">↺ Restablecer</button>' : '';
-      html+='<div style="padding:12px 0;border-bottom:1px solid rgba(127,127,127,0.18)">'
-        +  '<div style="margin-bottom:4px"><code>'+esc(it.clave)+'</code>'+marca+'</div>'
-        +  '<div class="muted" style="font-size:12px;margin-bottom:6px">'+(it.def? esc(it.def) : '<em>(sin texto original)</em>')+'</div>'
-        +  '<div style="display:flex;gap:8px;align-items:flex-start">'
-        +    '<textarea data-i18nedit="'+esc(it.clave)+'" rows="2" spellcheck="false" style="flex:1;min-width:0;font-size:14px;line-height:1.45;padding:8px;resize:vertical;font-family:inherit">'+esc(val)+'</textarea>'
-        +    '<div style="display:flex;flex-direction:column;gap:6px;white-space:nowrap">'
-        +      '<button class="sec mini" data-i18nsave="'+esc(it.clave)+'">Guardar</button>'
-        +      btnReset
-        +    '</div>'
-        +  '</div>'
-        +'</div>';
-    }
-    cont.innerHTML=cab+html;
-  }
-  async function guardarI18n(clave){
-    var inp=document.querySelector('[data-i18nedit="'+clave+'"]');
-    if (!inp) return;
-    var msg=$('i18nMsg'); msg.textContent='Guardando…';
-    try {
-      await api('/operador/i18n','PUT',{idioma:$('i18nLang').value, clave:clave, valor:inp.value});
-      msg.innerHTML='<span class="ok">Guardado.</span>';
-      cargarI18n();
-    } catch(e){ msg.innerHTML='<span class="off">'+esc(e.message)+'</span>'; }
-  }
-  async function resetI18n(clave){
-    var msg=$('i18nMsg'); msg.textContent='…';
-    try {
-      await api('/operador/i18n?idioma='+encodeURIComponent($('i18nLang').value)+'&clave='+encodeURIComponent(clave),'DELETE');
-      msg.innerHTML='<span class="ok">Restablecido.</span>';
-      cargarI18n();
-    } catch(e){ msg.innerHTML='<span class="off">'+esc(e.message)+'</span>'; }
-  }
-
-  // Bootstrap: la sesión se resuelve por cookie (sess_op) vía /operador/yo. Sin sesión,
-  // iniciar() muestra el login (no recarga -> sin loop).
-  iniciar();
-</script>
+<div id="modal"></div>
+<script src="/operador.js"></script>
 </body>
 </html>

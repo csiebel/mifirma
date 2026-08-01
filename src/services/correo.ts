@@ -1,5 +1,5 @@
 import nodemailer from 'nodemailer';
-import { ownerDb } from '../db/owner';
+import { operadorDb } from '../db/pool';
 import { HttpError } from '../http/errors';
 import { cifrar, descifrar, enmascarar } from '../operador/cripto';
 
@@ -10,13 +10,19 @@ import { cifrar, descifrar, enmascarar } from '../operador/cripto';
 // Gmail: host smtp.gmail.com, puerto 465 (SSL). Requiere verificación en dos pasos
 // y una "contraseña de aplicación" de 16 caracteres (la contraseña normal no sirve).
 
-export const PRESET_GMAIL = { proveedor: 'gmail', host: 'smtp.gmail.com', puerto: 465, seguridad: 'ssl' as const };
+// Presets de los proveedores que usamos. `seguridad` toma los valores del CHECK
+// de la migración 014 —'tls' | 'starttls' | 'ninguna'—, no los de nodemailer:
+// el código venía escribiendo 'ssl', que la base rechaza. Un insert que viola un
+// CHECK sale como 500 sin decir qué columna, y el sintoma aparece recien cuando
+// alguien intenta entrar y no le llega el codigo.
+export const PRESET_GMAIL  = { proveedor: 'gmail',  host: 'smtp.gmail.com',   puerto: 465, seguridad: 'tls' as const };
+export const PRESET_ICLOUD = { proveedor: 'icloud', host: 'smtp.mail.me.com', puerto: 587, seguridad: 'starttls' as const };
 
 export interface DatosCorreo {
   proveedor?: string;
   host: string;
   puerto: number;
-  seguridad?: 'ssl' | 'starttls';
+  seguridad?: 'tls' | 'starttls' | 'ninguna';
   usuario: string;
   remitenteNombre: string;
   remitenteEmail: string;
@@ -24,7 +30,7 @@ export interface DatosCorreo {
 }
 
 async function fila() {
-  return ownerDb().selectFrom('correo_config').selectAll().executeTakeFirst();
+  return operadorDb().selectFrom('correo_config').selectAll().executeTakeFirst();
 }
 
 /** Config actual con la contraseña enmascarada (nunca en claro). null si no hay. */
@@ -58,21 +64,21 @@ export async function guardarCorreo(d: DatosCorreo) {
       proveedor: d.proveedor ?? existe.proveedor,
       host: d.host,
       puerto: d.puerto,
-      seguridad: d.seguridad ?? 'ssl',
+      seguridad: d.seguridad ?? 'tls',
       usuario: d.usuario,
       remitente_nombre: d.remitenteNombre,
       remitente_email: d.remitenteEmail,
     };
     if (d.password) set.password_cifrado = cifrar(d.password);
-    await ownerDb().updateTable('correo_config').set(set).where('id', '=', existe.id).execute();
+    await operadorDb().updateTable('correo_config').set(set).where('id', '=', existe.id).execute();
   } else {
-    await ownerDb()
+    await operadorDb()
       .insertInto('correo_config')
       .values({
         proveedor: d.proveedor ?? 'gmail',
         host: d.host,
         puerto: d.puerto,
-        seguridad: d.seguridad ?? 'ssl',
+        seguridad: d.seguridad ?? 'tls',
         usuario: d.usuario,
         remitente_nombre: d.remitenteNombre,
         remitente_email: d.remitenteEmail,
@@ -91,7 +97,7 @@ export async function setCorreoActivo(activo: boolean) {
   if (activo && !c.password_cifrado) {
     throw new HttpError(400, 'No se puede activar: falta la contraseña (App Password).');
   }
-  await ownerDb().updateTable('correo_config').set({ activa: activo }).where('id', '=', c.id).execute();
+  await operadorDb().updateTable('correo_config').set({ activa: activo }).where('id', '=', c.id).execute();
   return { ok: true };
 }
 
@@ -104,7 +110,7 @@ async function transporte() {
   const t = nodemailer.createTransport({
     host: c.host,
     port: Number(c.puerto),
-    secure: c.seguridad === 'ssl', // 465 = SSL (true); 587 = STARTTLS (false)
+    secure: c.seguridad === 'tls', // 465 = TLS directo (true); 587 = STARTTLS (false)
     auth: { user: c.usuario, pass },
   });
   return { t, from: `"${c.remitente_nombre}" <${c.remitente_email}>` };

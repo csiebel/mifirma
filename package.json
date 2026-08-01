@@ -12,6 +12,7 @@
     "provisionar": "tsx scripts/provisionar.ts",
     "set-password": "tsx scripts/set-password.ts",
     "operador": "tsx scripts/operador.ts",
+    "correo": "tsx scripts/correo.ts",
     "migrate": "for f in migrations/0*.sql; do psql \"$MIFIRMA_DB\" -v ON_ERROR_STOP=1 -q -f \"$f\" || break; done"
   },
   "dependencies": {

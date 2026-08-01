@@ -98,7 +98,7 @@ let _operadorDb: Kysely<DB> | null = null;
  * Ese límite lo verifica el test C4 y sólo existe si la conexión es otra.
  * Compartiendo pool con la app, el operador heredaría los permisos de `app_rw`.
  */
-function operadorDb(): Kysely<DB> {
+export function operadorDb(): Kysely<DB> {
   if (!_operadorDb) {
     const url = process.env.DATABASE_OPERADOR_URL;
     if (!url) {

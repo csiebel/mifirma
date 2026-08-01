@@ -26,7 +26,8 @@
       'crear.pais.p':'O país define qual lei e quais certificadores se aplicam. Não pode ser alterado depois.',
       'crear.razon':'Razão social','crear.opcional':'(opcional)',
       'crear.vos':'Seu usuário de administrador','crear.tuNombre':'Seu nome',
-      'crear.password':'Senha','crear.password.p':'Mínimo 12 caracteres.','crear.btn':'Criar a conta',
+      'crear.password':'Senha','crear.password.p':'Mínimo 12 caracteres. Não pedimos maiúsculas nem símbolos: o comprimento defende mais que as regras.',
+      'crear.repetir':'Repita a senha','crear.btn':'Criar a conta',
       'crear.v1':'Adicione sua equipe com um e-mail e atribua um papel.',
       'crear.v2':'Cada pasta define quem vê e quem pode enviar.',
       'crear.v3':'Quem assina seus documentos não precisa de conta.',
@@ -40,7 +41,8 @@
       'footer':'Assinatura eletrônica com validade jurídica','esperando':'Um momento…',
       'err.faltan':'Preencha o e-mail e a senha.','err.codigo':'O código tem 6 dígitos.',
       'err.correo':'Escreva seu e-mail.','err.noCoinciden':'As duas senhas precisam ser iguais.',
-      'err.corta':'Mínimo 12 caracteres.','err.crear':'Preencha o nome da empresa, seu nome, e-mail e senha.'
+      'err.corta':'Mínimo 12 caracteres.','err.crear':'Preencha o nome da empresa, seu nome, e-mail e senha.',
+      'ojo.ver':'Mostrar a senha','ojo.ocultar':'Ocultar a senha'
     },
     en: {
       'volver':'Back to site','volver2':'Back','correo':'Email','password':'Password',
@@ -60,7 +62,8 @@
       'crear.pais.p':'The country decides which law and which certifiers apply. It can’t be changed later.',
       'crear.razon':'Legal name','crear.opcional':'(optional)',
       'crear.vos':'Your administrator account','crear.tuNombre':'Your name',
-      'crear.password':'Password','crear.password.p':'At least 12 characters.','crear.btn':'Create the account',
+      'crear.password':'Password','crear.password.p':'At least 12 characters. We don\u2019t ask for capitals or symbols: length defends better than rules.',
+      'crear.repetir':'Repeat the password','crear.btn':'Create the account',
       'crear.v1':'Add your team with an email and give each one a role.',
       'crear.v2':'Each folder decides who can see and who can send.',
       'crear.v3':'People signing your documents don’t need an account.',
@@ -74,7 +77,8 @@
       'footer':'Electronic signature with legal validity','esperando':'One moment…',
       'err.faltan':'Fill in the email and password.','err.codigo':'The code has 6 digits.',
       'err.correo':'Type your email.','err.noCoinciden':'Both passwords must match.',
-      'err.corta':'At least 12 characters.','err.crear':'Fill in the company name, your name, email and password.'
+      'err.corta':'At least 12 characters.','err.crear':'Fill in the company name, your name, email and password.',
+      'ojo.ver':'Show the password','ojo.ocultar':'Hide the password'
     }
   };
 
@@ -88,7 +92,8 @@
     'np.ok':'Listo. Entrá con tu contraseña nueva.',
     'err.faltan':'Completá el correo y la contraseña.','err.codigo':'El código tiene 6 dígitos.',
     'err.correo':'Escribí tu correo.','err.noCoinciden':'Las dos contraseñas tienen que ser iguales.',
-    'err.corta':'Mínimo 12 caracteres.','err.crear':'Completá el nombre de la empresa, tu nombre, correo y contraseña.'
+    'err.corta':'Mínimo 12 caracteres.','err.crear':'Completá el nombre de la empresa, tu nombre, correo y contraseña.',
+    'ojo.ver':'Mostrar la contraseña','ojo.ocultar':'Ocultar la contraseña'
   });
 
   var LANG = 'es';
@@ -117,6 +122,43 @@
     var b = $(btn); b.disabled = si;
     if (si){ b.dataset.txt = b.textContent; b.textContent = t('esperando'); }
     else if (b.dataset.txt){ b.textContent = b.dataset.txt; }
+  }
+
+  /* -------------------------------------------------------------------------
+     El ojo para ver la contraseña.
+
+     Se inyecta por JS sobre CADA input[type=password] en vez de escribirlo en
+     el HTML cinco veces: así ninguna pantalla nueva se olvida de ponerlo.
+
+     No es una comodidad menor. Sin poder ver lo que escribe, la gente elige
+     contraseñas cortas y fáciles de tipear —justo lo contrario de lo que pide
+     una política de largo mínimo— y en el celular se equivoca y abandona.
+     ------------------------------------------------------------------------- */
+  var OJO = '<svg viewBox="0 0 24 24"><path d="M2 12s3.6-6.5 10-6.5S22 12 22 12s-3.6 6.5-10 6.5S2 12 2 12z"/><circle cx="12" cy="12" r="2.8"/></svg>';
+  var OJO_TACHADO = '<svg viewBox="0 0 24 24"><path d="M2 12s3.6-6.5 10-6.5c1.7 0 3.2.5 4.5 1.1M22 12s-3.6 6.5-10 6.5c-1.7 0-3.2-.5-4.5-1.1"/><path d="M9.9 9.9a3 3 0 004.2 4.2"/><path d="M3 3l18 18"/></svg>';
+
+  function ponerOjos(){
+    document.querySelectorAll('input[type=password]').forEach(function(inp){
+      if (inp.parentNode && inp.parentNode.classList.contains('pw')) return;
+      var caja = document.createElement('div');
+      caja.className = 'pw';
+      inp.parentNode.insertBefore(caja, inp);
+      caja.appendChild(inp);
+
+      var b = document.createElement('button');
+      b.type = 'button';                 // sin esto, dentro de un form envía
+      b.innerHTML = OJO;
+      b.setAttribute('aria-label', t('ojo.ver'));
+      b.dataset.ojo = '1';
+      b.addEventListener('click', function(){
+        var mostrar = inp.type === 'password';
+        inp.type = mostrar ? 'text' : 'password';
+        b.innerHTML = mostrar ? OJO_TACHADO : OJO;
+        b.setAttribute('aria-label', t(mostrar ? 'ojo.ocultar' : 'ojo.ver'));
+        inp.focus();
+      });
+      caja.appendChild(b);
+    });
   }
 
   // Identificador de equipo. Estable por navegador: es lo que permite no pedir
@@ -225,6 +267,11 @@
     if (!nombre || !admin.nombre || !admin.email || !admin.password) {
       return msg('msgCrear', t('err.crear'), 'err');
     }
+    // Repetirla no es burocracia: es la única red contra un error de tipeo en
+    // la contraseña del ADMINISTRADOR de la cuenta, que además todavía no tiene
+    // el correo verificado. Equivocarse acá es quedar afuera de la empresa que
+    // se acaba de crear.
+    if (admin.password !== $('cPass2').value) return msg('msgCrear', t('err.noCoinciden'), 'err');
     if (admin.password.length < 12) return msg('msgCrear', t('err.corta'), 'err');
 
     msg('msgCrear','',''); ocupado('btnCrear', true);
@@ -293,6 +340,7 @@
   var guardado; try{ guardado = localStorage.getItem('mf_lang'); }catch(e){}
   var nav = (navigator.language || 'es').slice(0,2);
   idioma(guardado || (T[nav] ? nav : 'es'));
+  ponerOjos();
   if (!leerHash()) ver('vLogin');
   window.addEventListener('hashchange', function(){ if (!leerHash()) ver('vLogin'); });
 })();

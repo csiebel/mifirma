@@ -2,7 +2,7 @@ import Decimal from 'decimal.js';
 import type { Transaction } from 'kysely';
 import type { DB } from '../db/schema';
 import { withUsuario } from '../auth/authz';
-import { ownerDb } from '../db/owner';
+import { operadorDb } from '../db/pool';
 import { HttpError } from '../http/errors';
 
 // =============================================================================
@@ -158,13 +158,13 @@ export async function costoIaPeriodo(
 }
 
 // =============================================================================
-// CRUD de tarifas de IA (catálogo de plataforma, lo mantiene el operador con ownerDb).
+// CRUD de tarifas de IA (catálogo de plataforma, lo mantiene el operador con operadorDb).
 // Versionado por fecha: al guardar una tarifa nueva de un modelo, se cierra la vigencia
 // de la anterior. Nunca se edita una tarifa pasada (queda como histórico).
 // =============================================================================
 
 export async function listarTarifasIa() {
-  const tarifas = await ownerDb()
+  const tarifas = await operadorDb()
     .selectFrom('tarifa_ia')
     .select([
       'id',
@@ -193,7 +193,7 @@ export async function guardarTarifaIa(d: {
       ? d.vigenteDesde
       : new Date().toISOString().slice(0, 10);
   const anterior = new Date(new Date(desde).getTime() - 86400000).toISOString().slice(0, 10);
-  return ownerDb()
+  return operadorDb()
     .transaction()
     .execute(async (trx) => {
       // Cerrar la versión vigente anterior del mismo modelo (si la hay).
@@ -218,7 +218,7 @@ export async function guardarTarifaIa(d: {
 }
 
 export async function eliminarTarifaIa(id: string) {
-  const r = await ownerDb().deleteFrom('tarifa_ia').where('id', '=', id).executeTakeFirst();
+  const r = await operadorDb().deleteFrom('tarifa_ia').where('id', '=', id).executeTakeFirst();
   if (Number(r.numDeletedRows) === 0) throw new HttpError(404, 'Tarifa no encontrada.');
   return { ok: true };
 }
@@ -239,7 +239,7 @@ export async function setOverrideIaEmpresa(
   if (c.iaMargenPct !== undefined) set.ia_margen_pct = c.iaMargenPct === null ? null : String(c.iaMargenPct);
   if (c.iaIncluido !== undefined) set.ia_incluido = c.iaIncluido === null ? null : String(c.iaIncluido);
   if (Object.keys(set).length === 0) return { ok: true };
-  const r = await ownerDb()
+  const r = await operadorDb()
     .updateTable('suscripcion')
     .set(set)
     .where('cuenta_id', '=', cuentaId)

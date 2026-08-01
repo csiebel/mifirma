@@ -3,12 +3,12 @@
 # Requiere psql en el PATH.
 #
 # Uso:
-#   DATABASE_OWNER_URL=postgres://mifirma_owner:...@host:5432/mifirma ./scripts/migrar.sh
+#   MIFIRMA_DB=postgresql://postgres:...@host:puerto/mifirma ./scripts/migrar.sh
 set -euo pipefail
-: "${DATABASE_OWNER_URL:?Falta DATABASE_OWNER_URL}"
+: "${MIFIRMA_DB:?Falta MIFIRMA_DB}"
 cd "$(dirname "$0")/.."
 for f in migrations/*.sql; do
   echo ">> aplicando $f"
-  psql "$DATABASE_OWNER_URL" -v ON_ERROR_STOP=1 -f "$f"
+  psql "$MIFIRMA_DB" -v ON_ERROR_STOP=1 -f "$f"
 done
 echo "Migraciones OK."

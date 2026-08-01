@@ -47,6 +47,29 @@ import {
   editarIndustria,
   borrarIndustria,
 } from '../../services/industrias';
+import {
+  verCorreo,
+  guardarCorreo,
+  setCorreoActivo,
+  enviarPrueba,
+  PRESET_GMAIL,
+  PRESET_ICLOUD,
+} from '../../services/correo';
+import {
+  verTwilio,
+  guardarTwilio,
+  setTwilioActivo,
+  enviarPruebaTwilio,
+} from '../../services/twilio';
+import {
+  listarPlanes,
+  historialPrecios,
+  crearPlan,
+  editarPlan,
+  borrarPlan,
+  setPrecio,
+  bajaPrecio,
+} from '../../services/planes';
 
 // Autenticación de la consola: sesión de operador (JWT propio). El login con
 // usuario/contraseña la emite; cada acción exige el privilegio que corresponde.
@@ -63,68 +86,8 @@ function exigirSuperadmin(s: SesionOperador) {
 
 const loginSchema = z.object({ usuario: z.string().min(1), password: z.string().min(1) });
 
-const franjaSchema = z.object({
-  desde: z.coerce.number().int().min(0),
-  hasta: z.coerce.number().int().min(0).nullable().optional(),
-  precio: z.coerce.number().min(0),
-});
 
-const crearPlanSchema = z.object({
-  codigo: z.string().min(1).regex(/^[a-z0-9_-]+$/i, 'Solo letras, números, guion y guion bajo.'),
-  nombre: z.string().min(1),
-  modo_precio: z.enum(['fijo', 'por_funcionario']).optional(),
-  precio_fijo: z.coerce.number().min(0).optional(),
-  precio_por_funcionario: z.coerce.number().min(0).optional(),
-  funcionarios_gratis: z.coerce.number().int().min(0).optional(),
-  periodo: z.enum(['mensual', 'semestral', 'anual']).optional(),
-  vigente_desde: z.string().optional(),
-  asistente_ia: z.boolean().optional(),
-  ia_cobra: z.boolean().optional(),
-  ia_margen_pct: z.coerce.number().min(0).optional(),
-  ia_incluido: z.coerce.number().min(0).optional(),
-  tramos: z.array(franjaSchema).optional(),
-});
-const editarPlanSchema = z.object({
-  nombre: z.string().min(1).optional(),
-  modo_precio: z.enum(['fijo', 'por_funcionario']).optional(),
-  precio_fijo: z.coerce.number().min(0).optional(),
-  precio_por_funcionario: z.coerce.number().min(0).optional(),
-  funcionarios_gratis: z.coerce.number().int().min(0).optional(),
-  periodo: z.enum(['mensual', 'semestral', 'anual']).optional(),
-  activo: z.boolean().optional(),
-  vigente_hasta: z.string().nullable().optional(),
-  asistente_ia: z.boolean().optional(),
-  ia_cobra: z.boolean().optional(),
-  ia_margen_pct: z.coerce.number().min(0).optional(),
-  ia_incluido: z.coerce.number().min(0).optional(),
-  tramos: z.array(franjaSchema).optional(),
-});
-const suscSchema = z.object({
-  plan_codigo: z.string().min(1),
-  estado: z.enum(['prueba', 'activa', 'suspendida', 'cancelada']).optional(),
-});
-const factSchema = z.object({ periodo: z.string().regex(/^[0-9]{4}-(0[1-9]|1[0-2])$/, 'Formato YYYY-MM.') });
 
-const crearPlanEstudioSchema = z.object({
-  codigo: z.string().min(1).regex(/^[a-z0-9_-]+$/i, 'Solo letras, números, guion y guion bajo.'),
-  nombre: z.string().min(1),
-  precio_por_empresa: z.coerce.number().min(0).optional(),
-  empresas_gratis: z.coerce.number().int().min(0).optional(),
-  limite_empresas: z.coerce.number().int().min(0).nullable().optional(),
-  periodo: z.enum(['mensual', 'semestral', 'anual']).optional(),
-  vigente_desde: z.string().optional(),
-  tramos: z.array(franjaSchema).optional(),
-});
-const editarPlanEstudioSchema = z.object({
-  nombre: z.string().min(1).optional(),
-  precio_por_empresa: z.coerce.number().min(0).optional(),
-  empresas_gratis: z.coerce.number().int().min(0).optional(),
-  limite_empresas: z.coerce.number().int().min(0).nullable().optional(),
-  periodo: z.enum(['mensual', 'semestral', 'anual']).optional(),
-  activo: z.boolean().optional(),
-  vigente_hasta: z.string().nullable().optional(),
-  tramos: z.array(franjaSchema).optional(),
-});
 
 const crearOpSchema = z.object({
   usuario: z.string().min(1),
@@ -147,11 +110,23 @@ const guardarPasarelaSchema = z.object({
   webhook_secret: z.string().optional(),
 });
 
+// Plan comercial de MiFirma. Los textos son por idioma: el operador escribe en
+// el que quiera y la web muestra el del visitante, con castellano de respaldo.
+const planSchema = z.object({
+  nombre_i18n: z.record(z.string()),
+  descripcion_i18n: z.record(z.string()).optional(),
+  incluye_i18n: z.record(z.array(z.string())).optional(),
+  activo: z.boolean().optional(),
+  publico: z.boolean().optional(),
+  destacado: z.boolean().optional(),
+  orden: z.coerce.number().int().min(0).optional(),
+});
+
 const guardarCorreoSchema = z.object({
   proveedor: z.string().optional(),
   host: z.string().min(1),
   puerto: z.coerce.number().int().min(1).max(65535),
-  seguridad: z.enum(['ssl', 'starttls']).optional(),
+  seguridad: z.enum(['tls', 'starttls', 'ninguna']).optional(),
   usuario: z.string().min(1),
   remitente_nombre: z.string().min(1),
   remitente_email: z.string().email(),
@@ -183,7 +158,68 @@ export function registrarRutasOperador(app: FastifyInstance) {
     return cambiarPasswordOperador(s.operadorId, b.actual, b.nueva);
   });
 
-  // ---- Planes (config comercial global) ----
+  // ---- Planes y precios (parametría comercial global) ----
+  //
+  // El plan se define una vez; el precio se carga por país. Un plan sin precio
+  // en un país no se ofrece ahí, y eso ES el mecanismo para abrir o cerrar un
+  // país: no hay ninguna tabla de "países habilitados" que mantener en sincronía.
+  app.get('/operador/planes', async (req) => {
+    const s = await sesion(req);
+    exigirCap(s, 'gestionar_planes');
+    return listarPlanes(s.operadorId);
+  });
+
+  app.get('/operador/planes/:id/historial', async (req) => {
+    const s = await sesion(req);
+    exigirCap(s, 'gestionar_planes');
+    const { id } = z.object({ id: z.string().uuid() }).parse(req.params);
+    return historialPrecios(s.operadorId, id);
+  });
+
+  app.post('/operador/planes', async (req) => {
+    const s = await sesion(req);
+    exigirCap(s, 'gestionar_planes');
+    const b = planSchema.extend({ codigo: z.string().min(1).max(40) }).parse(req.body);
+    return crearPlan(s.operadorId, b.codigo, b);
+  });
+
+  app.put('/operador/planes/:id', async (req) => {
+    const s = await sesion(req);
+    exigirCap(s, 'gestionar_planes');
+    const { id } = z.object({ id: z.string().uuid() }).parse(req.params);
+    return editarPlan(s.operadorId, id, planSchema.parse(req.body));
+  });
+
+  app.delete('/operador/planes/:id', async (req) => {
+    const s = await sesion(req);
+    exigirCap(s, 'gestionar_planes');
+    const { id } = z.object({ id: z.string().uuid() }).parse(req.params);
+    return borrarPlan(s.operadorId, id);
+  });
+
+  app.put('/operador/precios', async (req) => {
+    const s = await sesion(req);
+    exigirCap(s, 'gestionar_planes');
+    const b = z
+      .object({
+        plan_id: z.string().uuid(),
+        pais: z.string().length(2),
+        moneda: z.string().length(3),
+        metrica: z.string().min(1),
+        nivel_firma: z.string().nullable().optional(),
+        precio: z.coerce.number().min(0),
+      })
+      .parse(req.body);
+    return setPrecio(s.operadorId, b);
+  });
+
+  app.delete('/operador/precios/:id', async (req) => {
+    const s = await sesion(req);
+    exigirCap(s, 'gestionar_planes');
+    const { id } = z.object({ id: z.string().uuid() }).parse(req.params);
+    return bajaPrecio(s.operadorId, id);
+  });
+
 
 
   // ---- Tarifas de IA (catálogo) + override de IA por empresa ----
@@ -402,8 +438,99 @@ export function registrarRutasOperador(app: FastifyInstance) {
   });
 
   // --- Conexión de correo saliente (plataforma) ---
+  //
+  // Una sola casilla manda por todas las cuentas. Sin esto no sale ni un código
+  // de acceso: el segundo factor del login viaja por correo.
+  //
+  // La contraseña nunca vuelve por HTTP —`verCorreo` devuelve una máscara— y
+  // guardar sin contraseña deja la que había. Así se puede corregir el host sin
+  // tener que volver a escribir la credencial ni exponerla en la pantalla.
+  app.get('/operador/correo', async (req) => {
+    const s = await sesion(req);
+    exigirCap(s, 'gestionar_mensajeria');
+    const r = await verCorreo();
+    return { ...r, presets: { gmail: PRESET_GMAIL, icloud: PRESET_ICLOUD } };
+  });
+
+  app.post('/operador/correo', async (req) => {
+    const s = await sesion(req);
+    exigirCap(s, 'gestionar_mensajeria');
+    const b = guardarCorreoSchema.parse(req.body);
+    return guardarCorreo({
+      proveedor: b.proveedor,
+      host: b.host,
+      puerto: b.puerto,
+      seguridad: b.seguridad,
+      usuario: b.usuario,
+      remitenteNombre: b.remitente_nombre,
+      remitenteEmail: b.remitente_email,
+      password: b.password,
+    });
+  });
+
+  app.patch('/operador/correo', async (req) => {
+    const s = await sesion(req);
+    exigirCap(s, 'gestionar_mensajeria');
+    const { activo } = z.object({ activo: z.boolean() }).parse(req.body);
+    return setCorreoActivo(activo);
+  });
+
+  app.post('/operador/correo/prueba', async (req) => {
+    const s = await sesion(req);
+    exigirCap(s, 'gestionar_mensajeria');
+    const { para } = z.object({ para: z.string().email() }).parse(req.body);
+    return enviarPrueba(para);
+  });
+
 
   // --- Conexión de Twilio (SMS / WhatsApp para OTP de login) ---
+  //
+  // Es opcional: sin Twilio el código sale por correo igual. Con Twilio, quien
+  // tenga teléfono cargado elige por dónde recibirlo — y un SMS llega donde un
+  // correo a veces no.
+  app.get('/operador/twilio', async (req) => {
+    const s = await sesion(req);
+    exigirCap(s, 'gestionar_mensajeria');
+    return verTwilio();
+  });
+
+  app.post('/operador/twilio', async (req) => {
+    const s = await sesion(req);
+    exigirCap(s, 'gestionar_mensajeria');
+    const b = z
+      .object({
+        account_sid: z.string().min(1),
+        auth_token: z.string().optional(),
+        from_sms: z.string().optional(),
+        from_whatsapp: z.string().optional(),
+        wa_content_sid: z.string().optional(),
+      })
+      .parse(req.body);
+    return guardarTwilio({
+      accountSid: b.account_sid,
+      authToken: b.auth_token,
+      fromSms: b.from_sms,
+      fromWhatsapp: b.from_whatsapp,
+      waContentSid: b.wa_content_sid,
+    });
+  });
+
+  app.patch('/operador/twilio', async (req) => {
+    const s = await sesion(req);
+    exigirCap(s, 'gestionar_mensajeria');
+    const { activo } = z.object({ activo: z.boolean() }).parse(req.body);
+    return setTwilioActivo(activo);
+  });
+
+  app.post('/operador/twilio/prueba', async (req) => {
+    const s = await sesion(req);
+    exigirCap(s, 'gestionar_mensajeria');
+    const b = z
+      .object({ canal: z.enum(['sms', 'whatsapp']), telefono: z.string().min(6) })
+      .parse(req.body);
+    return enviarPruebaTwilio(b.canal, b.telefono);
+  });
+
 
   // Diccionario de etiquetas editable (global del operador).
 

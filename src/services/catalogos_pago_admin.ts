@@ -1,11 +1,11 @@
-import { ownerDb } from '../db/owner';
+import { operadorDb } from '../db/pool';
 import { HttpError } from '../http/errors';
 
 // =============================================================================
 // CRUD de los catálogos de pago (banco y tipo de cuenta bancaria) para el operador.
 // Son catálogos de plataforma por país (los mismos que la empresa elige al cargar un
 // medio de pago). Hasta ahora venían solo con seed + lectura; esto permite mantenerlos
-// desde la consola del operador. Usan ownerDb (no llevan RLS: son compartidos por país).
+// desde la consola del operador. Usan operadorDb (no llevan RLS: son compartidos por país).
 //
 // Las dos tablas tienen la misma forma (id, pais, nombre, activo, orden), así que se
 // manejan con funciones genéricas parametrizadas por la tabla.
@@ -19,7 +19,7 @@ function tablaValida(t: string): TablaCatalogoPago {
 }
 
 export async function listarCatalogoPagoAdmin(tabla: TablaCatalogoPago, pais?: string) {
-  let q = ownerDb()
+  let q = operadorDb()
     .selectFrom(tabla)
     .select(['id', 'pais', 'nombre', 'activo', 'orden']);
   if (pais) q = q.where('pais', '=', pais.trim().toUpperCase());
@@ -35,12 +35,12 @@ export async function crearCatalogoPago(
   const nombre = (d.nombre || '').trim();
   if (!pais || !nombre) throw new HttpError(400, 'País y nombre son obligatorios.');
   if (tabla === 'banco') {
-    await ownerDb().insertInto('banco').values({ pais, nombre, orden: d.orden ?? 0 }).execute();
+    await operadorDb().insertInto('banco').values({ pais, nombre, orden: d.orden ?? 0 }).execute();
   } else {
     // El tipo de cuenta es catálogo nuestro y se muestra traducido; el nombre de
     // un banco, no: "Banco República" es "Banco República" en portugués.
     const codigo = nombre.toLowerCase().replace(/[^a-z0-9]+/g, '_');
-    await ownerDb()
+    await operadorDb()
       .insertInto('tipo_cuenta_bancaria')
       .values({ pais, codigo, nombre_i18n: JSON.stringify({ es: nombre }), orden: d.orden ?? 0 })
       .execute();
@@ -58,13 +58,13 @@ export async function editarCatalogoPago(
   if (c.activo !== undefined) set.activo = c.activo;
   if (c.orden !== undefined) set.orden = c.orden;
   if (Object.keys(set).length === 0) return { ok: true };
-  const r = await ownerDb().updateTable(tabla).set(set).where('id', '=', id).executeTakeFirst();
+  const r = await operadorDb().updateTable(tabla).set(set).where('id', '=', id).executeTakeFirst();
   if (Number(r.numUpdatedRows) === 0) throw new HttpError(404, 'No encontrado.');
   return { ok: true };
 }
 
 export async function eliminarCatalogoPago(tabla: TablaCatalogoPago, id: string) {
-  const r = await ownerDb().deleteFrom(tabla).where('id', '=', id).executeTakeFirst();
+  const r = await operadorDb().deleteFrom(tabla).where('id', '=', id).executeTakeFirst();
   if (Number(r.numDeletedRows) === 0) throw new HttpError(404, 'No encontrado.');
   return { ok: true };
 }

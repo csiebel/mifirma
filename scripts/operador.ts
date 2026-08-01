@@ -1,6 +1,6 @@
 import 'dotenv/config';
 import { crearSuperadmin, listarOperadores, resetPasswordOperadorPorUsuario } from '../src/services/operadores';
-import { cerrarOwnerPool } from '../src/db/owner';
+import { cerrarPool } from '../src/db/pool';
 
 // Arranque en frío de la consola de operador:
 //   Crear el primer superadmin:  npm run operador -- crear-superadmin <usuario> <password> "<nombre>"
@@ -33,4 +33,4 @@ main()
     console.error('Error:', e.message);
     process.exitCode = 1;
   })
-  .finally(() => cerrarOwnerPool());
+  .finally(() => cerrarPool());
