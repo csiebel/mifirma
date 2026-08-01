@@ -1,8 +1,5 @@
 import type { FastifyInstance } from 'fastify';
 import { z } from 'zod';
-import { generarReciboPDF, previewReciboPDF } from '../../services/recibo_pdf';
-import { verPlantilla, guardarPlantilla, restablecerPlantilla } from '../../services/recibo_plantilla';
-import { enviarReciboUno, enviarRecibosCorrida } from '../../services/envio_recibos';
 import { registrarSesion } from '../../services/auditoria';
 import * as branding from '../../services/branding';
 import { verConfigFirma, setConfigFirma } from '../../services/firma';
@@ -15,32 +12,10 @@ const PERIODO = z.string().regex(/^[0-9]{4}-(0[1-9]|1[0-2])$/);
 // y, en el caso del recibo, por el RLS de `recibo` (alcance jerárquico).
 export function registrarRutasDocumentos(app: FastifyInstance) {
   // Recibo en PDF. Si el usuario no puede ver ese recibo (alcance), da 404.
-  app.get('/recibos/:relacionId/pdf', async (req, reply) => {
-    const { relacionId } = z.object({ relacionId: z.string().uuid() }).parse(req.params);
-    const { periodo } = z.object({ periodo: PERIODO }).parse(req.query);
-    const { cuentaId, usuarioId } = req.identidad;
-    const { buffer, filename } = await generarReciboPDF(cuentaId, usuarioId, relacionId, periodo);
-    await registrarSesion(cuentaId, usuarioId, { accion: 'recibo.ver_pdf', recurso: 'recibo', objetoId: relacionId, detalle: { periodo } });
-    reply.header('Content-Type', 'application/pdf');
-    reply.header('Content-Disposition', `inline; filename="${filename}"`);
-    reply.header('Cache-Control', 'no-store');
-    return reply.send(buffer);
-  });
 
   // Enviar UN recibo por correo (al email del empleado). La corrida debe estar emitida.
-  app.post('/recibos/:relacionId/enviar', async (req) => {
-    const { relacionId } = z.object({ relacionId: z.string().uuid() }).parse(req.params);
-    const { periodo } = z.object({ periodo: PERIODO }).parse(req.query);
-    const { cuentaId, usuarioId } = req.identidad;
-    return enviarReciboUno(cuentaId, usuarioId, relacionId, periodo);
-  });
 
   // Enviar TODOS los recibos de una corrida emitida (envío masivo).
-  app.post('/corridas/:id/enviar', async (req) => {
-    const { id } = z.object({ id: z.string().uuid() }).parse(req.params);
-    const { cuentaId, usuarioId } = req.identidad;
-    return enviarRecibosCorrida(cuentaId, usuarioId, id);
-  });
 
   // Logo de la empresa (imagen). La consola lo baja con el token y lo muestra.
   app.get('/empresa/logo', async (req, reply) => {
@@ -108,26 +83,6 @@ export function registrarRutasDocumentos(app: FastifyInstance) {
   });
 
   // Plantilla del recibo (presentacional, por empresa). Gateada en el servicio (admin).
-  app.get('/recibo-plantilla', async (req) => {
-    const { cuentaId, usuarioId } = req.identidad;
-    return verPlantilla(cuentaId, usuarioId);
-  });
-  app.put('/recibo-plantilla', async (req) => {
-    const { cuentaId, usuarioId } = req.identidad;
-    return guardarPlantilla(cuentaId, usuarioId, req.body);
-  });
-  app.delete('/recibo-plantilla', async (req) => {
-    const { cuentaId, usuarioId } = req.identidad;
-    return restablecerPlantilla(cuentaId, usuarioId);
-  });
 
   // Vista previa: PDF de muestra con la plantilla en edición (no guardada).
-  app.post('/recibo-plantilla/preview', async (req, reply) => {
-    const { cuentaId, usuarioId } = req.identidad;
-    const { buffer, filename } = await previewReciboPDF(cuentaId, usuarioId, req.body);
-    reply.header('Content-Type', 'application/pdf');
-    reply.header('Content-Disposition', `inline; filename="${filename}"`);
-    reply.header('Cache-Control', 'no-store');
-    return reply.send(buffer);
-  });
 }

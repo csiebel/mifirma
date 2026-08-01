@@ -2,7 +2,6 @@ import type { FastifyInstance } from 'fastify';
 import { z } from 'zod';
 import { getAyudas } from '../../ayuda/textos';
 import { getI18nConOverrides } from '../../services/traducciones';
-import { marcoLaboral } from '../../services/marco';
 
 // /ayudas y /i18n son PÚBLICOS (texto de interfaz, no sensible): los consumen
 // tanto la consola como el sitio. /marco-laboral requiere token: resuelve el
@@ -18,8 +17,4 @@ export function registrarRutasAyuda(app: FastifyInstance) {
     return getAyudas(idioma);
   });
 
-  app.get('/marco-laboral', async (req) => {
-    const { cuentaId, usuarioId } = req.identidad;
-    return marcoLaboral(cuentaId, usuarioId);
-  });
 }

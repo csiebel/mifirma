@@ -6,8 +6,6 @@ import type { FastifyInstance } from 'fastify';
 // Sin DB: los handlers mutantes elegidos validan con zod ANTES de tocar la base, así que
 // con payload vacío devuelven 400 sin conectarse — suficiente para ejercitar el hook de CSRF.
 import { construirServidor } from '../src/server';
-import { emitirTokenOferente } from '../src/oferente/sesion';
-import { emitirTokenEstudio } from '../src/estudio/sesion';
 import { emitirTokenOperador } from '../src/operador/sesion';
 import { emitirTokenDev } from '../src/auth/identity';
 
@@ -59,29 +57,7 @@ async function casosCsrf(t: TestContext, app: FastifyInstance, cfg: CfgRealm): P
   });
 }
 
-test('CSRF Fase B (double-submit + Origin) — realm oferente', async (t) => {
-  const app = construirServidor();
-  await app.ready();
-  const sess = await emitirTokenOferente({
-    usuarioOferenteId: '00000000-0000-0000-0000-000000000001',
-    oferenteId: '00000000-0000-0000-0000-000000000002',
-    esAdmin: true, nombre: 'Test', email: 't@e',
-  });
-  await casosCsrf(t, app, { ruta: '/oferente/eventos', sessCookie: 'sess_ofe', csrfCookie: 'csrf_ofe', sess });
-  await app.close();
-});
 
-test('CSRF Fase B (double-submit + Origin) — realm estudio', async (t) => {
-  const app = construirServidor();
-  await app.ready();
-  const sess = await emitirTokenEstudio({
-    usuarioEstudioId: '00000000-0000-0000-0000-000000000011',
-    estudioId: '00000000-0000-0000-0000-000000000012',
-    esAdmin: true, nombre: 'Test', email: 't@e',
-  });
-  await casosCsrf(t, app, { ruta: '/estudio/contadores', sessCookie: 'sess_est', csrfCookie: 'csrf_est', sess });
-  await app.close();
-});
 
 test('CSRF Fase B (double-submit + Origin) — realm empresa', async (t) => {
   const app = construirServidor();

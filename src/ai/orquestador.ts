@@ -1,6 +1,5 @@
 import Anthropic from '@anthropic-ai/sdk';
 import { withUsuario } from '../auth/authz';
-import * as consultas from '../repositories/consultas';
 import { HERRAMIENTAS, ejecutarHerramienta } from './herramientas';
 import { asistenteHabilitado, registrarConsumoIA } from '../services/consumo_ia';
 
@@ -50,13 +49,7 @@ export async function responder(
 
   const client = new Anthropic({ apiKey });
 
-  // Identidad propia del usuario (para resolver "mi recibo").
-  const yo = await withUsuario(cuentaId, usuarioId, async (trx, autz) =>
-    autz.relacionPropia ? consultas.relacionDe(trx, autz.relacionPropia) : null,
-  );
-  const sistema = yo
-    ? `${SISTEMA}\n\nEl usuario actual es ${yo.nombre} (su relacion_id es ${yo.relacion_id}). Cuando pregunte por "mi" o "mío", usá ese relacion_id.`
-    : SISTEMA;
+  const sistema = SISTEMA;
 
   const messages: Anthropic.MessageParam[] = [{ role: 'user', content: pregunta }];
   const periodo = new Date().toISOString().slice(0, 7); // 'YYYY-MM'

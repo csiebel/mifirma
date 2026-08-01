@@ -388,6 +388,7 @@ export function construirServidor(): FastifyInstance {
   registrarRutasAyuda(app);
   registrarRutasDocumentos(app);
   registrarRutasMi(app);
+  registrarRutasFacturas(app);
 
   app.setErrorHandler((err, _req, reply) => {
     if (err instanceof ZodError) {

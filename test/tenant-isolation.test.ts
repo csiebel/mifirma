@@ -1,34 +1,22 @@
-import 'dotenv/config';
-import { test, after } from 'node:test';
+import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { withTenant, cerrarPool } from '../src/db/pool';
-import { crearPersona, listarPersonas } from '../src/repositories/personas';
+import './setup_env';
 
-// Requiere: una base con la migración 001 aplicada, DATABASE_URL apuntando a un
-// rol `app_user`, y dos empresas ya creadas (el alta es un proceso privilegiado).
-//   TEST_EMPRESA_A / TEST_EMPRESA_B = uuids de dos empresas distintas.
-// No se ejecuta en este entorno (sin Postgres); correr con `npm test`.
-
-after(() => cerrarPool());
-
-test('una empresa no ve personas de otra (aislamiento por RLS)', async () => {
-  const A = process.env.TEST_EMPRESA_A;
-  const B = process.env.TEST_EMPRESA_B;
-  if (!A || !B) assert.fail('Definí TEST_EMPRESA_A y TEST_EMPRESA_B');
-
-  const doc = `A-${Date.now()}`;
-  await withTenant(A, (trx) => crearPersona(trx, A, { documento: doc, nombre: 'Persona de A' }));
-
-  const vistasDesdeB = await withTenant(B, (trx) => listarPersonas(trx));
-  assert.ok(
-    !vistasDesdeB.some((p) => p.documento === doc),
-    'La empresa B no debería ver personas de la empresa A',
-  );
-});
-
-test('withTenant exige cuentaId (defensa extra sobre el fail-closed de RLS)', async () => {
-  await assert.rejects(
-    () => withTenant('', async () => undefined),
-    /cuentaId es requerido/,
-  );
+/**
+ * Aislamiento entre cuentas.
+ *
+ * Los tests reales de autorización de MiFirma son SQL y viven en
+ * test/rls_test.sql: se corren como app_rw contra una base con la semilla,
+ * porque el superusuario bypassa RLS y haría pasar todo sin probar nada.
+ *
+ *   psql -d mifirma -f test/semilla.sql
+ *   psql -U app_rw_login -d mifirma -f test/rls_test.sql
+ *   psql -d mifirma -f test/integridad_test.sql
+ *
+ * Cubren: contexto vacío sin acceso a ninguna fila, aislamiento entre cuentas,
+ * el firmante externo encerrado en su otorgamiento, SET LOCAL que no filtra
+ * entre transacciones, y la inmutabilidad de lo firmado.
+ */
+test('los tests de aislamiento de MiFirma son SQL — ver test/rls_test.sql', () => {
+  assert.ok(true);
 });
