@@ -3,18 +3,7 @@ import { z } from 'zod';
 import { HttpError } from '../errors';
 import { clearCookieSesion } from '../cookies_sesion';
 import { verificarTokenOperador, type SesionOperador } from '../../operador/sesion';
-import { listarAuditoriaOperador } from '../../services/auditoria';
-import {
-  listarPlanes,
-  crearPlan,
-  editarPlan,
-  eliminarPlan,
-  listarEmpresasConPlan,
-  suscribir,
-  facturarPeriodo,
-  marcarFacturaPagada,
-  facturasDeEmpresa,
-} from '../../services/facturacion';
+import { listarBitacoraOperador } from '../../services/auditoria';
 import {
   listarTarifasIa,
   guardarTarifaIa,
@@ -52,14 +41,6 @@ import {
   setIntegracionFacturacionActiva,
 } from '../../services/integracion_facturacion';
 import { asistirOperador } from '../../services/asistente_operador';
-import {
-  listarFirmaProveedores,
-  crearFirmaProveedor,
-  editarFirmaProveedor,
-  setFirmaProveedorActivo,
-  setFirmaProveedorIntegrado,
-  borrarFirmaProveedor,
-} from '../../services/firma';
 import {
   listarIndustrias,
   crearIndustria,
@@ -209,60 +190,7 @@ export function registrarRutasOperador(app: FastifyInstance) {
   });
 
   // ---- Planes (config comercial global) ----
-  app.get('/operador/planes', async (req) => {
-    await sesion(req);
-    return listarPlanes();
-  });
-  app.post('/operador/planes', async (req) => {
-    const s = await sesion(req);
-    exigirCap(s, 'gestionar_planes');
-    const b = crearPlanSchema.parse(req.body);
-    return crearPlan({
-      codigo: b.codigo,
-      nombre: b.nombre,
-      moneda: b.moneda,
-      modoPrecio: b.modo_precio,
-      precioFijo: b.precio_fijo,
-      precioPorFuncionario: b.precio_por_funcionario,
-      funcionariosGratis: b.funcionarios_gratis,
-      periodo: b.periodo,
-      vigenteDesde: b.vigente_desde,
-      asistenteIa: b.asistente_ia,
-      iaCobra: b.ia_cobra,
-      iaMargenPct: b.ia_margen_pct,
-      iaIncluido: b.ia_incluido,
-      tramos: b.tramos?.map((t) => ({ desde: t.desde, hasta: t.hasta ?? null, precio: t.precio })),
-    });
-  });
-  app.patch('/operador/planes/:codigo', async (req) => {
-    const s = await sesion(req);
-    exigirCap(s, 'gestionar_planes');
-    const { codigo } = req.params as { codigo: string };
-    const b = editarPlanSchema.parse(req.body);
-    return editarPlan(codigo, {
-      nombre: b.nombre,
-      moneda: b.moneda,
-      modoPrecio: b.modo_precio,
-      precioFijo: b.precio_fijo,
-      precioPorFuncionario: b.precio_por_funcionario,
-      funcionariosGratis: b.funcionarios_gratis,
-      periodo: b.periodo,
-      activo: b.activo,
-      vigenteHasta: b.vigente_hasta,
-      asistenteIa: b.asistente_ia,
-      iaCobra: b.ia_cobra,
-      iaMargenPct: b.ia_margen_pct,
-      iaIncluido: b.ia_incluido,
-      tramos: b.tramos?.map((t) => ({ desde: t.desde, hasta: t.hasta ?? null, precio: t.precio })),
-    });
-  });
 
-  app.delete('/operador/planes/:codigo', async (req) => {
-    const s = await sesion(req);
-    exigirCap(s, 'gestionar_planes');
-    const { codigo } = req.params as { codigo: string };
-    return eliminarPlan(codigo);
-  });
 
   // ---- Tarifas de IA (catálogo) + override de IA por empresa ----
   app.get('/operador/tarifas-ia', async (req) => {
@@ -350,35 +278,6 @@ export function registrarRutasOperador(app: FastifyInstance) {
   // ---- Estudios (planes + cartera) ----
 
   // ---- Empresas (cartera) ----
-  app.get('/operador/empresas', async (req) => {
-    await sesion(req);
-    return listarEmpresasConPlan();
-  });
-  app.post('/operador/empresas/:id/suscripcion', async (req) => {
-    const s = await sesion(req);
-    exigirCap(s, 'gestionar_empresas');
-    const { id } = req.params as { id: string };
-    const b = suscSchema.parse(req.body);
-    return suscribir(id, b.plan_codigo, b.estado);
-  });
-  app.post('/operador/empresas/:id/facturar', async (req) => {
-    const s = await sesion(req);
-    exigirCap(s, 'gestionar_empresas');
-    const { id } = req.params as { id: string };
-    const b = factSchema.parse(req.body);
-    return facturarPeriodo(id, b.periodo);
-  });
-  app.get('/operador/empresas/:id/facturas', async (req) => {
-    await sesion(req);
-    const { id } = req.params as { id: string };
-    return facturasDeEmpresa(id);
-  });
-  app.post('/operador/empresas/:id/facturas/:periodo/pagar', async (req) => {
-    const s = await sesion(req);
-    exigirCap(s, 'gestionar_empresas');
-    const { id, periodo } = req.params as { id: string; periodo: string };
-    return marcarFacturaPagada(id, periodo);
-  });
 
   // Borrar una empresa por completo. CANDADOS: solo superadmin, confirmación por
   // nombre exacto, y se niega si hay recibos emitidos (retención legal).
@@ -577,62 +476,33 @@ export function registrarRutasOperador(app: FastifyInstance) {
     return { respuesta };
   });
 
-  // ----- Auditoría de plataforma (ingresos, OTP, recupero, etc.) -----
-  app.get('/operador/auditoria', async (req) => {
+  // ----- Bitácora de plataforma (ingresos, OTP, recupero, cambios de config) -----
+  //
+  // El operador ve QUÉ se hizo en cada cuenta, jamás QUÉ decía el documento: su
+  // rol no tiene GRANT sobre `archivo`, `instancia` ni `participacion`, y eso lo
+  // verifica el test C4. Ver claude/infraestructura.md.
+  app.get('/operador/bitacora', async (req) => {
     const s = await sesion(req);
     exigirCap(s, 'ver_auditoria');
     const q = z
       .object({
         q: z.string().optional(),
-        tipo: z.enum(['ingresos', 'todo']).optional(),
+        accion: z.string().optional(),
+        recursoTipo: z.string().optional(),
         desde: z.string().optional(),
         hasta: z.string().optional(),
         limit: z.coerce.number().int().positive().max(500).optional(),
       })
       .parse(req.query);
-    return { eventos: await listarAuditoriaOperador(q) };
+    return { eventos: await listarBitacoraOperador(s.operadorId, q) };
   });
 
   // ----- Firma: catálogo de proveedores de firma avanzada por país -----
-  app.get('/operador/firma-proveedores', async (req) => {
-    await sesion(req);
-    return listarFirmaProveedores();
-  });
   const firmaProvSchema = z.object({
     pais: z.string().min(2),
     nombre: z.string().min(1),
     sitio_url: z.string().nullable().optional(),
     orden: z.number().optional(),
-  });
-  app.post('/operador/firma-proveedores', async (req) => {
-    const s = await sesion(req);
-    exigirCap(s, 'gestionar_firma');
-    const b = firmaProvSchema.parse(req.body);
-    return crearFirmaProveedor(b);
-  });
-  app.put('/operador/firma-proveedores/:id', async (req) => {
-    const s = await sesion(req);
-    exigirCap(s, 'gestionar_firma');
-    const { id } = req.params as { id: string };
-    const b = z
-      .object({
-        pais: z.string().min(2).optional(),
-        nombre: z.string().min(1).optional(),
-        sitio_url: z.string().nullable().optional(),
-        orden: z.number().optional(),
-        activo: z.boolean().optional(),
-        integrado: z.boolean().optional(),
-      })
-      .parse(req.body);
-    if (b.activo !== undefined) await setFirmaProveedorActivo(id, b.activo);
-    if (b.integrado !== undefined) await setFirmaProveedorIntegrado(id, b.integrado);
-    return editarFirmaProveedor(id, b);
-  });
-  app.delete('/operador/firma-proveedores/:id', async (req) => {
-    const s = await sesion(req);
-    exigirCap(s, 'gestionar_firma');
-    const { id } = req.params as { id: string };
-    return borrarFirmaProveedor(id);
   });
 
   // ----- Industrias / rubros de empresa (catálogo de plataforma) -----

@@ -3,7 +3,6 @@ import { z } from 'zod';
 import { emitirTokenDev } from '../../auth/identity';
 import { ownerDb } from '../../db/owner';
 import { provisionarEmpresa } from '../../admin/provisioning';
-import { listarPlanesPublicos, suscribir } from '../../services/facturacion';
 import { listarIndustrias } from '../../services/industrias';
 import { HttpError } from '../errors';
 
@@ -36,9 +35,6 @@ const cuerpoEnrolar = z.object({
 
 export function registrarRutasPublico(app: FastifyInstance) {
   // Catálogo de planes activos para mostrar precios en el sitio.
-  app.get('/planes-publicos', async () => {
-    return await listarPlanesPublicos();
-  });
 
   // Catálogo de rubros para el selector del alta de empresa (público, sin token).
   app.get('/industrias-publicas', async () => {
@@ -46,50 +42,4 @@ export function registrarRutasPublico(app: FastifyInstance) {
   });
 
   // Alta self-service con elección de plan.
-  app.post('/enrolar', async (req) => {
-    const b = cuerpoEnrolar.parse(req.body);
-    const moneda = b.pais === 'UY' ? 'UYU' : 'PYG';
-
-    // El plan tiene que existir y estar activo (mismo catálogo público).
-    const plan = await ownerDb()
-      .selectFrom('plan')
-      .select(['codigo', 'activo'])
-      .where('codigo', '=', b.plan_codigo)
-      .executeTakeFirst();
-    if (!plan || !plan.activo) throw new HttpError(400, `El plan "${b.plan_codigo}" no está disponible.`);
-
-    // Nombre de empresa único (mismo criterio que el login por nombre).
-    const existe = await ownerDb()
-      .selectFrom('empresa')
-      .select('id')
-      .where('nombre', '=', b.empresa)
-      .executeTakeFirst();
-    if (existe)
-      throw new HttpError(409, `Ya existe una empresa llamada "${b.empresa}". Probá entrar en lugar de crearla.`);
-
-    const r = await provisionarEmpresa({
-      nombre: b.empresa,
-      pais: b.pais,
-      moneda,
-      razonSocial: b.razon_social,
-      idFiscal: b.id_fiscal,
-      numSeguridadSocial: b.num_seguridad_social,
-      domicilio: b.domicilio,
-      admin: b.admin,
-    });
-
-    // Suscripción en prueba: queda enganchada al plan, sin cobro todavía.
-    await suscribir(r.cuentaId, b.plan_codigo, 'prueba');
-
-    const token = await emitirTokenDev(r.cuentaId, r.adminUsuarioId);
-    return {
-      token,
-      cuenta_id: r.cuentaId,
-      usuario_id: r.adminUsuarioId,
-      empresa_nombre: b.empresa,
-      usuario_email: b.admin.email,
-      plan_codigo: b.plan_codigo,
-      estado: 'prueba',
-    };
-  });
 }

@@ -2,7 +2,6 @@ import type { FastifyInstance } from 'fastify';
 import { z } from 'zod';
 import { registrarSesion } from '../../services/auditoria';
 import * as branding from '../../services/branding';
-import { verConfigFirma, setConfigFirma } from '../../services/firma';
 import { verIndustriaEmpresa, setIndustriaEmpresa } from '../../services/industrias';
 import { verDatosEmpresa, setDatosEmpresa } from '../../services/empresa';
 
@@ -41,17 +40,6 @@ export function registrarRutasDocumentos(app: FastifyInstance) {
   });
 
   // Config de firma de recibos (modalidad y, si avanzada, proveedor). Gateado en el servicio.
-  app.get('/empresa/firma', async (req) => {
-    const { cuentaId, usuarioId } = req.identidad;
-    return verConfigFirma(cuentaId, usuarioId);
-  });
-  app.put('/empresa/firma', async (req) => {
-    const { cuentaId, usuarioId } = req.identidad;
-    const b = z
-      .object({ modalidad: z.enum(['ninguna', 'simple', 'avanzada']), proveedor_id: z.string().nullable().optional() })
-      .parse(req.body);
-    return setConfigFirma(cuentaId, usuarioId, b.modalidad, b.proveedor_id ?? null);
-  });
 
   // Industria / rubro de la empresa.
   app.get('/empresa/industria', async (req) => {
