@@ -27,3 +27,6 @@ npm-debug.log*
 
 # Documentos subidos (driver de almacenamiento local)
 datos/
+
+# Puerto y credenciales del túnel, regenerado por db/tunel.sh
+db/.env.tunel

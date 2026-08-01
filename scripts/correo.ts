@@ -1,4 +1,4 @@
-import 'dotenv/config';
+import '../src/entorno';
 import {
   verCorreo,
   guardarCorreo,
@@ -60,6 +60,16 @@ async function main() {
     }
     console.log(JSON.stringify(config, null, 2));
     if (!config.activo) console.log('\n⚠ Está configurada pero DESACTIVADA: no sale ningún correo.');
+    if (config.tiene_password && !config.password_descifrable) {
+      console.log(
+        '\n✗ La contraseña está guardada pero NO se puede descifrar con la clave de este proceso' +
+          ` (huella ${config.huella_clave}).\n` +
+          '  Compará esa huella con la que imprime el servidor al arrancar:\n' +
+          '    [seguridad] Clave de cifrado de secretos: …, huella …\n' +
+          '  Si no coinciden, hay una variable de entorno exportada en una de las dos terminales:\n' +
+          '  dotenv NO pisa las variables que ya existen en el entorno.',
+      );
+    }
     return;
   }
 

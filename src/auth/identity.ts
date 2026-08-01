@@ -74,15 +74,25 @@ export async function autenticar(authHeader?: string): Promise<Identidad> {
   }
   const token = authHeader.slice('Bearer '.length);
   let payload: JWTPayload;
-  if (devSecret) {
-    ({ payload } = await jwtVerify(token, devSecret));
-  } else if (jwks) {
-    ({ payload } = await jwtVerify(token, jwks, {
-      issuer: process.env.AUTH_ISSUER,
-      audience: process.env.AUTH_AUDIENCE,
-    }));
-  } else {
+  if (!devSecret && !jwks) {
     throw new HttpError(500, 'No hay método de autenticación configurado (AUTH_JWKS_URL o AUTH_DEV_SECRET)');
+  }
+  try {
+    if (devSecret) {
+      ({ payload } = await jwtVerify(token, devSecret));
+    } else {
+      ({ payload } = await jwtVerify(token, jwks!, {
+        issuer: process.env.AUTH_ISSUER,
+        audience: process.env.AUTH_AUDIENCE,
+      }));
+    }
+  } catch {
+    // Un token vencido, alterado o firmado con otro secreto NO es un error del
+    // servidor: es una sesión que no vale. Dejar que la excepción de `jose`
+    // suba tal cual da un 500, y el navegador —que ante un 401 se va solo a
+    // /entrar— se queda mostrando "ocurrió un error en el servidor" sobre una
+    // pantalla a la que ya no se puede entrar.
+    throw new HttpError(401, 'Tu sesión no es válida o venció. Entrá de nuevo.');
   }
 
   const cuentaId = typeof payload.cuenta_id === 'string' ? payload.cuenta_id : undefined;

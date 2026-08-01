@@ -359,6 +359,200 @@ export async function despachar(
 }
 
 /**
+ * Reenviar el aviso a quien todavía no firmó.
+ *
+ * ═══ POR QUÉ ESTO NO ES UN LUJO ═══
+ *
+ * Sin esto, un correo que falla —el SMTP caído, la casilla llena, el aviso en
+ * spam— deja el documento trabado para siempre: figura "esperando firmas" y la
+ * persona nunca se enteró de que tiene que firmar. El emisor espera a alguien
+ * que no sabe nada, y no hay ninguna acción que lo destrabe.
+ *
+ * ⚠ NO se emite un otorgamiento nuevo: se reusa el que ya existe. Emitir otro
+ * dejaría dos enlaces vivos para el mismo acto, y revocar uno no revocaría el
+ * otro. El enlace es un puntero a una fila; si la fila es la misma, el enlace
+ * viejo del primer correo —si alguna vez llegó— sigue siendo válido, que es
+ * exactamente lo que uno espera al pedir "reenviámelo".
+ */
+export async function reenviarAvisos(
+  cuentaId: string,
+  identidadId: string,
+  circuitoId: string,
+) {
+  const preparado = await withUsuario(cuentaId, identidadId, async (trx, autz) => {
+    exigir(autz, 'circuito', 'enviar', 'No tenés permiso para enviar documentos a firmar.');
+
+    const r = await sql<{
+      titulo: string; estado: string; idioma: string; cuenta_nombre: string;
+    }>`
+      select c.titulo, c.estado, c.idioma, cu.nombre_mostrado as cuenta_nombre
+        from circuito c
+        join cuenta cu on cu.id = c.cuenta_propietaria_id
+       where c.id = ${circuitoId}::uuid and c.cuenta_propietaria_id = ${cuentaId}::uuid
+    `.execute(trx);
+    const c = r.rows[0];
+    if (!c) throw new HttpError(404, 'Ese documento no existe o no lo podés ver.');
+    if (c.estado !== 'enviado') {
+      throw new HttpError(409, 'Sólo se puede reenviar el aviso de un documento que está esperando firmas.');
+    }
+
+    // A quién le toca AHORA: los pendientes del orden más bajo. El mismo
+    // criterio que el despacho, para que reenviar no adelante a nadie.
+    const p = await sql<{
+      id: string; instancia_id: string; identidad_id: string; email: string;
+      nombre: string | null; orden: number; otorgamiento_id: string | null;
+    }>`
+      select p.id, p.instancia_id, p.identidad_id,
+             i.email_mostrado as email, i.nombre_mostrado as nombre, p.orden,
+             (select o.id from otorgamiento o
+               where o.instancia_id = p.instancia_id
+                 and o.identidad_id = p.identidad_id
+                 and o.revocado_en is null
+               order by o.creado_en desc limit 1) as otorgamiento_id
+        from participacion p
+        join identidad i on i.id = p.identidad_id
+       where p.circuito_id = ${circuitoId}::uuid
+         and p.estado in ('pendiente','notificada','vista')
+         and p.orden = (
+           select min(p2.orden) from participacion p2
+            where p2.circuito_id = ${circuitoId}::uuid
+              and p2.estado in ('pendiente','notificada','vista'))
+    `.execute(trx);
+
+    if (!p.rows.length) {
+      throw new HttpError(409, 'No queda nadie a quien avisarle: ya firmaron todos los que tenían que firmar.');
+    }
+    const sinOtorgamiento = p.rows.filter((x) => !x.otorgamiento_id);
+    if (sinOtorgamiento.length) {
+      throw new HttpError(500, 'Hay participaciones sin otorgamiento vigente. No se puede reenviar.');
+    }
+
+    return { titulo: c.titulo, cuentaNombre: c.cuenta_nombre, idioma: c.idioma, destinos: p.rows };
+  });
+
+  const resultados = await Promise.all(
+    preparado.destinos.map((d) =>
+      notificar(cuentaId, circuitoId, preparado, {
+        participacionId: d.id,
+        otorgamientoId: d.otorgamiento_id!,
+        identidadId: d.identidad_id,
+        instanciaId: d.instancia_id,
+        email: d.email,
+        nombre: d.nombre,
+      }),
+    ),
+  );
+
+  return {
+    ok: true,
+    notificados: resultados.filter((r) => r.ok).length,
+    fallidos: resultados.filter((r) => !r.ok),
+  };
+}
+
+/**
+ * El enlace de firma de un participante, para que el emisor lo entregue él.
+ *
+ * ═══ POR QUÉ EXISTE ═══
+ *
+ * El correo no siempre llega, y a veces ni siquiera es el canal: el emisor
+ * quiere mandarlo por WhatsApp, pegarlo en un chat, o tener a la persona
+ * enfrente. Depender de que el SMTP funcione para que un documento se pueda
+ * firmar convierte un problema de infraestructura en un producto que no
+ * funciona.
+ *
+ * ═══ ⚠ EL COSTO, QUE HAY QUE DECIR EN VOZ ALTA ═══
+ *
+ * Este enlace ES la autorización para firmar. Quien lo tenga puede firmar en
+ * nombre de esa persona. Al copiarlo, el emisor pasa a tener esa capacidad —y
+ * el expediente sólo va a poder decir que la firma vino de ese enlace, con esa
+ * IP y ese dispositivo.
+ *
+ * Por eso el acto se anota en el expediente. No lo impide, lo REGISTRA: si
+ * mañana alguien discute la firma, el expediente muestra que el emisor obtuvo
+ * el enlace y en qué momento, que es exactamente lo que un perito necesita para
+ * evaluar el caso. Un producto que oculta ese hecho es peor que uno que no
+ * ofrece la función.
+ */
+export async function enlaceDeFirma(
+  cuentaId: string,
+  identidadId: string,
+  circuitoId: string,
+  participacionId: string,
+  ctx: { ip?: string | null; userAgent?: string | null } = {},
+) {
+  return withUsuario(cuentaId, identidadId, async (trx, autz) => {
+    exigir(autz, 'circuito', 'enviar', 'No tenés permiso para enviar documentos a firmar.');
+
+    const r = await sql<{
+      id: string; instancia_id: string; identidad_id: string; estado: string;
+      email: string; nombre: string | null; circuito_estado: string;
+      cuenta_propietaria_id: string; otorgamiento_id: string | null;
+    }>`
+      select p.id, p.instancia_id, p.identidad_id, p.estado,
+             i.email_mostrado as email, i.nombre_mostrado as nombre,
+             c.estado as circuito_estado, p.cuenta_propietaria_id,
+             (select o.id from otorgamiento o
+               where o.instancia_id = p.instancia_id
+                 and o.identidad_id = p.identidad_id
+                 and o.revocado_en is null
+               order by o.creado_en desc limit 1) as otorgamiento_id
+        from participacion p
+        join identidad i on i.id = p.identidad_id
+        join circuito c on c.id = p.circuito_id
+       where p.id = ${participacionId}::uuid
+         and p.circuito_id = ${circuitoId}::uuid
+         and p.cuenta_propietaria_id = ${cuentaId}::uuid
+    `.execute(trx);
+
+    const p = r.rows[0];
+    if (!p) throw new HttpError(404, 'Esa participación no existe en este documento.');
+    if (p.circuito_estado !== 'enviado') {
+      throw new HttpError(409, 'El documento todavía no se despachó: no hay enlace que dar.');
+    }
+    if (!p.otorgamiento_id) {
+      throw new HttpError(409, 'Esa persona no tiene un otorgamiento vigente sobre el documento.');
+    }
+    if (p.estado === 'firmada') throw new HttpError(409, 'Esa persona ya firmó.');
+    if (p.estado === 'rechazada') throw new HttpError(409, 'Esa persona rechazó firmar.');
+
+    await anotar(trx, {
+      instanciaId: p.instancia_id,
+      circuitoId,
+      cuentaPropietariaId: p.cuenta_propietaria_id,
+      tipo: 'notificacion.enviada',
+      actorTipo: 'emisor',
+      identidadId,
+      participacionId: p.id,
+      datos: {
+        canal: 'manual',
+        metodo: 'enlace_entregado_por_el_emisor',
+        destino: enmascarar(p.email),
+        // Se deja explícito para quien lea el expediente: a partir de acá el
+        // enlace estuvo en manos del emisor, no sólo en la casilla del firmante.
+        advertencia: 'el emisor obtuvo el enlace personal de firma',
+      },
+      ip: ctx.ip,
+      userAgent: ctx.userAgent,
+      canal: 'web',
+    });
+
+    await sql`
+      update participacion set estado = 'notificada'
+       where id = ${p.id}::uuid and estado = 'pendiente'
+    `.execute(trx);
+
+    const token = await emitirEnlaceFirma({
+      otorgamientoId: p.otorgamiento_id,
+      identidadId: p.identidad_id,
+      participacionId: p.id,
+    });
+
+    return { url: urlDeFirma(token), email: p.email, nombre: p.nombre };
+  });
+}
+
+/**
  * Manda el correo y lo anota. Fuera de la transacción del despacho: que un
  * servidor SMTP caído impida despachar sería peor que un documento enviado con
  * una notificación que hay que reintentar.

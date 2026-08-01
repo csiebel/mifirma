@@ -6,6 +6,8 @@ import {
   quitarFirmante,
   configurarCircuito,
   despachar,
+  reenviarAvisos,
+  enlaceDeFirma,
 } from '../../services/circuito';
 
 /**
@@ -80,5 +82,25 @@ export function registrarRutasCircuitos(app: FastifyInstance) {
       ip: req.ip,
       userAgent: req.headers['user-agent'] ?? null,
     });
+  });
+
+  // El enlace personal de firma, para que el emisor lo entregue por su cuenta:
+  // WhatsApp, en persona, o cuando el correo simplemente no llega. Queda
+  // anotado en el expediente — ver el comentario del servicio.
+  app.post('/circuitos/:id/firmantes/:pid/enlace', async (req) => {
+    const p = z.object({ id: z.string().uuid(), pid: z.string().uuid() }).parse(req.params);
+    const { cuentaId, identidadId } = req.identidad;
+    return enlaceDeFirma(cuentaId, identidadId, p.id, p.pid, {
+      ip: req.ip,
+      userAgent: req.headers['user-agent'] ?? null,
+    });
+  });
+
+  // Reenviar el aviso. No emite un otorgamiento nuevo: reusa el que ya existe,
+  // así el enlace del correo original —si alguna vez llegó— sigue sirviendo.
+  app.post('/circuitos/:id/reenviar', async (req) => {
+    const { id } = z.object({ id: z.string().uuid() }).parse(req.params);
+    const { cuentaId, identidadId } = req.identidad;
+    return reenviarAvisos(cuentaId, identidadId, id);
   });
 }

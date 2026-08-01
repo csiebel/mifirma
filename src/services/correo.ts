@@ -1,7 +1,7 @@
 import nodemailer from 'nodemailer';
 import { operadorDb } from '../db/pool';
 import { HttpError } from '../http/errors';
-import { cifrar, descifrar, enmascarar } from '../operador/cripto';
+import { cifrar, descifrar, enmascarar, huellaClave } from '../operador/cripto';
 
 // Conexión de correo saliente de la PLATAFORMA (dominio del operador). Una sola
 // casilla envía los recibos por todas las empresas. La contraseña se guarda cifrada
@@ -48,6 +48,11 @@ export async function verCorreo() {
       remitente_email: c.remitente_email,
       password_mask: enmascarar(c.password_cifrado),
       tiene_password: !!c.password_cifrado,
+      // Guardada pero ilegible: la clave de cifrado no es la que se usó para
+      // guardarla. Distinguirlo de "no hay contraseña" es la diferencia entre
+      // buscar el problema en la base o en el entorno.
+      password_descifrable: !!c.password_cifrado && !!descifrar(c.password_cifrado),
+      huella_clave: huellaClave(),
       activo: c.activa,
     },
   };
@@ -105,8 +110,21 @@ export async function setCorreoActivo(activo: boolean) {
 async function transporte() {
   const c = await fila();
   if (!c || !c.activa) throw new HttpError(503, 'No hay conexión de correo activa.');
+  if (!c.password_cifrado) {
+    throw new HttpError(503, 'La conexión de correo no tiene contraseña cargada.');
+  }
   const pass = descifrar(c.password_cifrado);
-  if (!pass) throw new HttpError(503, 'La conexión de correo no tiene contraseña cargada.');
+  if (!pass) {
+    // Hay contraseña guardada y no se puede leer: cambió la clave de cifrado.
+    // Decir "no hay contraseña" acá manda a cargarla de nuevo una y otra vez
+    // sin que nada mejore, que es exactamente lo que pasó.
+    throw new HttpError(
+      503,
+      'La contraseña del correo está guardada pero no se puede descifrar: la clave de cifrado ' +
+        `del servidor (huella ${huellaClave()}) no es la que se usó para guardarla. ` +
+        'Revisá GATEWAY_ENC_KEY en el entorno del servidor y volvé a cargar la contraseña.',
+    );
+  }
   const t = nodemailer.createTransport({
     host: c.host,
     port: Number(c.puerto),

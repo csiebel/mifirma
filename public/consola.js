@@ -206,7 +206,18 @@
           '<tr><td><b>' + esc(d.titulo) + '</b><br>' +
           '<span style="font-size:12.5px;color:var(--mut)">' + tamano(d.bytes) +
           (d.paginas ? ' · ' + d.paginas + ' págs' : '') + '</span></td>' +
-          '<td>' + (ESTADO_DOC[d.circuito_estado] || esc(d.circuito_estado)) + '</td>' +
+          '<td>' + (ESTADO_DOC[d.circuito_estado] || esc(d.circuito_estado)) +
+          // Un documento despachado cuyo aviso no salió se ve idéntico a uno
+          // que sí salió. Sin este cartel, el emisor espera para siempre la
+          // firma de alguien que nunca se enteró.
+          (d.sin_avisar
+            ? '<br><span class="pill no" style="background:#fef3f2;color:var(--danger);margin-top:5px;' +
+              'display:inline-block">No le llegó el aviso a ' + d.sin_avisar + '</span>'
+            : '') +
+          (d.cadena_rota
+            ? '<br><span class="pill no" style="background:#fef3f2;color:var(--danger);margin-top:5px;' +
+              'display:inline-block">Expediente comprometido</span>'
+            : '') + '</td>' +
           '<td>' + (d.firmas_total
             ? d.firmas_hechas + ' de ' + d.firmas_total
             : '<span style="color:var(--mut)">sin firmantes</span>') + '</td>' +
@@ -214,6 +225,10 @@
           '<td><div class="acc" style="justify-content:flex-end">' +
           (d.circuito_estado === 'borrador'
             ? '<button class="btn btn-p chico" data-prep="' + esc(d.circuito_id) + '">Enviar a firmar</button>'
+            : '') +
+          (d.circuito_estado === 'enviado'
+            ? '<button class="btn ' + (d.sin_avisar ? 'btn-p' : 'btn-s') + ' chico" data-reenv="' +
+              esc(d.circuito_id) + '">Reenviar aviso</button>'
             : '') +
           '<button class="btn btn-s chico" data-ver="' + esc(d.instancia_id) +
           '" data-tit="' + esc(d.titulo) + '">Ver</button>' +
@@ -228,6 +243,21 @@
     });
     $('tDocumentos').querySelectorAll('[data-prep]').forEach(function (b) {
       b.addEventListener('click', function () { abrirCircuito(b.dataset.prep); });
+    });
+    $('tDocumentos').querySelectorAll('[data-reenv]').forEach(function (b) {
+      b.addEventListener('click', async function () {
+        b.disabled = true;
+        msg('msgDocs', '', '');
+        try {
+          var r = await api('/circuitos/' + b.dataset.reenv + '/reenviar', 'POST');
+          await cargarDocumentos();
+          if (r.fallidos && r.fallidos.length) {
+            msg('msgDocs', 'Volvió a fallar: ' + r.fallidos[0].error, 'err');
+          } else {
+            msg('msgDocs', 'Aviso reenviado a ' + r.notificados + ' persona(s).', 'ok');
+          }
+        } catch (e) { msg('msgDocs', e.message, 'err'); b.disabled = false; }
+      });
     });
     $('tDocumentos').querySelectorAll('[data-exp]').forEach(function (b) {
       b.addEventListener('click', function () { verExpediente(b.dataset.exp); });
@@ -363,7 +393,11 @@
             (p.papel === 'firmante' ? '' : '<span class="pill no">' + esc(p.papel) + '</span> ') +
             (ESTADO_PART[p.estado] || esc(p.estado)) +
             '</td><td style="padding:9px 0;border-bottom:1px solid var(--line);text-align:right">' +
-            (enviado ? '' : '<button class="btn btn-d chico" data-quitar="' + esc(p.id) + '">Quitar</button>') +
+            (enviado
+              ? (p.estado === 'firmada' || p.estado === 'rechazada'
+                  ? ''
+                  : '<button class="btn btn-s chico" data-enlace="' + esc(p.id) + '">Copiar enlace</button>')
+              : '<button class="btn btn-d chico" data-quitar="' + esc(p.id) + '">Quitar</button>') +
             '</td></tr>'
           );
         }).join('')
@@ -414,6 +448,30 @@
     );
 
     $('mCancel').addEventListener('click', function () { cerrarModal(); cargarDocumentos(); });
+
+    // El enlace personal de firma. Se copia al portapapeles y se muestra, porque
+    // en algunos navegadores el portapapeles falla en silencio y quedarse sin el
+    // enlace después de que el sistema dijo "copiado" es peor que no ofrecerlo.
+    $('modal').querySelectorAll('[data-enlace]').forEach(function (b) {
+      b.addEventListener('click', async function () {
+        b.disabled = true;
+        try {
+          var r = await api('/circuitos/' + circuitoId + '/firmantes/' + b.dataset.enlace + '/enlace', 'POST');
+          try { await navigator.clipboard.writeText(r.url); } catch (e) { /* se muestra igual */ }
+          abrirModal(
+            '<h2>Enlace de firma</h2>' +
+            '<p class="sub">Es el enlace personal de <b>' + esc(r.nombre || r.email) + '</b>. ' +
+            'Mandáselo por donde quieras.</p>' +
+            '<input id="mUrl" readonly value="' + esc(r.url) + '" style="font-size:12.5px" />' +
+            '<div class="msg err" style="margin-top:14px">Quien tenga este enlace puede firmar en ' +
+            'nombre de esa persona. Que lo hayas copiado quedó anotado en el expediente del documento.</div>' +
+            '<div class="acc"><button class="btn btn-p" id="mCancel">Listo</button></div>'
+          );
+          $('mUrl').select();
+          $('mCancel').addEventListener('click', function () { cerrarModal(); cargarDocumentos(); });
+        } catch (e) { msg('msgModal', e.message, 'err'); b.disabled = false; }
+      });
+    });
 
     $('modal').querySelectorAll('[data-quitar]').forEach(function (b) {
       b.addEventListener('click', async function () {

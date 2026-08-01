@@ -1,3 +1,4 @@
+import { createHash } from 'node:crypto';
 // Validación de los secretos de firma/cifrado al arrancar. Convierte "confío en que el
 // secreto es fuerte" en una garantía estructural: si un secreto falta, es demasiado corto
 // o es un valor de ejemplo, la app NO levanta (mejor un arranque fallido y visible que
@@ -56,6 +57,20 @@ function evaluarSecreto(nombre: string, valor: string | undefined, requerido: bo
  * AUTH_DEV_SECRET no son obligatorios, pero si están definidos también se exige que sean
  * fuertes.
  */
+/**
+ * Huella de la clave con la que este proceso va a cifrar y descifrar secretos.
+ *
+ * Se imprime al arrancar para que se pueda comparar con la del script de línea
+ * de comandos. `dotenv` no pisa variables ya presentes en el entorno, así que
+ * dos procesos con el mismo .env pueden terminar con claves distintas y nada
+ * lo delata hasta que un secreto guardado deja de leerse.
+ */
+function huellaDeLaClave(): string {
+  const s = process.env.GATEWAY_ENC_KEY || process.env.OPERADOR_JWT_SECRET || process.env.AUTH_DEV_SECRET;
+  if (!s) return 'sin-clave';
+  return createHash('sha256').update(createHash('sha256').update(s).digest()).digest('hex').slice(0, 12);
+}
+
 export function validarSecretos(): void {
   const errores: string[] = [
     ...evaluarSecreto('AUTH_DEV_SECRET', process.env.AUTH_DEV_SECRET, true),
@@ -71,4 +86,15 @@ export function validarSecretos(): void {
     );
     throw new Error('Arranque abortado: secretos inseguros. Revisá las variables de entorno.');
   }
+
+  // Con qué clave va a cifrar y descifrar ESTE proceso. Comparable con la que
+  // muestra `npm run correo -- ver`: si no coinciden, los secretos guardados por
+  // uno no los puede leer el otro, y el síntoma es "la contraseña no está
+  // cargada" sobre una contraseña que sí está.
+  const cual = process.env.GATEWAY_ENC_KEY
+    ? 'GATEWAY_ENC_KEY'
+    : process.env.OPERADOR_JWT_SECRET
+      ? 'OPERADOR_JWT_SECRET'
+      : 'AUTH_DEV_SECRET';
+  console.log(`[seguridad] Clave de cifrado de secretos: ${cual}, huella ${huellaDeLaClave()}`);
 }

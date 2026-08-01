@@ -100,7 +100,42 @@ if [ -n "$MIFIRMA_OPERADOR_PASSWORD" ]; then
   export DATABASE_OPERADOR_URL="postgresql://mifirma_operador:${MIFIRMA_OPERADOR_PASSWORD}@${_hostpuerto}/mifirma"
   echo "DATABASE_OPERADOR_URL -> mifirma_operador@${_hostpuerto}/mifirma"
 fi
-unset _hostpuerto
+
+# ---------------------------------------------------------------------------
+# Y además se dejan en un archivo, no sólo en el entorno.
+#
+# El puerto del túnel cambia en cada sesión, y el servidor lo toma UNA vez al
+# arrancar. Si el túnel se cae y se reabre en otro puerto, el proceso sigue
+# apuntando al viejo y todo falla con ECONNREFUSED — un error que no dice
+# "reabrí el túnel", dice "no me puedo conectar", y manda a buscar el problema
+# en la base.
+#
+# Con este archivo, cualquier proceso que arranque después toma el puerto
+# vigente, sin importar en qué terminal se haya abierto el túnel. `src/index.ts`
+# lo carga pisando lo que venga del entorno.
+#
+# Tiene contraseñas: está en .gitignore junto con .env.local.
+# ---------------------------------------------------------------------------
+_dir="$(dirname "${BASH_SOURCE[0]:-db/tunel.sh}")"
+{
+  echo "# Generado por db/tunel.sh — NO editar a mano, se pisa en cada túnel."
+  [ -n "$DATABASE_URL" ]          && echo "DATABASE_URL=$DATABASE_URL"
+  [ -n "$DATABASE_OPERADOR_URL" ] && echo "DATABASE_OPERADOR_URL=$DATABASE_OPERADOR_URL"
+  echo "MIFIRMA_DB=$MIFIRMA_DB"
+} > "$_dir/.env.tunel"
+chmod 600 "$_dir/.env.tunel" 2>/dev/null
+echo "Puerto vigente escrito en db/.env.tunel (lo lee el servidor al arrancar)."
+
+# Y se le avisa al servidor que ya está corriendo en la OTRA terminal.
+#
+# `tsx watch` reinicia el proceso cuando cambia un archivo fuente, pero no mira
+# db/.env.tunel — no está importado desde ningún lado. Tocar index.ts dispara ese
+# reinicio, y el servidor vuelve a levantar con el puerto nuevo sin que haya que
+# ir a la otra terminal a matarlo.
+#
+# Si no hay ningún servidor corriendo, esto no hace nada.
+touch "$_dir/../src/index.ts" 2>/dev/null
+unset _hostpuerto _dir
 
 # Prueba de vida: si esto no dice `mifirma`, algo quedó mal.
 psql "$MIFIRMA_DB" -tAc "select 'conectado a ' || current_database()" 2>&1

@@ -1,4 +1,4 @@
-import 'dotenv/config';
+import '../src/entorno';
 import { crearSuperadmin, listarOperadores, resetPasswordOperadorPorUsuario } from '../src/services/operadores';
 import { cerrarPool } from '../src/db/pool';
 

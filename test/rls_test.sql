@@ -292,6 +292,73 @@ begin;
   end $$;
 rollback;
 
+-- ---------- TEST 9b: la cadena no se bifurca cuando anota el sistema --------
+--
+-- El agujero real, encontrado en producción el 1/8/2026 y no por este test:
+-- T9 anota como actor `cuenta`, que ve su propia evidencia, así que el trigger
+-- encontraba el evento anterior y encadenaba bien. Pero la notificación por
+-- correo se anota DESPUÉS de la transacción del despacho, con actor `sistema`
+-- — y `sistema` no tenía rama en `evidencia_select`. El trigger vio cero
+-- eventos previos y numeró desde 1: dos ramas arrancando del mismo punto.
+--
+-- La corrupción es silenciosa: no falla, no avisa, y aparece meses después
+-- cuando alguien intenta usar el expediente. Este test cruza los dos actores a
+-- propósito, que es lo que el anterior no hacía.
+begin;
+  set local app.actor = 'cuenta';
+  set local app.cuenta_id = :'cuenta_a';
+  set local app.identidad_id = :'ident_a';
+  set local app.anclajes_probados = :'anclaje_a';
+  set local app.nivel_garantia = 'bajo';
+
+  do $$
+  begin
+    insert into evidencia (instancia_id, circuito_id, cuenta_propietaria_id,
+                           actor_tipo, tipo, datos, ocurrido_en,
+                           numero_orden, hash_contenido, hash_propio)
+    values ('a6000000-0000-0000-0000-000000000001', 'a5000000-0000-0000-0000-000000000001',
+            'aaaaaaaa-0000-0000-0000-000000000001', 'emisor', 'circuito.despachado',
+            '{}'::jsonb, now(), 0, ''::bytea, ''::bytea);
+  end $$;
+
+  -- Ahora anota el sistema, como hace el envío de notificaciones.
+  set local app.actor = 'sistema';
+  set local app.cuenta_id = '';
+  set local app.identidad_id = '';
+
+  do $$
+  declare v_repetidos int; v_ult record; v_ant record;
+  begin
+    insert into evidencia (instancia_id, circuito_id, cuenta_propietaria_id,
+                           actor_tipo, tipo, datos, ocurrido_en,
+                           numero_orden, hash_contenido, hash_propio)
+    values ('a6000000-0000-0000-0000-000000000001', 'a5000000-0000-0000-0000-000000000001',
+            'aaaaaaaa-0000-0000-0000-000000000001', 'sistema', 'notificacion.enviada',
+            '{}'::jsonb, now(), 0, ''::bytea, ''::bytea);
+
+    select count(*) - count(distinct numero_orden) into v_repetidos
+      from evidencia where instancia_id = 'a6000000-0000-0000-0000-000000000001';
+    if v_repetidos <> 0 then
+      raise exception 'FALLA T9b: la cadena se bifurcó — % número(s) repetido(s)', v_repetidos;
+    end if;
+
+    select * into v_ult from evidencia
+     where instancia_id = 'a6000000-0000-0000-0000-000000000001' order by numero_orden desc limit 1;
+    select * into v_ant from evidencia
+     where instancia_id = 'a6000000-0000-0000-0000-000000000001'
+       and numero_orden = v_ult.numero_orden - 1;
+
+    if v_ult.numero_orden <> 2 then
+      raise exception 'FALLA T9b: el sistema numeró % en vez de 2', v_ult.numero_orden;
+    end if;
+    if v_ult.hash_anterior is distinct from v_ant.hash_propio then
+      raise exception 'FALLA T9b: el evento del sistema no engancha con el anterior';
+    end if;
+
+    raise notice 'OK T9b — el sistema continúa la cadena en vez de arrancar otra';
+  end $$;
+rollback;
+
 -- ---------- TEST 10: el expediente no cruza cuentas -------------------------
 --
 -- El expediente tiene IP, dispositivo y horarios de gente real. Que la cuenta B
@@ -406,4 +473,4 @@ rollback;
 
 reset role;
 
-do $fin$ begin raise notice 'Los 13 tests de RLS pasaron.'; end $fin$;
+do $fin$ begin raise notice 'Los 14 tests de RLS pasaron.'; end $fin$;

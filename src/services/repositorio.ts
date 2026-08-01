@@ -225,10 +225,34 @@ export async function listarDocumentos(cuentaId: string, identidadId: string, ca
       circuito_estado: string; modo: string; nivel_firma: string;
       bytes: string; paginas: number | null; creado_en: Date;
       instancias: string; firmas_total: string; firmas_hechas: string;
+      sin_avisar: string; cadena_rota: boolean;
     }>`
       select c.id as circuito_id, c.titulo,
              c.estado as circuito_estado, c.modo, c.nivel_firma,
              a.bytes::text as bytes, a.paginas, c.creado_en,
+
+             -- Despachado pero sin avisar: la notificación no salió. Sin esto,
+             -- el emisor espera indefinidamente la firma de alguien que nunca
+             -- se enteró — y el documento se ve idéntico a uno que sí avisó.
+             (select count(*) from participacion p
+               where p.circuito_id = c.id and p.papel = 'firmante'
+                 and p.estado = 'pendiente')::text as sin_avisar,
+
+             -- El expediente comprometido se marca en la LISTA, no sólo adentro
+             -- del expediente: si hay que abrir cada documento para descubrirlo,
+             -- se descubre el día que hace falta el certificado.
+             exists (
+               select 1 from (
+                 select e.instancia_id,
+                        count(*) as n,
+                        count(distinct e.numero_orden) as distintos,
+                        max(e.numero_orden) as ultimo
+                   from evidencia e
+                   join instancia i2 on i2.id = e.instancia_id
+                  where i2.circuito_id = c.id
+                  group by e.instancia_id
+               ) x where x.n <> x.distintos or x.ultimo <> x.n
+             ) as cadena_rota,
              (select i.id from instancia i
                where i.circuito_id = c.id order by i.numero limit 1) as instancia_id,
              (select count(*) from instancia i where i.circuito_id = c.id)::text as instancias,
@@ -253,6 +277,7 @@ export async function listarDocumentos(cuentaId: string, identidadId: string, ca
       instancias: Number(f.instancias),
       firmas_total: Number(f.firmas_total),
       firmas_hechas: Number(f.firmas_hechas),
+      sin_avisar: Number(f.sin_avisar),
     }));
   });
 }

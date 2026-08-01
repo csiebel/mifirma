@@ -1,4 +1,7 @@
-import 'dotenv/config';
+// ⚠ PRIMERO Y ANTES QUE NADA: en ESM los import se evalúan antes del cuerpo
+// del archivo, así que cualquier módulo que lea process.env al importarse
+// —como db/pool.ts— ya corrió cuando esta línea se ejecuta. Ver src/entorno.ts.
+import './entorno';
 import { construirServidor } from './server';
 import { cerrarPool } from './db/pool';
 import { validarSecretos } from './auth/validar_secretos';

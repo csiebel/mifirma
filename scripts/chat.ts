@@ -1,4 +1,4 @@
-import 'dotenv/config';
+import '../src/entorno';
 import { responder } from '../src/ai/orquestador';
 import { cerrarPool } from '../src/db/pool';
 

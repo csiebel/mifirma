@@ -20,6 +20,7 @@ import { registrarRutasAyuda } from './http/routes/ayuda';
 import { registrarRutasDocumentos } from './http/routes/documentos';
 import { registrarRutasRepositorio } from './http/routes/repositorio';
 import { registrarRutasCircuitos } from './http/routes/circuitos';
+import { registrarRutasFirma } from './http/routes/firma';
 
 declare module 'fastify' {
   interface FastifyRequest {
@@ -139,6 +140,18 @@ export function construirServidor(): FastifyInstance {
 
 
 
+  // Página del FIRMANTE EXTERNO. Pública: quien llega no tiene cuenta y no
+  // debería necesitar una. La autorización la lleva el token del enlace, que se
+  // cambia por una cookie acotada a /firmar en `POST /firmar/abrir`.
+  app.get('/firmar', async (_req, reply) => {
+    try {
+      const html = readFileSync(new URL('../public/firmar.html', import.meta.url), 'utf8');
+      reply.header('Cache-Control', 'no-store').type('text/html').send(html);
+    } catch {
+      reply.type('text/html').send('<h1>Falta public/firmar.html</h1>');
+    }
+  });
+
   // Página de ACCESO: login y alta de empresa. Un solo realm.
   // Pública; sus llamadas (/auth/*) validan adentro.
   app.get('/entrar', async (_req, reply) => {
@@ -152,7 +165,7 @@ export function construirServidor(): FastifyInstance {
 
   // JavaScript de las páginas públicas. Se sirve como archivo suelto, igual que
   // el HTML: para dos archivos no vale la pena montar un servidor de estáticos.
-  for (const js of ['sitio.js', 'entrar.js', 'consola.js', 'operador.js']) {
+  for (const js of ['sitio.js', 'entrar.js', 'consola.js', 'operador.js', 'firmar.js']) {
     app.get('/' + js, async (_req, reply) => {
       try {
         const body = readFileSync(new URL('../public/' + js, import.meta.url), 'utf8');
@@ -221,6 +234,15 @@ export function construirServidor(): FastifyInstance {
     '/entrar.js',
     '/consola.js',
     '/operador.js',
+    '/firmar.js',
+    // El firmante externo: su autorización es el otorgamiento que lleva el
+    // token, no una sesión de cuenta. El hook central no puede autenticarlo
+    // porque no pertenece a ninguna.
+    '/firmar',
+    '/firmar/abrir',
+    '/firmar/documento',
+    '/firmar/firmar',
+    '/firmar/rechazar',
     '/manifest.webmanifest',
     '/manifest-empleado.webmanifest',
     '/sw.js',
@@ -381,6 +403,7 @@ export function construirServidor(): FastifyInstance {
   registrarRutasDocumentos(app);
   registrarRutasRepositorio(app);
   registrarRutasCircuitos(app);
+  registrarRutasFirma(app);
 
   app.setErrorHandler((err, _req, reply) => {
     if (err instanceof ZodError) {

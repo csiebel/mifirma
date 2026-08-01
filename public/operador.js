@@ -51,6 +51,69 @@
   // ---------------------------------------------------------------------------
   function $(id) { return document.getElementById(id); }
 
+  /* ---------------------------------------------------------------------------
+     Campos de credencial: por qué no son un input común.
+
+     El 1/8/2026 la clave SMTP se sobrescribió sola dos veces. No se perdía: se
+     GUARDABA OTRA. La causa es el gestor de contraseñas del navegador, que
+     rellena cualquier `input[type=password]` de un sitio conocido — y como el
+     formulario manda lo que haya en el campo al tocar "Guardar", cambiar el
+     puerto o el remitente pisaba la credencial con una contraseña de otro lado.
+     Sin error, sin aviso, y el síntoma aparecía recién al mandar un correo.
+
+     Dos defensas, porque `autocomplete="off"` no la respeta nadie:
+
+       1. Mientras hay credencial guardada, el input NO EXISTE en pantalla: se
+          muestra la máscara y un botón "Cambiar". Un campo que no está no se
+          autocompleta.
+       2. El input arranca `readonly` y se libera al pedirlo explícitamente.
+          Los gestores saltean los campos de sólo lectura.
+
+     Y la regla de fondo: sólo se manda la credencial si el usuario abrió el
+     campo a propósito. Nunca "por las dudas".
+     --------------------------------------------------------------------------- */
+  function campoSecreto(idInput, idBloque, idMask, idBoton) {
+    return {
+      /** Hay credencial guardada: mostrar la máscara y esconder el input. */
+      pintar: function (tiene, mascara) {
+        var inp = $(idInput), bloque = $(idBloque);
+        inp.value = '';
+        if (tiene) {
+          $(idMask).textContent = mascara || '••••••••';
+          bloque.classList.remove('hidden');
+          inp.classList.add('hidden');
+          inp.setAttribute('readonly', 'readonly');
+        } else {
+          bloque.classList.add('hidden');
+          inp.classList.remove('hidden');
+          inp.removeAttribute('readonly');
+        }
+      },
+      cablear: function () {
+        var b = $(idBoton);
+        if (!b || b.dataset.listo) return;
+        b.dataset.listo = '1';
+        b.addEventListener('click', function () {
+          var inp = $(idInput);
+          $(idBloque).classList.add('hidden');
+          inp.classList.remove('hidden');
+          inp.removeAttribute('readonly');
+          inp.value = '';
+          inp.focus();
+        });
+      },
+      /** El valor a mandar, o undefined si el usuario no lo tocó. */
+      valor: function () {
+        var inp = $(idInput);
+        if (inp.classList.contains('hidden')) return undefined;
+        return inp.value ? inp.value : undefined;
+      },
+    };
+  }
+
+  var SECRETO_CORREO = campoSecreto('cPassword', 'cPassGuardada', 'cPassMask', 'cPassCambiar');
+  var SECRETO_TWILIO = campoSecreto('tToken', 'tTokenGuardado', 'tTokenMask', 'tTokenCambiar');
+
   function esc(s) {
     return String(s == null ? '' : s).replace(/[&<>"]/g, function (c) {
       return { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c];
@@ -173,11 +236,22 @@
       $('cUsuario').value = c.usuario || '';
       $('cRemNombre').value = c.remitente_nombre || '';
       $('cRemEmail').value = c.remitente_email || '';
-      $('cPassword').value = '';
-      $('cPassword').placeholder = c.tiene_password ? c.password_mask + ' (guardada)' : '';
+      SECRETO_CORREO.pintar(c.tiene_password, c.password_mask);
     } else {
       aplicarPreset();
       $('cRemNombre').value = 'MiFirma';
+      SECRETO_CORREO.pintar(false, '');
+    }
+    SECRETO_CORREO.cablear();
+
+    // Guardada pero ilegible: la clave de cifrado del servidor no es la que se
+    // usó para guardarla. Decirlo acá evita el ciclo de cargarla de nuevo una y
+    // otra vez sin que nada mejore.
+    if (c && c.tiene_password && c.password_descifrable === false) {
+      msg('msgCorreo',
+        'La contraseña está guardada pero no se puede descifrar: la clave de cifrado del servidor ' +
+        '(huella ' + (c.huella_clave || '?') + ') no es la que se usó para guardarla. ' +
+        'Cargala de nuevo.', 'err');
     }
 
     var estado = !c
@@ -219,13 +293,15 @@
         puerto: Number($('cPuerto').value),
         seguridad: $('cSeg').value,
         usuario: $('cUsuario').value.trim(),
-        password: $('cPassword').value || undefined,
+        // undefined = "no la cambies". Nunca se manda lo que haya en el campo:
+        // ver `campoSecreto`.
+        password: SECRETO_CORREO.valor(),
         remitente_nombre: $('cRemNombre').value.trim(),
         remitente_email: $('cRemEmail').value.trim(),
       });
-      // El orden importa: guardar deja la conexion apagada, y la prueba sale
-      // por la conexion ACTIVA. Probar antes de encender falla siempre.
-      ok('msgCorreo', 'Guardado. Encendela y despues mandate un correo de prueba.');
+      // El orden importa: guardar deja la conexión apagada, y la prueba sale
+      // por la conexión ACTIVA. Probar antes de encender falla siempre.
+      ok('msgCorreo', 'Guardado. Encendela y después mandate un correo de prueba.');
       cargarCorreo();
     } catch (e) { msg('msgCorreo', e.message, 'err'); }
   }
@@ -267,9 +343,11 @@
       $('tSms').value = c.from_sms || '';
       $('tWa').value = c.from_whatsapp || '';
       $('tContent').value = c.wa_content_sid || '';
-      $('tToken').value = '';
-      $('tToken').placeholder = c.tiene_token ? c.token_mask + ' (guardado)' : '';
+      SECRETO_TWILIO.pintar(c.tiene_token, c.token_mask);
+    } else {
+      SECRETO_TWILIO.pintar(false, '');
     }
+    SECRETO_TWILIO.cablear();
     $('estadoTwilio').innerHTML = !c
       ? '<span class="pill off">Sin configurar</span> El código sale por correo.'
       : c.activo
@@ -294,7 +372,7 @@
     try {
       await api('/operador/twilio', 'POST', {
         account_sid: $('tSid').value.trim(),
-        auth_token: $('tToken').value || undefined,
+        auth_token: SECRETO_TWILIO.valor(),
         from_sms: $('tSms').value.trim() || undefined,
         from_whatsapp: $('tWa').value.trim() || undefined,
         wa_content_sid: $('tContent').value.trim() || undefined,

@@ -71,6 +71,9 @@
   .tres{display:grid;gap:14px;grid-template-columns:2fr 1fr 1fr}
   @media(max-width:700px){.dos,.tres{grid-template-columns:1fr}}
   .pista{font-size:12.5px;color:var(--mut);margin-top:6px}
+  .guardado{display:flex;align-items:center;gap:10px;padding:9px 12px;border:1px solid var(--line);
+            border-radius:var(--r);background:var(--soft)}
+  .guardado span{font-family:ui-monospace,SFMono-Regular,monospace;font-size:14px;color:var(--mut);flex:1}
   .check{display:flex;align-items:center;gap:9px;font-size:14px;font-weight:500;margin:12px 0 0;cursor:pointer}
   .check input{width:16px;height:16px;accent-color:var(--brand-600);flex:none}
 
@@ -145,6 +148,8 @@
 
 <!-- ============ Consola ============ -->
 <aside id="lateral" class="hidden">
+  <!-- La versión blanca: el logo normal es azul marino y sobre este fondo
+       desaparece. Ya existía en public/, sólo estaba apuntado al que no era. -->
   <div class="logo"><img src="/logo-blanco.svg" alt="MiFirma" /><span>operador</span></div>
   <nav class="menu">
     <button onclick="ir('correo')" data-v="correo">
@@ -205,7 +210,14 @@
           <div><label for="cUsuario">Casilla que se autentica</label>
                <input id="cUsuario" type="email" placeholder="vos@empresa.com" /></div>
           <div><label for="cPassword">Contraseña de aplicación</label>
-               <input id="cPassword" type="password" autocomplete="new-password" /></div>
+               <!-- Ver el comentario de `campoSecreto` en operador.js: el campo
+                    arranca oculto para que ningún gestor de contraseñas pueda
+                    autocompletarlo y pisar la credencial al guardar otra cosa. -->
+               <div class="guardado hidden" id="cPassGuardada">
+                 <span id="cPassMask"></span>
+                 <button type="button" class="btn btn-s chico" id="cPassCambiar">Cambiar</button>
+               </div>
+               <input id="cPassword" type="password" autocomplete="one-time-code" readonly /></div>
         </div>
         <p class="pista">Es una contraseña de aplicación, no la de tu cuenta: con verificación en dos pasos
            activada, la normal la rechazan. Se guarda cifrada y no vuelve nunca a esta pantalla —
@@ -242,7 +254,12 @@
       <div class="cuerpo">
         <div class="dos">
           <div><label for="tSid">Account SID</label><input id="tSid" placeholder="AC…" /></div>
-          <div><label for="tToken">Auth Token</label><input id="tToken" type="password" autocomplete="new-password" /></div>
+          <div><label for="tToken">Auth Token</label>
+               <div class="guardado hidden" id="tTokenGuardado">
+                 <span id="tTokenMask"></span>
+                 <button type="button" class="btn btn-s chico" id="tTokenCambiar">Cambiar</button>
+               </div>
+               <input id="tToken" type="password" autocomplete="one-time-code" readonly /></div>
         </div>
         <p class="pista">El token se guarda cifrado y no vuelve a esta pantalla. Vacío = no se cambia.</p>
 
