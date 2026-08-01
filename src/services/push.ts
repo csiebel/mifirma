@@ -149,7 +149,8 @@ export async function notificarUsuario(
     }
     await registrarSistema(cuentaId, identidadId, {
       accion: ok === 0 && fail > 0 ? 'push.fallido' : 'push.enviado',
-      detalle: { titulo: payload.title, enviadas: ok, fallidas: fail },
+      recursoTipo: 'push',
+      despues: { titulo: payload.title, enviadas: ok, fallidas: fail },
     });
   } catch (e) {
     // Nunca lanza: si algo inesperado falla, lo dejamos en los logs y lo anotamos.

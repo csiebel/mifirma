@@ -7,7 +7,7 @@ import type { FastifyInstance } from 'fastify';
 // con payload vacío devuelven 400 sin conectarse — suficiente para ejercitar el hook de CSRF.
 import { construirServidor } from '../src/server';
 import { emitirTokenOperador } from '../src/operador/sesion';
-import { emitirTokenDev } from '../src/auth/identity';
+import { emitirSesion } from '../src/auth/identity';
 
 const CSRF = 'valor-csrf-de-prueba';
 const HOST = 'localhost'; // Host y Origin consistentes -> chequeo de Origin determinístico
@@ -62,7 +62,7 @@ async function casosCsrf(t: TestContext, app: FastifyInstance, cfg: CfgRealm): P
 test('CSRF Fase B (double-submit + Origin) — realm empresa', async (t) => {
   const app = construirServidor();
   await app.ready();
-  const sess = await emitirTokenDev('00000000-0000-0000-0000-000000000021', '00000000-0000-0000-0000-000000000022');
+  const sess = await emitirSesion('00000000-0000-0000-0000-000000000021', '00000000-0000-0000-0000-000000000022');
   // POST /usuarios valida zod (relacion_id/email/rol_id) antes de DB -> 400 con payload vacío.
   await casosCsrf(t, app, { ruta: '/usuarios', sessCookie: 'sess_emp', csrfCookie: 'csrf_emp', sess });
   await app.close();
@@ -84,7 +84,7 @@ test('CSRF Fase B (double-submit + Origin) — /mi (PWA empleado, comparte sess_
   const app = construirServidor();
   await app.ready();
   // /mi es realm EMPRESA: usa el mismo token e sess_emp/csrf_emp que la consola.
-  const sess = await emitirTokenDev('00000000-0000-0000-0000-000000000041', '00000000-0000-0000-0000-000000000042');
+  const sess = await emitirSesion('00000000-0000-0000-0000-000000000041', '00000000-0000-0000-0000-000000000042');
   // POST /mi/solicitudes valida zod (tipo/desde/hasta) antes de DB -> 400 con payload vacío.
   await casosCsrf(t, app, { ruta: '/mi/solicitudes', sessCookie: 'sess_emp', csrfCookie: 'csrf_emp', sess });
   await app.close();

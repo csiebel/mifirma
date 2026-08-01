@@ -53,7 +53,7 @@ async function configIA(trx: Transaction<DB>, cuentaId: string): Promise<ConfigI
       'p.ia_margen_pct as p_margen',
       's.ia_incluido as s_incl',
       'p.ia_incluido as p_incl',
-      'p.moneda as moneda',
+      's.moneda as moneda',
     ])
     .where('s.cuenta_id', '=', cuentaId)
     .executeTakeFirst();

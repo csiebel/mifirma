@@ -1,100 +1,180 @@
-import { ownerDb } from '../db/owner';
+import { sql, type Transaction } from 'kysely';
+import { db } from '../db/pool';
+import type { DB } from '../db/schema';
+import { fijarContexto } from '../db/contexto';
 import { HttpError } from '../http/errors';
 
-// Borrado total de una empresa (herramienta de operador para empresas de prueba/descarte).
-//
-// CANDADOS (la ruta exige además: solo superadmin):
-//   1. Confirmación por nombre exacto (el operador tiene que tipear el nombre).
-//   2. Se NIEGA si la empresa tiene recibos emitidos (inmutable=true): retención legal.
-//      Además, la base tiene un trigger que impide borrar recibos inmutables, así que
-//      aunque se intentara, la transacción haría rollback (sin borrado parcial).
-//
-// Mecánica: borra las 27 tablas de tenant en orden hijo->padre dentro de una
-// transacción. Las 4 que referencian empresa con ON DELETE CASCADE
-// (api_token, suscripcion, factura_plataforma, recibo_plantilla) se borran solas
-// al eliminar la fila de empresa. El self-FK de unidad_org (parent_id, RESTRICT)
-// se neutraliza poniéndolo en NULL antes de borrar esa tabla.
+/**
+ * Borrado total de una cuenta. Herramienta del operador para cuentas de prueba.
+ *
+ * ═══ EL CANDADO QUE IMPORTA ═══
+ *
+ * Si la cuenta tiene UNA sola instancia firmada, no se borra. Punto.
+ *
+ * No es prudencia excesiva: un documento firmado no es sólo de quien lo emitió.
+ * El firmante tiene su copia y su otorgamiento perpetuo sobre ella
+ * (`propiedad-y-otorgamientos.md`), y el expediente de evidencias es la prueba
+ * que sostiene esa firma en un juicio. Borrar la cuenta emisora destruiría
+ * prueba ajena — de alguien que ni siquiera es cliente nuestro y que confió en
+ * que su firma iba a seguir valiendo.
+ *
+ * Para una cuenta con documentos firmados, la operación correcta es cerrarla
+ * (`cuenta.estado = 'cerrada'`), no borrarla. Los plazos de conservación son
+ * dato del paquete de país y los define el abogado local.
+ *
+ * ═══ MECÁNICA ═══
+ *
+ * Borra en orden hijo → padre dentro de UNA transacción: o se va todo o no se va
+ * nada. Un borrado parcial deja una cuenta rota que nadie puede ni usar ni
+ * limpiar.
+ */
 
-const TABLAS_BORRADO = [
-  'linea_recibo',
-  'envio_recibo',
-  'recibo',
-  'retencion_aplicada',
-  'retencion',
-  'corrida_liquidacion',
-  'novedad',
-  'ausencia_licencia',
-  'evaluacion',
-  'inscripcion',
-  'capacitacion',
-  'relacion_laboral_version',
-  'relacion_laboral',
-  'cargo',
-  'unidad_org',
-  'legajo_doc',
-  'estudio_cert',
+/**
+ * Orden de borrado. Cada tabla va antes que aquella a la que referencia.
+ *
+ * ⚠ Si agregás una tabla con `cuenta_id`, agregala acá. La consulta de
+ * verificación de abajo lo detecta y falla en vez de dejar filas huérfanas.
+ */
+const ORDEN_BORRADO = [
+  'carpeta_permiso',
+  'otorgamiento',
+  'participacion',
+  'instancia',
+  'circuito',
+  'archivo',
+  'ubicacion',
+  'carpeta',
   'usuario_rol',
-  'capacidad',
-  'otp_login',
-  'dispositivo_confiable',
-  'token_acceso',
-  'usuario',
+  'rol_capacidad',
   'rol',
+  'bloque_mensaje',
+  'factura_linea',
+  'factura_plataforma',
+  'suscripcion',
+  'consumo_ia',
+  'medio_pago',
+  'marca',
+  'api_token',
+  'token_acceso',
+  'membresia',
   'persona',
-  'establecimiento',
-  'auditoria',
-];
+  'empresa',
+  'bitacora_plataforma',
+] as const;
 
-export interface ResumenBorrado {
-  ok: true;
-  cuenta_id: string;
-  empresa_nombre: string;
-  filas_borradas: number;
+export interface ResultadoBorrado {
+  cuentaId: string;
+  nombre: string;
+  filasBorradas: Record<string, number>;
 }
 
-export async function borrarEmpresa(cuentaId: string, nombreTipeado: string): Promise<ResumenBorrado> {
-  const db = ownerDb();
+export async function borrarCuenta(
+  cuentaId: string,
+  confirmacionNombre: string,
+): Promise<ResultadoBorrado> {
+  return db.transaction().execute(async (trx) => {
+    // Actor 'sistema' con la cuenta fijada: las políticas de borrado lo admiten
+    // y el contexto acota todo lo que se toca a esta cuenta. No hace falta —ni
+    // conviene— una conexión que evada RLS.
+    await fijarContexto(trx, { actor: 'sistema', cuentaId });
 
-  const emp = await db
-    .selectFrom('empresa')
-    .select(['id', 'nombre'])
-    .where('id', '=', cuentaId)
-    .executeTakeFirst();
-  if (!emp) throw new HttpError(404, 'La empresa no existe (quizás ya fue borrada).');
+    const cuenta = await trx
+      .selectFrom('cuenta')
+      .select(['id', 'nombre_mostrado', 'estado'])
+      .where('id', '=', cuentaId)
+      .executeTakeFirst();
+    if (!cuenta) throw new HttpError(404, 'Esa cuenta no existe.');
 
-  // Candado 1: confirmación por nombre exacto.
-  if ((nombreTipeado || '').trim() !== emp.nombre) {
-    throw new HttpError(400, 'El nombre tipeado no coincide con el de la empresa. No se borró nada.');
-  }
+    // Confirmación por nombre exacto: el operador tiene que tipearlo. Es la
+    // diferencia entre borrar la cuenta que quería y la que tenía al lado en la
+    // lista.
+    if (confirmacionNombre.trim() !== cuenta.nombre_mostrado) {
+      throw new HttpError(
+        400,
+        `Para borrarla hay que escribir su nombre exacto: "${cuenta.nombre_mostrado}".`,
+      );
+    }
 
-  // Candado 2: nunca borrar una empresa con recibos emitidos (inmutables).
-  const emitido = await db
-    .selectFrom('recibo')
-    .select('id')
-    .where('cuenta_id', '=', cuentaId)
-    .where('inmutable', '=', true)
-    .limit(1)
-    .executeTakeFirst();
-  if (emitido) {
+    await verificarSinFirmas(trx, cuentaId);
+    await verificarCoberturaDelOrden(trx);
+
+    const filasBorradas: Record<string, number> = {};
+    for (const tabla of ORDEN_BORRADO) {
+      const r = await sql<{ n: string }>`
+        with borradas as (
+          delete from ${sql.table(tabla)} where cuenta_id = ${cuentaId}::uuid returning 1
+        ) select count(*)::text as n from borradas
+      `.execute(trx);
+      const n = Number(r.rows[0]?.n ?? 0);
+      if (n) filasBorradas[tabla] = n;
+    }
+
+    await trx.deleteFrom('cuenta').where('id', '=', cuentaId).execute();
+
+    return { cuentaId, nombre: cuenta.nombre_mostrado, filasBorradas };
+  });
+}
+
+/**
+ * Nada firmado, ni en curso.
+ *
+ * También frena si hay circuitos despachados sin terminar: hay gente esperando
+ * firmar algo que desaparecería de su bandeja sin explicación.
+ */
+async function verificarSinFirmas(trx: Transaction<DB>, cuentaId: string): Promise<void> {
+  const r = await sql<{ firmadas: string; en_curso: string }>`
+    select
+      count(*) filter (where estado in ('firmada','completada'))::text as firmadas,
+      count(*) filter (where estado in ('en_curso','despachada'))::text as en_curso
+    from instancia
+    where cuenta_propietaria_id = ${cuentaId}::uuid
+  `.execute(trx);
+
+  const firmadas = Number(r.rows[0]?.firmadas ?? 0);
+  const enCurso = Number(r.rows[0]?.en_curso ?? 0);
+
+  if (firmadas > 0) {
     throw new HttpError(
       409,
-      'La empresa tiene recibos emitidos y no se puede borrar (retención legal). Cancelá la suscripción en vez de borrar.',
+      `Esta cuenta tiene ${firmadas} documento(s) firmado(s). No se borra: el firmante tiene su copia y su evidencia, y borrarla destruiría prueba ajena. Si la cuenta ya no opera, cerrala en vez de borrarla.`,
     );
   }
+  if (enCurso > 0) {
+    throw new HttpError(
+      409,
+      `Esta cuenta tiene ${enCurso} circuito(s) en curso. Cancelalos primero: hay firmantes esperando.`,
+    );
+  }
+}
 
-  let filas = 0;
-  await db.transaction().execute(async (trx) => {
-    // Rompe el self-FK de unidad_org (parent_id RESTRICT) antes de borrar la tabla.
-    await trx.updateTable('unidad_org').set({ parent_id: null }).where('cuenta_id', '=', cuentaId).execute();
+/**
+ * Toda tabla con `cuenta_id` tiene que estar en ORDEN_BORRADO.
+ *
+ * Sin esto, agregar una tabla en una migración futura y olvidarse de esta lista
+ * deja filas huérfanas apuntando a una cuenta que ya no existe — y como el
+ * borrado corre en transacción, el `delete from cuenta` fallaría por FK con un
+ * mensaje que no le dice nada a nadie. Mejor fallar acá, con el nombre de la
+ * tabla que falta.
+ */
+async function verificarCoberturaDelOrden(trx: Transaction<DB>): Promise<void> {
+  const r = await sql<{ tabla: string }>`
+    select c.table_name as tabla
+      from information_schema.columns c
+      join pg_class pc on pc.relname = c.table_name
+     where c.table_schema = 'public'
+       and c.column_name = 'cuenta_id'
+       and not pc.relispartition
+       and c.table_name <> 'cuenta'
+  `.execute(trx);
 
-    for (const tabla of TABLAS_BORRADO) {
-      const res = await (trx as any).deleteFrom(tabla).where('cuenta_id', '=', cuentaId).execute();
-      filas += Number(res?.[0]?.numDeletedRows ?? 0n);
-    }
-    // La empresa al final: arrastra (CASCADE) api_token, suscripcion, factura_plataforma y recibo_plantilla.
-    const res = await trx.deleteFrom('empresa').where('id', '=', cuentaId).execute();
-    filas += Number(res?.[0]?.numDeletedRows ?? 0n);
-  });
+  const faltan = r.rows
+    .map((x) => x.tabla)
+    .filter((t) => !(ORDEN_BORRADO as readonly string[]).includes(t));
 
-  return { ok: true, cuenta_id: emp.id, empresa_nombre: emp.nombre, filas_borradas: filas };
+  if (faltan.length) {
+    throw new HttpError(
+      500,
+      `El borrado de cuentas está desactualizado: faltan tablas en ORDEN_BORRADO (${faltan.join(', ')}). Agregalas antes de borrar nada.`,
+    );
+  }
 }

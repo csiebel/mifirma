@@ -42,10 +42,9 @@ import {
 } from '../../services/integracion_facturacion';
 import { asistirOperador } from '../../services/asistente_operador';
 import {
-  listarIndustrias,
+  listarIndustriasOperador,
   crearIndustria,
   editarIndustria,
-  setIndustriaActiva,
   borrarIndustria,
 } from '../../services/industrias';
 
@@ -73,7 +72,6 @@ const franjaSchema = z.object({
 const crearPlanSchema = z.object({
   codigo: z.string().min(1).regex(/^[a-z0-9_-]+$/i, 'Solo letras, números, guion y guion bajo.'),
   nombre: z.string().min(1),
-  moneda: z.string().length(3).optional(),
   modo_precio: z.enum(['fijo', 'por_funcionario']).optional(),
   precio_fijo: z.coerce.number().min(0).optional(),
   precio_por_funcionario: z.coerce.number().min(0).optional(),
@@ -88,7 +86,6 @@ const crearPlanSchema = z.object({
 });
 const editarPlanSchema = z.object({
   nombre: z.string().min(1).optional(),
-  moneda: z.string().length(3).optional(),
   modo_precio: z.enum(['fijo', 'por_funcionario']).optional(),
   precio_fijo: z.coerce.number().min(0).optional(),
   precio_por_funcionario: z.coerce.number().min(0).optional(),
@@ -111,7 +108,6 @@ const factSchema = z.object({ periodo: z.string().regex(/^[0-9]{4}-(0[1-9]|1[0-2
 const crearPlanEstudioSchema = z.object({
   codigo: z.string().min(1).regex(/^[a-z0-9_-]+$/i, 'Solo letras, números, guion y guion bajo.'),
   nombre: z.string().min(1),
-  moneda: z.string().length(3).optional(),
   precio_por_empresa: z.coerce.number().min(0).optional(),
   empresas_gratis: z.coerce.number().int().min(0).optional(),
   limite_empresas: z.coerce.number().int().min(0).nullable().optional(),
@@ -121,7 +117,6 @@ const crearPlanEstudioSchema = z.object({
 });
 const editarPlanEstudioSchema = z.object({
   nombre: z.string().min(1).optional(),
-  moneda: z.string().length(3).optional(),
   precio_por_empresa: z.coerce.number().min(0).optional(),
   empresas_gratis: z.coerce.number().int().min(0).optional(),
   limite_empresas: z.coerce.number().int().min(0).nullable().optional(),
@@ -147,7 +142,6 @@ const guardarPasarelaSchema = z.object({
   proveedor: z.string().min(1),
   nombre: z.string().min(1),
   modo: z.enum(['sandbox', 'produccion']).optional(),
-  moneda: z.string().length(3).optional(),
   client_id: z.string().optional(),
   client_secret: z.string().optional(),
   webhook_secret: z.string().optional(),
@@ -203,7 +197,6 @@ export function registrarRutasOperador(app: FastifyInstance) {
     const b = z
       .object({
         modelo: z.string().min(1),
-        moneda: z.string().length(3).optional(),
         precio_input_millon: z.coerce.number().min(0),
         precio_output_millon: z.coerce.number().min(0),
         vigente_desde: z.string().optional(),
@@ -211,7 +204,6 @@ export function registrarRutasOperador(app: FastifyInstance) {
       .parse(req.body);
     return guardarTarifaIa({
       modelo: b.modelo,
-      moneda: b.moneda,
       precioInputMillon: b.precio_input_millon,
       precioOutputMillon: b.precio_output_millon,
       vigenteDesde: b.vigente_desde,
@@ -334,7 +326,6 @@ export function registrarRutasOperador(app: FastifyInstance) {
       proveedor: b.proveedor,
       nombre: b.nombre,
       modo: b.modo,
-      moneda: b.moneda,
       clientId: b.client_id,
       clientSecret: b.client_secret,
       webhookSecret: b.webhook_secret,
@@ -509,29 +500,30 @@ export function registrarRutasOperador(app: FastifyInstance) {
 
   // ----- Industrias / rubros de empresa (catálogo de plataforma) -----
   app.get('/operador/industrias', async (req) => {
-    await sesion(req);
-    return listarIndustrias();
+    const s = await sesion(req);
+    return { industrias: await listarIndustriasOperador(s.operadorId) };
   });
   app.post('/operador/industrias', async (req) => {
     const s = await sesion(req);
     exigirCap(s, 'gestionar_industrias');
-    const b = z.object({ nombre: z.string().min(1), orden: z.number().optional() }).parse(req.body);
-    return crearIndustria(b);
+    // El nombre va por idioma: el catálogo lo ve un usuario brasileño en
+    // portugués sin que nadie traduzca a mano.
+    const b = z
+      .object({ codigo: z.string().min(1), nombres: z.record(z.string(), z.string()) })
+      .parse(req.body);
+    return crearIndustria(s.operadorId, b);
   });
   app.put('/operador/industrias/:id', async (req) => {
     const s = await sesion(req);
     exigirCap(s, 'gestionar_industrias');
     const { id } = req.params as { id: string };
-    const b = z
-      .object({ nombre: z.string().optional(), orden: z.number().optional(), activo: z.boolean().optional() })
-      .parse(req.body);
-    if (b.activo !== undefined) await setIndustriaActiva(id, b.activo);
-    return editarIndustria(id, b);
+    const b = z.object({ nombres: z.record(z.string(), z.string()) }).parse(req.body);
+    return editarIndustria(s.operadorId, id, b);
   });
   app.delete('/operador/industrias/:id', async (req) => {
     const s = await sesion(req);
     exigirCap(s, 'gestionar_industrias');
     const { id } = req.params as { id: string };
-    return borrarIndustria(id);
+    return borrarIndustria(s.operadorId, id);
   });
 }
