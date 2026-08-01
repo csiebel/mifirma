@@ -12,14 +12,21 @@
       'volver':'Voltar ao site','volver2':'Voltar','correo':'E-mail','password':'Senha',
       'login.h1':'Entrar no MiFirma','login.lead':'Com seu e-mail e sua senha.',
       'btn.entrar':'Entrar','olvide':'Esqueceu sua senha?',
-      'sinCuenta':'Sua empresa ainda não tem conta?','crear':'Crie aqui',
+      'sinCuenta':'Ainda não tem conta?','crear':'Crie aqui',
       'canal.h1':'Por onde mandamos o código?','canal.lead':'É um equipamento novo, então confirmamos que é você.',
       'canal.correo':'Por e-mail','canal.sms':'Por SMS','canal.wa':'Por WhatsApp',
       'otp.h1':'Digite o código','otp.codigo':'Código de 6 dígitos','btn.verificar':'Verificar',
       'otp.reenviar':'Enviar outro código','otp.destino':'Enviamos para {destino}.',
       'otp.enviado':'Pronto, enviamos outro para {destino}.',
       'cuenta.h1':'Em qual conta você quer entrar?','cuenta.lead':'Você tem acesso a mais de uma.',
-      'crear.h1':'Crie a conta da sua empresa',
+      'crear.h1':'Crie a conta da sua empresa','crear.h1.persona':'Crie a sua conta',
+      'crear.lead.persona':'É sua. Se um dia incluir alguém, você dá acesso com o papel que precisar.',
+      'tipo.empresa':'Uma empresa','tipo.empresa.p':'Assina com o nome dela e inclui sua equipe.',
+      'tipo.persona':'Eu, em nome próprio','tipo.persona.p':'Um profissional, um tabelião, alguém que assina sozinho.',
+      'crear.fiscal.persona':'Documento (opcional)','crear.vos.persona':'Seus dados',
+      'crear.tuNombre.p':'É o que seus signatários vão ver no e-mail.',
+      'crear.v1.persona':'Você assina em nome próprio, com validade jurídica.',
+      'err.crear.persona':'Preencha seu nome, e-mail e senha.',
       'crear.lead':'Você cria e depois adiciona sua equipe com o papel de cada um.',
       'crear.nombre':'Nome da empresa','crear.nombre.p':'É o que seus signatários vão ver no e-mail.',
       'crear.pais':'País','crear.fiscal':'CNPJ / RUC / RUT',
@@ -48,14 +55,21 @@
       'volver':'Back to site','volver2':'Back','correo':'Email','password':'Password',
       'login.h1':'Sign in to MiFirma','login.lead':'With your email and password.',
       'btn.entrar':'Sign in','olvide':'Forgot your password?',
-      'sinCuenta':'Your company doesn’t have an account yet?','crear':'Create one',
+      'sinCuenta':'Don’t have an account yet?','crear':'Create one',
       'canal.h1':'Where should we send the code?','canal.lead':'New device, so we check it’s really you.',
       'canal.correo':'By email','canal.sms':'By SMS','canal.wa':'By WhatsApp',
       'otp.h1':'Enter the code','otp.codigo':'6-digit code','btn.verificar':'Verify',
       'otp.reenviar':'Send another code','otp.destino':'We sent it to {destino}.',
       'otp.enviado':'Done, we sent another one to {destino}.',
       'cuenta.h1':'Which account do you want to enter?','cuenta.lead':'You have access to more than one.',
-      'crear.h1':'Create your company account',
+      'crear.h1':'Create your company account','crear.h1.persona':'Create your account',
+      'crear.lead.persona':'It\u2019s yours. If you ever add someone, you give them the role they need.',
+      'tipo.empresa':'A company','tipo.empresa.p':'Signs under its own name and adds its team.',
+      'tipo.persona':'Just me','tipo.persona.p':'A professional, a notary, someone who signs alone.',
+      'crear.fiscal.persona':'ID number (optional)','crear.vos.persona':'Your details',
+      'crear.tuNombre.p':'This is what your signers will see in the email.',
+      'crear.v1.persona':'You sign in your own name, with legal validity.',
+      'err.crear.persona':'Fill in your name, email and password.',
       'crear.lead':'You create it, then add your team with the role each one needs.',
       'crear.nombre':'Company name','crear.nombre.p':'This is what your signers will see in the email.',
       'crear.pais':'Country','crear.fiscal':'Tax ID',
@@ -93,7 +107,12 @@
     'err.faltan':'Completá el correo y la contraseña.','err.codigo':'El código tiene 6 dígitos.',
     'err.correo':'Escribí tu correo.','err.noCoinciden':'Las dos contraseñas tienen que ser iguales.',
     'err.corta':'Mínimo 12 caracteres.','err.crear':'Completá el nombre de la empresa, tu nombre, correo y contraseña.',
-    'ojo.ver':'Mostrar la contraseña','ojo.ocultar':'Ocultar la contraseña'
+    'ojo.ver':'Mostrar la contraseña','ojo.ocultar':'Ocultar la contraseña',
+    'crear.h1.persona':'Creá tu cuenta',
+    'crear.lead.persona':'Es tuya. Si algún día sumás a alguien, le das acceso con el rol que necesite.',
+    'crear.fiscal.persona':'Documento (opcional)','crear.vos.persona':'Tus datos',
+    'crear.v1.persona':'Firmás a título propio, con validez legal.',
+    'err.crear.persona':'Completá tu nombre, correo y contraseña.'
   });
 
   var LANG = 'es';
@@ -111,6 +130,18 @@
   }
 
   var VISTAS = ['vLogin','vCanal','vOtp','vCuenta','vCrear','vReset','vNuevaPassword'];
+
+  /* -------------------------------------------------------------------------
+     Empresa o persona.
+
+     No es un detalle de formulario: son dos tipos de cuenta distintos en la
+     base (`cuenta.tipo`). La de persona lleva `identidad_titular_id` —la cuenta
+     ES de alguien— y no crea fila en `empresa`, porque no hay razón social ni
+     giro que registrar. El resto es idéntico: mismos roles, mismas carpetas,
+     mismo repositorio. Un escribano que firma solo hoy puede sumar una
+     secretaria mañana sin migrar nada.
+     ------------------------------------------------------------------------- */
+  var TIPO = 'empresa';
   var DESAFIO_OTP = null, DESAFIO_CUENTA = null, TOKEN_RESET = null, CANAL_TEL = 'sms';
 
   function $(id){ return document.getElementById(id); }
@@ -260,12 +291,66 @@
   }
   function volverAlLogin(){ DESAFIO_OTP=null; DESAFIO_CUENTA=null; msg('msgLogin','',''); ver('vLogin'); }
 
-  // ---------------- Alta de empresa ----------------
+  // ---------------- Alta de cuenta ----------------
+
+  /**
+   * Cambia el formulario según el tipo.
+   *
+   * En vez de escribir los textos a mano, se cambia la CLAVE de traducción de
+   * cada elemento (`data-t`). Así cambiar de idioma después de elegir "persona"
+   * sigue mostrando los textos de persona: `idioma()` recorre los mismos
+   * elementos y encuentra la clave que corresponde. Escribiendo el texto a mano
+   * habría que acordarse de repintar en dos lugares, y uno de los dos se olvida.
+   */
+  function pintarTipo(){
+    var esP = TIPO === 'persona';
+    $('bloqueEmpresa').classList.toggle('hidden', esP);
+    $('bloqueRazon').classList.toggle('hidden', esP);
+    $('pistaNombre').classList.toggle('hidden', !esP);
+
+    // ⚠ A una persona NO se le pide el documento acá, y no es un olvido.
+    //
+    // El documento de alguien es un ANCLAJE de identidad (migración 003), y un
+    // anclaje es una PRUEBA: se establece cuando la persona lo demuestra —con
+    // un certificado, con un proveedor de identidad—, no cuando lo escribe en
+    // un formulario. Guardar un número tipeado como si fuera identidad probada
+    // es exactamente la confusión que este producto no se puede permitir: sobre
+    // eso se decide después si una firma es oponible.
+    //
+    // La empresa es otra cosa: su RUT es un dato registral del contribuyente,
+    // va en la tabla `empresa` y no pretende identificar a nadie.
+    $('bloqueFiscal').classList.toggle('hidden', esP);
+    $('filaPaisFiscal').style.gridTemplateColumns = esP ? '1fr' : '';
+
+    $('crearTitulo').dataset.t = esP ? 'crear.h1.persona' : 'crear.h1';
+    $('crearLead').dataset.t   = esP ? 'crear.lead.persona' : 'crear.lead';
+    $('crearVos').dataset.t    = esP ? 'crear.vos.persona' : 'crear.vos';
+    $('ventaja1').dataset.t    = esP ? 'crear.v1.persona' : 'crear.v1';
+    $('cFiscal').placeholder   = esP ? '' : '21 555 3300 12';
+
+    document.querySelectorAll('#vCrear [data-t]').forEach(function(el){
+      var v = t(el.dataset.t); if (v) el.textContent = v;
+    });
+    document.querySelectorAll('.opcTipo').forEach(function(b){
+      b.setAttribute('aria-pressed', String(b.dataset.tipo === TIPO));
+    });
+  }
+
+  function elegirTipo(tipo){
+    TIPO = tipo === 'persona' ? 'persona' : 'empresa';
+    msg('msgCrear','','');
+    pintarTipo();
+  }
+
   async function crearCuenta(){
-    var nombre = $('cNombre').value.trim();
+    var esP    = TIPO === 'persona';
     var admin  = { nombre: $('cAdminNombre').value.trim(), email: $('cAdminEmail').value.trim(), password: $('cPass').value };
+    // Una cuenta de persona se llama como la persona. Pedir "nombre de la
+    // cuenta" y "tu nombre" por separado es hacer que alguien escriba dos veces
+    // lo mismo y después dude de si escribió mal alguno.
+    var nombre = esP ? admin.nombre : $('cNombre').value.trim();
     if (!nombre || !admin.nombre || !admin.email || !admin.password) {
-      return msg('msgCrear', t('err.crear'), 'err');
+      return msg('msgCrear', t(esP ? 'err.crear.persona' : 'err.crear'), 'err');
     }
     // Repetirla no es burocracia: es la única red contra un error de tipeo en
     // la contraseña del ADMINISTRADOR de la cuenta, que además todavía no tiene
@@ -277,10 +362,13 @@
     msg('msgCrear','',''); ocupado('btnCrear', true);
     try{
       var j = await api('/auth/registro','POST',{
+        tipo: TIPO,
         nombre: nombre,
         pais: $('cPais').value,
-        id_fiscal: $('cFiscal').value.trim() || undefined,
-        razon_social: $('cRazon').value.trim() || undefined,
+        id_fiscal: esP ? undefined : ($('cFiscal').value.trim() || undefined),
+        // La razón social es de la empresa. Mandarla en una cuenta de persona
+        // sería inventarle una que no tiene.
+        razon_social: esP ? undefined : ($('cRazon').value.trim() || undefined),
         admin: admin
       });
       entrar(j);
@@ -335,12 +423,17 @@
   window.login = login; window.enviarCodigo = enviarCodigo; window.verificarCodigo = verificarCodigo;
   window.reenviar = reenviar; window.volverAlLogin = volverAlLogin;
   window.pedirReset = pedirReset; window.guardarPassword = guardarPassword; window.crearCuenta = crearCuenta;
+  window.elegirTipo = elegirTipo;
   Object.defineProperty(window, 'CANAL_TEL', { get: function(){ return CANAL_TEL; } });
 
   var guardado; try{ guardado = localStorage.getItem('mf_lang'); }catch(e){}
   var nav = (navigator.language || 'es').slice(0,2);
   idioma(guardado || (T[nav] ? nav : 'es'));
   ponerOjos();
+  document.querySelectorAll('.opcTipo').forEach(function(b){
+    b.addEventListener('click', function(){ elegirTipo(b.dataset.tipo); });
+  });
+  pintarTipo();
   if (!leerHash()) ver('vLogin');
   window.addEventListener('hashchange', function(){ if (!leerHash()) ver('vLogin'); });
 })();

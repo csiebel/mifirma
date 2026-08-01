@@ -1,9 +1,38 @@
 -- =============================================================================
 -- MiFirma — tests de autorización
--- Se corren como app_rw (NO como superusuario: el superusuario bypassa RLS).
+--
+-- ⚠ SE CORREN COMO app_rw. El superusuario y el dueño de las tablas SALTEAN RLS
+--   sin decir nada: todas las consultas devuelven todo y los tests dan verde sin
+--   haber probado absolutamente nada.
+--
+--   Esto no es teórico. El 1/8/2026 el archivo ya decía "se corren como app_rw"
+--   en un comentario, pero nada lo hacía cumplir: se corrió con la conexión de
+--   postgres y pasó igual — porque las tablas estaban vacías y contar cero da
+--   cero con RLS y sin ella. El día que hubo dos cuentas reales, T1 falló y
+--   recién ahí se supo que el test nunca había probado nada.
+--
+--   De ahí el `set role` y la guarda de abajo: ahora es imposible correrlos de
+--   una forma que los vuelva inofensivos.
 -- =============================================================================
 
 \set ON_ERROR_STOP on
+
+set role app_rw;
+
+do $guarda$ begin
+  if (select rolsuper from pg_roles where rolname = current_user) then
+    raise exception 'ABORTADO: estos tests corren como % y el superusuario saltea RLS', current_user;
+  end if;
+  if not current_setting('row_security')::boolean then
+    raise exception 'ABORTADO: row_security está apagado en esta sesión';
+  end if;
+  -- El dueño de la tabla también saltea RLS, salvo FORCE ROW LEVEL SECURITY.
+  if exists (select 1 from pg_class c join pg_roles r on r.oid = c.relowner
+              where c.relname = 'cuenta' and r.rolname = current_user) then
+    raise exception 'ABORTADO: % es dueño de las tablas y saltea RLS', current_user;
+  end if;
+  raise notice 'Corriendo como % — RLS activa', current_user;
+end $guarda$;
 
 -- Identificadores de la semilla. Van acá y no en la línea de comandos: un test
 -- que sólo corre si alguien recuerda nueve `-v` es un test que no se corre.
@@ -16,6 +45,8 @@
 \set anclaje_b   'b1000000-0000-0000-0000-000000000001'
 \set anclaje_ext 'e1000000-0000-0000-0000-000000000001'
 \set otorg_ext   'a8000000-0000-0000-0000-000000000001'
+\set circuito_a  'a5000000-0000-0000-0000-000000000001'
+\set instancia_a 'a6000000-0000-0000-0000-000000000001'
 
 -- ---------- TEST 1: contexto vacío no ve absolutamente nada ------------------
 begin;
@@ -179,6 +210,129 @@ begin;
 rollback;
 
 
+-- ---------- TEST 9: la evidencia se escribe una vez y no se toca más --------
+--
+-- Es la tabla que sostiene el valor legal del producto. Si la aplicación puede
+-- editar o borrar un evento, el expediente deja de probar nada — y el agujero
+-- no se nota hasta que alguien lo usa.
+--
+-- Se prueban las dos cerraduras por separado, porque son independientes: el
+-- REVOKE de privilegios y la política `using (false)`. Cualquiera de las dos
+-- alcanza para frenar; tener las dos es lo que hace que un error en una
+-- migración no abra la puerta.
+begin;
+  set local app.actor = 'cuenta';
+  set local app.cuenta_id = :'cuenta_a';
+  set local app.identidad_id = :'ident_a';
+  set local app.anclajes_probados = :'anclaje_a';
+  set local app.nivel_garantia = 'bajo';
+
+  do $$
+  declare
+    v_afect int;
+    v1 record; v2 record;
+  begin
+    insert into evidencia (instancia_id, circuito_id, cuenta_propietaria_id,
+                           actor_tipo, tipo, datos, ocurrido_en,
+                           numero_orden, hash_contenido, hash_propio)
+    values ('a6000000-0000-0000-0000-000000000001', 'a5000000-0000-0000-0000-000000000001',
+            'aaaaaaaa-0000-0000-0000-000000000001', 'emisor', 'documento.subido',
+            '{"n":1}'::jsonb, now(), 0, ''::bytea, ''::bytea);
+
+    insert into evidencia (instancia_id, circuito_id, cuenta_propietaria_id,
+                           actor_tipo, tipo, datos, ocurrido_en,
+                           numero_orden, hash_contenido, hash_propio)
+    values ('a6000000-0000-0000-0000-000000000001', 'a5000000-0000-0000-0000-000000000001',
+            'aaaaaaaa-0000-0000-0000-000000000001', 'emisor', 'documento.descargado',
+            '{"n":2}'::jsonb, now(), 0, ''::bytea, ''::bytea);
+
+    select * into v1 from evidencia
+     where instancia_id = 'a6000000-0000-0000-0000-000000000001' and numero_orden = 1;
+    select * into v2 from evidencia
+     where instancia_id = 'a6000000-0000-0000-0000-000000000001' and numero_orden = 2;
+
+    -- El trigger numeró y encadenó, aunque el insert mandó ceros y vacíos.
+    if v1.id is null or v2.id is null then
+      raise exception 'FALLA T9: el trigger no numeró la secuencia por instancia';
+    end if;
+    if v1.hash_anterior is not null then
+      raise exception 'FALLA T9: el primer evento no puede tener hash anterior';
+    end if;
+    if v2.hash_anterior is distinct from v1.hash_propio then
+      raise exception 'FALLA T9: la cadena no engancha el segundo evento con el primero';
+    end if;
+    if v2.hash_propio is distinct from
+       digest(encode(v1.hash_propio,'hex') ||'|'|| encode(v2.hash_contenido,'hex'), 'sha256') then
+      raise exception 'FALLA T9: hash_propio no sale de (hash_anterior + hash_contenido)';
+    end if;
+
+    -- Modificar: el REVOKE frena antes que la política, así que lo esperable es
+    -- un error de privilegio. Si algún día se devolviera el GRANT, la política
+    -- tiene que dejarlo en cero filas — y eso también se acepta acá.
+    begin
+      update evidencia set datos = '{"alterado":true}'::jsonb
+       where instancia_id = 'a6000000-0000-0000-0000-000000000001';
+      get diagnostics v_afect = row_count;
+      if v_afect > 0 then
+        raise exception 'FALLA T9: se modificaron % filas de evidencia', v_afect;
+      end if;
+    exception when insufficient_privilege then null;
+    end;
+
+    begin
+      delete from evidencia where instancia_id = 'a6000000-0000-0000-0000-000000000001';
+      get diagnostics v_afect = row_count;
+      if v_afect > 0 then
+        raise exception 'FALLA T9: se borraron % filas de evidencia', v_afect;
+      end if;
+    exception when insufficient_privilege then null;
+    end;
+
+    raise notice 'OK T9 — la evidencia se encadena sola y no se puede editar ni borrar';
+  end $$;
+rollback;
+
+-- ---------- TEST 10: el expediente no cruza cuentas -------------------------
+--
+-- El expediente tiene IP, dispositivo y horarios de gente real. Que la cuenta B
+-- no vea el de A es el mismo aislamiento de T2, pero sobre la tabla donde una
+-- filtración duele más.
+begin;
+  set local app.actor = 'cuenta';
+  set local app.cuenta_id = :'cuenta_a';
+  set local app.identidad_id = :'ident_a';
+  set local app.anclajes_probados = :'anclaje_a';
+  set local app.nivel_garantia = 'bajo';
+
+  do $$
+  declare v int;
+  begin
+    insert into evidencia (instancia_id, circuito_id, cuenta_propietaria_id,
+                           actor_tipo, tipo, datos, ocurrido_en, ip,
+                           numero_orden, hash_contenido, hash_propio)
+    values ('a6000000-0000-0000-0000-000000000001', 'a5000000-0000-0000-0000-000000000001',
+            'aaaaaaaa-0000-0000-0000-000000000001', 'firmante', 'firma.aplicada',
+            '{}'::jsonb, now(), '181.45.1.1'::inet, 0, ''::bytea, ''::bytea);
+
+    select count(*) into v from evidencia
+     where instancia_id = 'a6000000-0000-0000-0000-000000000001';
+    if v = 0 then raise exception 'FALLA T10: la cuenta dueña no ve su propio expediente'; end if;
+  end $$;
+
+  -- Misma transacción, otra cuenta: la fila existe y no tiene que verse.
+  set local app.cuenta_id = :'cuenta_b';
+  set local app.identidad_id = :'ident_b';
+  set local app.anclajes_probados = :'anclaje_b';
+
+  do $$
+  declare v int;
+  begin
+    select count(*) into v from evidencia;
+    if v <> 0 then raise exception 'FALLA T10: la cuenta B ve % evento(s) del expediente de A', v; end if;
+    raise notice 'OK T10 — el expediente de una cuenta no lo ve otra';
+  end $$;
+rollback;
+
 -- ---------- TEST 11: la plata no cruza cuentas --------------------------------
 -- Distinto de T2: acá no hay otorgamiento que valga. Un documento puede cruzar
 -- de la cuenta A a un firmante de la B; una factura, jamás.
@@ -249,3 +403,7 @@ begin;
     raise notice 'OK T13 — la capacidad de facturación se verifica en la capa de datos';
   end $$;
 rollback;
+
+reset role;
+
+do $fin$ begin raise notice 'Los 13 tests de RLS pasaron.'; end $fin$;

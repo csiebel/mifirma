@@ -1,6 +1,7 @@
 import Fastify, { type FastifyInstance, type FastifyRequest } from 'fastify';
 import rateLimit from '@fastify/rate-limit';
 import cookie from '@fastify/cookie';
+import multipart from '@fastify/multipart';
 import { readFileSync } from 'node:fs';
 import { ZodError } from 'zod';
 import { autenticar, type Identidad } from './auth/identity';
@@ -17,6 +18,7 @@ import { registrarRutasPublico } from './http/routes/publico';
 import { registrarRutasPagosWebhook } from './http/routes/pagos_webhook';
 import { registrarRutasAyuda } from './http/routes/ayuda';
 import { registrarRutasDocumentos } from './http/routes/documentos';
+import { registrarRutasRepositorio } from './http/routes/repositorio';
 
 declare module 'fastify' {
   interface FastifyRequest {
@@ -63,6 +65,12 @@ export function construirServidor(): FastifyInstance {
   // Parsea req.cookies y habilita reply.setCookie/clearCookie. Sin firma: el valor es un JWT
   // que ya se verifica por su propia firma; no hace falta firmar la cookie además.
   app.register(cookie);
+
+  // Subida de documentos. El `bodyLimit` de arriba (5 MB) es para cuerpos JSON;
+  // los PDF van por multipart, con su propio tope. Un archivo por request: la
+  // subida masiva es otro camino —una planilla más un PDF plantilla— y no una
+  // request con doscientos adjuntos.
+  app.register(multipart, { limits: { fileSize: 30 * 1024 * 1024, files: 1 } });
 
   // Cabeceras de seguridad en todas las respuestas (defensa en profundidad):
   //  - nosniff: el navegador no reinterpreta el tipo de un archivo (clave para los
@@ -370,6 +378,7 @@ export function construirServidor(): FastifyInstance {
   registrarRutasPagosWebhook(app);
   registrarRutasAyuda(app);
   registrarRutasDocumentos(app);
+  registrarRutasRepositorio(app);
 
   app.setErrorHandler((err, _req, reply) => {
     if (err instanceof ZodError) {

@@ -51,6 +51,18 @@
   input[inputmode="numeric"]{letter-spacing:.5em;font-size:23px;text-align:center;font-weight:700}
   .dos{display:grid;gap:12px;grid-template-columns:1fr 1fr}
 
+  /* Elegir si la cuenta es de una empresa o de una persona. Va arriba de todo
+     y no en un desplegable perdido: cambia qué campos se piden, y descubrirlo
+     a mitad del formulario es motivo suficiente para abandonarlo. */
+  .tipo{display:grid;gap:10px;grid-template-columns:1fr 1fr;margin:4px 0 20px}
+  @media(max-width:560px){.tipo{grid-template-columns:1fr}}
+  .opcTipo{text-align:left;font:inherit;background:var(--paper);cursor:pointer;
+           border:1.5px solid var(--line);border-radius:var(--r);padding:13px 15px;transition:.15s}
+  .opcTipo:hover{border-color:var(--brand)}
+  .opcTipo[aria-pressed="true"]{border-color:var(--brand);background:var(--brand-50)}
+  .opcTipo b{display:block;font-size:14.5px}
+  .opcTipo span{color:var(--mut);font-size:12.5px;line-height:1.4;display:block}
+
   /* Campo de contraseña con el ojo para revelarla. El botón lo inyecta
      entrar.js sobre cada input[type=password]: así no hay que acordarse de
      ponerlo en cada pantalla nueva. */
@@ -123,7 +135,7 @@
     <div class="foot">
       <button class="link" onclick="ver('vReset')" data-t="olvide">¿Olvidaste tu contraseña?</button>
       <br /><br />
-      <span data-t="sinCuenta">¿Tu empresa todavía no tiene cuenta?</span>
+      <span data-t="sinCuenta">¿Todavía no tenés cuenta?</span>
       <button class="link" onclick="ver('vCrear')" data-t="crear">Creala acá</button>
     </div>
   </section>
@@ -170,14 +182,27 @@
 
   <!-- ============ Crear cuenta de empresa ============ -->
   <section id="vCrear" class="card ancha hidden">
-    <h1 data-t="crear.h1">Creá la cuenta de tu empresa</h1>
-    <p class="lead" data-t="crear.lead">La creás vos y después sumás a tu equipo con el rol que le corresponda a cada uno.</p>
+    <h1 id="crearTitulo" data-t="crear.h1">Creá la cuenta de tu empresa</h1>
+    <p class="lead" id="crearLead" data-t="crear.lead">La creás vos y después sumás a tu equipo con el rol que le corresponda a cada uno.</p>
 
-    <label for="cNombre" data-t="crear.nombre">Nombre de la empresa</label>
-    <input id="cNombre" placeholder="Ferretería del Centro" />
-    <p class="pista" data-t="crear.nombre.p">Es el que van a ver tus firmantes en el correo.</p>
+    <div class="tipo" role="group">
+      <button type="button" class="opcTipo" data-tipo="empresa" aria-pressed="true">
+        <b data-t="tipo.empresa">Una empresa</b>
+        <span data-t="tipo.empresa.p">Firma con su nombre y suma a su equipo.</span>
+      </button>
+      <button type="button" class="opcTipo" data-tipo="persona" aria-pressed="false">
+        <b data-t="tipo.persona">Yo, a título propio</b>
+        <span data-t="tipo.persona.p">Un profesional, un escribano, alguien que firma solo.</span>
+      </button>
+    </div>
 
-    <div class="dos">
+    <div id="bloqueEmpresa">
+      <label for="cNombre" data-t="crear.nombre">Nombre de la empresa</label>
+      <input id="cNombre" placeholder="Ferretería del Centro" />
+      <p class="pista" data-t="crear.nombre.p">Es el que van a ver tus firmantes en el correo.</p>
+    </div>
+
+    <div class="dos" id="filaPaisFiscal">
       <div>
         <label for="cPais" data-t="crear.pais">País</label>
         <select id="cPais">
@@ -186,24 +211,27 @@
           <option value="BR">🇧🇷 Brasil</option>
         </select>
       </div>
-      <div>
-        <label for="cFiscal" data-t="crear.fiscal">RUT / RUC / CNPJ</label>
+      <div id="bloqueFiscal">
+        <label id="lblFiscal" for="cFiscal" data-t="crear.fiscal">RUT / RUC / CNPJ</label>
         <input id="cFiscal" placeholder="21 555 3300 12" />
       </div>
     </div>
     <p class="pista" data-t="crear.pais.p">El país define qué ley y qué certificadores se aplican. No se puede cambiar después.</p>
 
-    <label for="cRazon" data-t="crear.razon">Razón social <span style="font-weight:400;color:var(--mut)" data-t="crear.opcional">(opcional)</span></label>
-    <input id="cRazon" placeholder="COMERCIAL DEL CENTRO S.R.L." />
+    <div id="bloqueRazon">
+      <label for="cRazon" data-t="crear.razon">Razón social <span style="font-weight:400;color:var(--mut)" data-t="crear.opcional">(opcional)</span></label>
+      <input id="cRazon" placeholder="COMERCIAL DEL CENTRO S.R.L." />
+    </div>
 
     <div class="foot" style="border:0;padding:0;margin-top:26px">
-      <b style="color:var(--ink);font-size:14px" data-t="crear.vos">Tu usuario de administrador</b>
+      <b id="crearVos" style="color:var(--ink);font-size:14px" data-t="crear.vos">Tu usuario de administrador</b>
     </div>
 
     <div class="dos">
       <div>
         <label for="cAdminNombre" data-t="crear.tuNombre">Tu nombre</label>
         <input id="cAdminNombre" placeholder="Ana Pérez" />
+        <p class="pista hidden" id="pistaNombre" data-t="crear.tuNombre.p">Es el que van a ver tus firmantes en el correo.</p>
       </div>
       <div>
         <label for="cAdminEmail" data-t="correo">Correo</label>
@@ -223,7 +251,7 @@
 
     <div class="venta">
       <ul>
-        <li data-t="crear.v1">Sumás a tu equipo con un correo y le asignás un rol.</li>
+        <li id="ventaja1" data-t="crear.v1">Sumás a tu equipo con un correo y le asignás un rol.</li>
         <li data-t="crear.v2">Cada carpeta define quién ve y quién puede enviar.</li>
         <li data-t="crear.v3">Quien firma tus documentos no necesita cuenta.</li>
       </ul>

@@ -108,6 +108,7 @@
     if (location.hash.slice(1) !== vista) location.hash = vista;
     window.scrollTo(0, 0);
 
+    if (vista === 'documentos') cargarSelectorCarpetas();
     if (vista === 'carpetas') cargarCarpetas();
     if (vista === 'accesos') cargarUsuarios();
     if (vista === 'roles') cargarRoles();
@@ -131,6 +132,242 @@
   function cerrarModal() { $('modal').innerHTML = ''; }
 
   document.addEventListener('keydown', function (e) { if (e.key === 'Escape') cerrarModal(); });
+
+  // ===========================================================================
+  // DOCUMENTOS
+  //
+  // Subir un PDF no crea "un documento": crea un archivo, un circuito en
+  // borrador, una instancia y una ubicación. Puede parecer mucho, pero es lo
+  // que evita el rediseño de la semana siguiente — cuando le agregues firmantes
+  // y lo mandes, el documento no se convierte en otra cosa, cambia de estado.
+  // ===========================================================================
+  var ESTADO_DOC = {
+    borrador:  '<span class="pill no">Borrador</span>',
+    enviado:   '<span class="pill esp">Esperando firmas</span>',
+    completo:  '<span class="pill ok">Firmado</span>',
+    cancelado: '<span class="pill no">Cancelado</span>',
+    vencido:   '<span class="pill no">Vencido</span>',
+  };
+
+  function aplanar(nodos, salida, nivel) {
+    (nodos || []).forEach(function (n) {
+      salida.push({ id: n.id, nombre: '  '.repeat(nivel) + n.nombre });
+      aplanar(n.hijos, salida, nivel + 1);
+    });
+    return salida;
+  }
+
+  async function cargarSelectorCarpetas() {
+    try {
+      if (!ARBOL.length) ARBOL = (await api('/carpetas')).carpetas || [];
+      var lista = aplanar(ARBOL, [], 0);
+      var sel = $('carpetaDocs');
+      var previo = sel.value;
+      sel.innerHTML = lista
+        .map(function (c) { return '<option value="' + esc(c.id) + '">' + c.nombre + '</option>'; })
+        .join('');
+      if (previo) sel.value = previo;
+      cargarDocumentos();
+    } catch (e) {
+      msg('msgDocs', e.message, 'err');
+    }
+  }
+
+  async function cargarDocumentos() {
+    var carpetaId = $('carpetaDocs').value;
+    if (!carpetaId) return;
+    msg('msgDocs', '', '');
+    $('tDocumentos').innerHTML = '<tr><td colspan="5" class="vacio">Un momento…</td></tr>';
+    try {
+      var j = await api('/documentos?carpeta_id=' + encodeURIComponent(carpetaId));
+      pintarDocumentos(j.documentos || []);
+    } catch (e) {
+      $('tDocumentos').innerHTML = '<tr><td colspan="5" class="vacio">' + esc(e.message) + '</td></tr>';
+    }
+  }
+
+  function tamano(b) {
+    return b >= 1048576 ? (b / 1048576).toFixed(1) + ' MB' : Math.max(1, Math.round(b / 1024)) + ' KB';
+  }
+  function fecha(s) {
+    try { return new Date(s).toLocaleDateString('es', { day: '2-digit', month: 'short', year: 'numeric' }); }
+    catch (e) { return ''; }
+  }
+
+  function pintarDocumentos(docs) {
+    if (!docs.length) {
+      $('tDocumentos').innerHTML =
+        '<tr><td colspan="5" class="vacio">No hay documentos en esta carpeta.</td></tr>';
+      return;
+    }
+    $('tDocumentos').innerHTML = docs
+      .map(function (d) {
+        return (
+          '<tr><td><b>' + esc(d.titulo) + '</b><br>' +
+          '<span style="font-size:12.5px;color:var(--mut)">' + tamano(d.bytes) +
+          (d.paginas ? ' · ' + d.paginas + ' págs' : '') + '</span></td>' +
+          '<td>' + (ESTADO_DOC[d.circuito_estado] || esc(d.circuito_estado)) + '</td>' +
+          '<td>' + (d.firmas_total
+            ? d.firmas_hechas + ' de ' + d.firmas_total
+            : '<span style="color:var(--mut)">sin firmantes</span>') + '</td>' +
+          '<td>' + esc(fecha(d.creado_en)) + '</td>' +
+          '<td><div class="acc" style="justify-content:flex-end">' +
+          '<button class="btn btn-s chico" data-ver="' + esc(d.instancia_id) +
+          '" data-tit="' + esc(d.titulo) + '">Ver</button>' +
+          '<button class="btn btn-s chico" data-exp="' + esc(d.instancia_id) + '">Expediente</button>' +
+          '</div></td></tr>'
+        );
+      })
+      .join('');
+
+    $('tDocumentos').querySelectorAll('[data-ver]').forEach(function (b) {
+      b.addEventListener('click', function () { abrirVisor(b.dataset.ver, b.dataset.tit); });
+    });
+    $('tDocumentos').querySelectorAll('[data-exp]').forEach(function (b) {
+      b.addEventListener('click', function () { verExpediente(b.dataset.exp); });
+    });
+  }
+
+  /**
+   * El visor.
+   *
+   * El documento se abre DENTRO de la consola y no en otra pestaña: el botón
+   * atrás del navegador no es una forma de cerrar un documento, y cuando acá
+   * adentro haya que poner campos y firmar, esta ventana es donde va a pasar.
+   *
+   * El PDF lo dibuja el visor del navegador dentro de un iframe. No usamos una
+   * librería de render: la del navegador ya está, está probada y es la misma que
+   * el firmante va a usar para leer lo que firma.
+   */
+  function abrirVisor(instanciaId, titulo) {
+    var url = '/documentos/' + instanciaId + '/archivo';
+    $('modal').innerHTML =
+      '<div class="fondo" id="fondo"><div class="modal visor">' +
+      '<div class="cabVisor">' +
+      '<div style="min-width:0"><b style="display:block;font-size:15px;overflow:hidden;' +
+      'text-overflow:ellipsis;white-space:nowrap">' + esc(titulo || 'Documento') + '</b>' +
+      '<span style="font-size:12.5px;color:var(--mut)">Abrirlo queda registrado en el expediente</span></div>' +
+      '<div class="acc">' +
+      '<a class="btn btn-s chico" style="text-decoration:none" href="' + esc(url) +
+      '" target="_blank" rel="noopener">Abrir aparte</a>' +
+      '<button class="btn btn-p chico" id="mCerrar">Cerrar</button>' +
+      '</div></div>' +
+      '<iframe src="' + esc(url) + '" title="' + esc(titulo || 'Documento') + '"></iframe>' +
+      '</div></div>';
+
+    $('fondo').addEventListener('mousedown', function (e) { if (e.target.id === 'fondo') cerrarModal(); });
+    $('mCerrar').addEventListener('click', cerrarModal);
+    $('mCerrar').focus();
+  }
+
+  function abrirSubir() {
+    abrirModal(
+      '<h2>Subir documento</h2>' +
+      '<p class="sub">Por ahora, PDF. Queda en borrador: todavía no se le pide la firma a nadie.</p>' +
+      '<label class="campo" for="mArchivo">Archivo</label>' +
+      '<input id="mArchivo" type="file" accept="application/pdf" />' +
+      '<label class="campo" for="mTitulo">Título <span style="font-weight:400;color:var(--mut)">(opcional)</span></label>' +
+      '<input id="mTitulo" maxlength="200" placeholder="Se usa el nombre del archivo" />' +
+      '<p class="pista">Va a la carpeta que tenés elegida. Los permisos de esa carpeta deciden quién lo ve.</p>' +
+      '<div id="msgModal"></div>' +
+      '<div class="acc"><button class="btn btn-s" id="mCancel">Cancelar</button>' +
+      '<button class="btn btn-p" id="mOk">Subir</button></div>'
+    );
+    $('mCancel').addEventListener('click', cerrarModal);
+    $('mOk').addEventListener('click', async function () {
+      var f = $('mArchivo').files[0];
+      if (!f) return msg('msgModal', 'Elegí un archivo.', 'err');
+      $('mOk').disabled = true;
+      msg('msgModal', '', '');
+      try {
+        var fd = new FormData();
+        fd.append('carpeta_id', $('carpetaDocs').value);
+        var tit = $('mTitulo').value.trim();
+        if (tit) fd.append('titulo', tit);
+        // El archivo va ÚLTIMO a propósito: el servidor lee el stream del
+        // archivo y recién después los campos de texto. Si el archivo fuera
+        // primero, `carpeta_id` no estaría disponible al procesarlo.
+        fd.append('archivo', f, f.name);
+
+        var c = csrf();
+        var r = await fetch('/documentos', {
+          method: 'POST',
+          credentials: 'same-origin',
+          headers: c ? { 'X-CSRF-Token': c } : {},
+          body: fd,   // sin Content-Type: lo pone el navegador con su boundary
+        });
+        var txt = await r.text();
+        var data; try { data = txt ? JSON.parse(txt) : {}; } catch (e2) { data = { error: txt }; }
+        if (!r.ok) throw new Error(data.error || ('HTTP ' + r.status));
+
+        cerrarModal();
+        await cargarDocumentos();
+        if (data.duplicado) {
+          msg('msgDocs', 'Ese archivo ya estaba subido: se reusó el mismo contenido.', 'ok');
+        }
+      } catch (e) {
+        msg('msgModal', e.message, 'err');
+        $('mOk').disabled = false;
+      }
+    });
+  }
+
+  /**
+   * El expediente.
+   *
+   * Se muestra el resultado de verificar la cadena arriba de todo, no escondido
+   * al final: si no cierra, es lo primero que hay que saber.
+   */
+  async function verExpediente(instanciaId) {
+    abrirModal('<h2>Expediente</h2><p class="sub">Buscando…</p>');
+    try {
+      var j = await api('/documentos/' + instanciaId + '/evidencia');
+      var c = j.cadena;
+      var estado = c.integra
+        ? '<div class="msg ok">Cadena íntegra: ' + c.eventos + ' evento' + (c.eventos === 1 ? '' : 's') +
+          ', sin huecos ni alteraciones.</div>'
+        : '<div class="msg err">La cadena no cierra: ' + c.huecos + ' hueco(s) y ' + c.rotos +
+          ' evento(s) alterado(s). No emitas un certificado con este expediente.</div>';
+
+      var filas = j.eventos.map(function (e) {
+        var d = e.descripcion_i18n || {};
+        var texto = d.es || d.pt || d.en || e.tipo;
+        var quien = e.nombre || e.email || ({ sistema: 'El sistema', proveedor: 'El proveedor' }[e.actor_tipo] || '—');
+        var cuando = '';
+        try { cuando = new Date(e.ocurrido_en).toLocaleString('es'); } catch (x) {}
+        return (
+          '<div style="display:flex;gap:12px;padding:12px 0;border-bottom:1px solid var(--line)">' +
+          '<div style="flex:none;width:26px;height:26px;border-radius:50%;background:var(--acc-50);' +
+          'color:var(--acc-700);display:grid;place-items:center;font-size:12px;font-weight:700">' +
+          e.numero_orden + '</div>' +
+          '<div style="flex:1;min-width:0">' +
+          '<b style="font-size:14px">' + esc(texto) + '</b>' +
+          (e.peso === 'alto' ? ' <span class="pill esp">hito</span>' : '') +
+          '<div style="font-size:12.5px;color:var(--mut)">' + esc(quien) + ' · ' + esc(cuando) +
+          (e.ip ? ' · ' + esc(e.ip) : '') + '</div>' +
+          '<div style="font-size:11px;color:var(--mut);font-family:ui-monospace,monospace;' +
+          'overflow:hidden;text-overflow:ellipsis">' + esc((e.hash_propio || '').slice(0, 32)) + '…</div>' +
+          '</div></div>'
+        );
+      }).join('');
+
+      abrirModal(
+        '<h2>Expediente de evidencias</h2>' +
+        '<p class="sub">Cada evento encadena con el anterior. Nadie —tampoco nosotros— puede ' +
+        'editarlo ni borrarlo: la base no lo permite.</p>' +
+        estado +
+        '<div style="max-height:52vh;overflow:auto;margin-top:12px">' + filas + '</div>' +
+        '<div class="acc"><button class="btn btn-p" id="mCancel">Cerrar</button></div>'
+      );
+      $('mCancel').addEventListener('click', cerrarModal);
+    } catch (e) {
+      abrirModal(
+        '<h2>Expediente</h2><div class="msg err">' + esc(e.message) + '</div>' +
+        '<div class="acc"><button class="btn btn-p" id="mCancel">Cerrar</button></div>'
+      );
+      $('mCancel').addEventListener('click', cerrarModal);
+    }
+  }
 
   // ===========================================================================
   // CARPETAS
@@ -759,6 +996,8 @@
 
   window.ir = ir;
   window.salir = salir;
+  window.abrirSubir = abrirSubir;
+  window.cargarDocumentos = cargarDocumentos;
   window.abrirNuevaCarpeta = abrirNuevaCarpeta;
   window.abrirNuevoAcceso = abrirNuevoAcceso;
   window.abrirNuevoRol = abrirNuevoRol;

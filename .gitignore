@@ -24,3 +24,6 @@ npm-debug.log*
 # Zips de entregas
 *.zip
 .fuse_hidden*
+
+# Documentos subidos (driver de almacenamiento local)
+datos/

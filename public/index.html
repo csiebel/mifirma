@@ -102,6 +102,14 @@
   .fondo{position:fixed;inset:0;background:rgba(11,30,44,.45);display:grid;place-items:center;padding:24px;z-index:80}
   .modal{background:var(--paper);border-radius:16px;padding:28px;width:100%;max-width:440px;
          box-shadow:0 24px 60px rgba(11,43,74,.24)}
+  /* El visor: casi toda la pantalla, porque lo que se mira es un A4 y una
+     ventanita obliga a hacer zoom para leer lo que se está por firmar. */
+  .modal.visor{max-width:min(1080px,94vw);padding:0;display:flex;flex-direction:column;
+               height:min(92vh,1000px)}
+  .modal.visor .cabVisor{display:flex;align-items:center;justify-content:space-between;
+                         gap:14px;padding:14px 18px;border-bottom:1px solid var(--line)}
+  .modal.visor iframe{flex:1;width:100%;border:0;background:var(--soft)}
+
   .modal h2{font-size:19px;margin:0 0 6px}
   .modal p.sub{color:var(--mut);font-size:14px;margin:0 0 18px}
   label.campo{display:block;font-size:13px;font-weight:600;margin:14px 0 6px}
@@ -154,15 +162,26 @@
 
   <!-- ============ Documentos (todavía no) ============ -->
   <section id="vDocumentos" class="hidden">
-    <div class="cab"><div>
-      <h1>Documentos</h1>
-      <p>Acá van a aparecer los circuitos de firma: los que enviaste, los que esperan tu firma y los terminados con su expediente.</p>
-    </div></div>
-    <div class="panel"><div class="vacio">
-      <b style="color:var(--ink);display:block;margin-bottom:8px">Todavía no está construido</b>
-      El motor de firma es lo próximo. Mientras tanto podés dejar armadas las carpetas,
-      los roles y los accesos de tu equipo, que es lo que va a gobernar quién ve qué.
-    </div></div>
+    <div class="cab">
+      <div>
+        <h1>Documentos</h1>
+        <p>Cada documento que subís queda con su propio expediente de evidencias desde el
+           primer minuto, encadenado y sin poder editarse.</p>
+      </div>
+      <button class="btn btn-p" onclick="abrirSubir()">Subir documento</button>
+    </div>
+
+    <div class="panel">
+      <div class="cabPanel">
+        <div><b>Carpeta</b><span id="subDocs"></span></div>
+        <div class="acc"><select id="carpetaDocs" onchange="cargarDocumentos()" style="width:auto"></select></div>
+      </div>
+      <table>
+        <thead><tr><th>Documento</th><th>Estado</th><th>Firmas</th><th>Subido</th><th></th></tr></thead>
+        <tbody id="tDocumentos"></tbody>
+      </table>
+      <div id="msgDocs" style="padding:0 18px 18px"></div>
+    </div>
   </section>
 
   <!-- ============ Carpetas ============ -->
