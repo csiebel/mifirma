@@ -262,7 +262,28 @@ function leerCadena(s: string, desde: number): string | null {
   let prof = 1;
   for (let i = desde + 1; i < s.length; i++) {
     const ch = s[i]!;
-    if (ch === '\\') { out += s[i + 1] ?? ''; i++; continue; }
+    if (ch === '\\') {
+      const sig = s[i + 1];
+      // ⚠ Escapes OCTALES `\ddd`. Es como el PDF escribe cualquier byte que no
+      // sea ASCII imprimible — incluido el BOM de UTF-16 con el que viaja todo
+      // nombre acentuado. Sin esto, "José Pérez" vuelve como los dígitos del
+      // octal, que es peor que no leerlo: parece un dato y no lo es.
+      if (sig && sig >= '0' && sig <= '7') {
+        let oct = '';
+        for (let k = 1; k <= 3; k++) {
+          const d = s[i + k];
+          if (!d || d < '0' || d > '7') break;
+          oct += d;
+        }
+        out += String.fromCharCode(parseInt(oct, 8));
+        i += oct.length;
+        continue;
+      }
+      const mapa: Record<string, string> = { n: '\n', r: '\r', t: '\t', b: '\b', f: '\f' };
+      out += (sig && mapa[sig]) ?? sig ?? '';
+      i++;
+      continue;
+    }
     if (ch === '(') prof++;
     if (ch === ')') { prof--; if (prof === 0) break; }
     out += ch;
@@ -281,14 +302,25 @@ function leerCadena(s: string, desde: number): string | null {
  * hace perder credibilidad a una pantalla que dice verificar firmas.
  */
 function decodificarTexto(crudo: string): string {
+  // Dos formas de encontrarse el MISMO UTF-16BE, y hay que aceptar las dos:
+  //
+  //  · Crudo: `FE FF` y después los pares de bytes. Es lo que dice el estándar
+  //    y lo que escribimos nosotros al armar apariencias visibles.
+  //  · Envuelto en UTF-8: `C3 BE C3 BF …`. Es lo que produce signpdf, que arma
+  //    la cadena en JavaScript y escribe el buffer como UTF-8.
+  //
+  // Comprobado sobre documentos de las dos procedencias, no deducido.
+  const utf16 = (t: string) => {
+    let out = '';
+    for (let i = 0; i + 1 < t.length; i += 2) {
+      out += String.fromCharCode((t.charCodeAt(i) << 8) | t.charCodeAt(i + 1));
+    }
+    return out;
+  };
+  if (crudo.charCodeAt(0) === 0xfe && crudo.charCodeAt(1) === 0xff) return utf16(crudo.slice(2));
   const u = Buffer.from(crudo, 'latin1').toString('utf8');
-  if (u.charCodeAt(0) !== 0xfe || u.charCodeAt(1) !== 0xff) return crudo;
-  const cuerpo = u.slice(2);
-  let out = '';
-  for (let i = 0; i + 1 < cuerpo.length; i += 2) {
-    out += String.fromCharCode((cuerpo.charCodeAt(i) << 8) | cuerpo.charCodeAt(i + 1));
-  }
-  return out;
+  if (u.charCodeAt(0) === 0xfe && u.charCodeAt(1) === 0xff) return utf16(u.slice(2));
+  return crudo;
 }
 
 /** Un campo de cadena del diccionario de firma, buscado dentro de una ventana. */
