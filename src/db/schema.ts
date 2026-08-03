@@ -528,6 +528,10 @@ export interface Persona {
 
 export interface Plan {
   activo: Generated<boolean>;
+  /** A qué clase de cuenta se le ofrece. Migración 036. */
+  para_tipo: Generated<string>;
+  /** El que recibe una cuenta nueva de ese tipo, si el operador marcó uno. */
+  por_defecto: Generated<boolean>;
   asistente_ia: Generated<boolean>;
   codigo: string;
   creado_en: Generated<Timestamp>;
@@ -615,6 +619,16 @@ export interface TipoCuentaBancaria {
   nombre_i18n: Json;
   orden: Generated<number>;
   pais: string;
+}
+
+/** Un alta pedida y todavía sin confirmar. Ver migración 036. */
+export interface RegistroPendiente {
+  id: Generated<string>;
+  token_acceso_id: string;
+  identidad_id: string;
+  datos: unknown;
+  creado_en: Generated<Timestamp>;
+  ip_solicitud: string | null;
 }
 
 export interface TokenAcceso {
@@ -714,6 +728,7 @@ export interface DB {
   suscripcion: Suscripcion;
   tarifa_ia: TarifaIa;
   tipo_cuenta_bancaria: TipoCuentaBancaria;
+  registro_pendiente: RegistroPendiente;
   token_acceso: TokenAcceso;
   traduccion_override: TraduccionOverride;
   twilio_config: TwilioConfig;

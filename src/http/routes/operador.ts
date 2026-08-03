@@ -41,6 +41,7 @@ import {
   setIntegracionFacturacionActiva,
 } from '../../services/integracion_facturacion';
 import { asistirOperador } from '../../services/asistente_operador';
+import { listarPaises, guardarPais, borrarPais } from '../../services/paises';
 import {
   listarIndustriasOperador,
   crearIndustria,
@@ -218,6 +219,50 @@ export function registrarRutasOperador(app: FastifyInstance) {
     exigirCap(s, 'gestionar_planes');
     const { id } = z.object({ id: z.string().uuid() }).parse(req.params);
     return bajaPrecio(s.operadorId, id);
+  });
+
+  // ---- Países: moneda de cobro, idioma y marco legal ----
+  //
+  // ⚠ La moneda de cobro es el DÓLAR salvo que acá diga otra cosa. Un país sin
+  // fila cobra en USD y funciona sin configurar nada; la moneda local es la
+  // excepción declarada. Ver migración 032.
+  //
+  // Esto NO decide en qué países se ofrece el producto: eso lo sigue decidiendo
+  // tener precios cargados.
+  app.get('/operador/paises', async (req) => {
+    const s = await sesion(req);
+    exigirCap(s, 'gestionar_planes');
+    return listarPaises();
+  });
+
+  app.put('/operador/paises', async (req) => {
+    const s = await sesion(req);
+    exigirCap(s, 'gestionar_planes');
+    const b = z
+      .object({
+        codigo: z.string().length(2),
+        nombre_i18n: z.record(z.string()).optional(),
+        bandera: z.string().max(8).nullable().optional(),
+        idioma: z.string().min(2).max(5).optional(),
+        orden: z.coerce.number().int().min(0).max(9999).optional(),
+        moneda: z.string().length(3).optional(),
+        admite_usd: z.boolean().optional(),
+        tc_fuente: z.string().max(40).nullable().optional(),
+        marco_legal: z.string().max(120).nullable().optional(),
+        certificador: z.string().max(120).nullable().optional(),
+        fuente: z.string().max(300).optional(),
+        verificado_por: z.string().max(120).nullable().optional(),
+        verificado_en: z.string().nullable().optional(),
+      })
+      .parse(req.body);
+    return guardarPais(s.operadorId, b);
+  });
+
+  app.delete('/operador/paises/:codigo', async (req) => {
+    const s = await sesion(req);
+    exigirCap(s, 'gestionar_planes');
+    const { codigo } = z.object({ codigo: z.string().length(2) }).parse(req.params);
+    return borrarPais(s.operadorId, codigo);
   });
 
 

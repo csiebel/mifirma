@@ -7,8 +7,10 @@ import {
   bajarDocumento,
   verificarFirmas,
   moverDocumento,
+  borrarBorrador,
 } from '../../services/repositorio';
 import { expediente, verificarCadena } from '../../services/evidencia';
+import { bajarCertificado } from '../../services/certificado';
 import { listarBitacora } from '../../services/auditoria';
 import {
   guardarFirmaVisual,
@@ -58,15 +60,23 @@ export function registrarRutasRepositorio(app: FastifyInstance) {
   app.get('/documentos', async (req) => {
     const q = z
       .object({
-        carpeta_id: z.string().uuid(),
+        // Opcional: sin carpeta se busca en todo el repositorio, que es lo que
+        // hacen las carpetas inteligentes por estado. La RLS sigue acotando a
+        // lo que la persona puede ver.
+        carpeta_id: z.string().uuid().optional(),
         // `sub=1` incluye toda la rama. Se acepta como texto porque viene de un
         // query string, donde no existen los booleanos.
         sub: z.enum(['0', '1']).optional(),
+        // La vista por estado. Es un FILTRO, no una carpeta: el árbol es para
+        // organizar y el estado es un hecho del sistema. Ver `listarDocumentos`.
+        vista: z.enum(['borrador', 'en_curso', 'completo', 'cerrado']).optional(),
       })
       .parse(req.query);
     const { cuentaId, identidadId } = req.identidad;
     return {
-      documentos: await listarDocumentos(cuentaId, identidadId, q.carpeta_id, q.sub === '1'),
+      documentos: await listarDocumentos(
+        cuentaId, identidadId, q.carpeta_id ?? null, q.sub === '1', q.vista,
+      ),
     };
   });
 
@@ -108,6 +118,39 @@ export function registrarRutasRepositorio(app: FastifyInstance) {
    *
    * PATCH y no POST: no crea nada, cambia un campo de algo que ya existe.
    */
+  /**
+   * Borrar un borrador que nunca se despachó.
+   *
+   * DELETE sobre el CIRCUITO y no sobre el documento: lo que se borra es el
+   * envío entero —su instancia, su ubicación, su expediente incipiente—, no una
+   * copia. Y sólo se puede si nadie recibió acceso todavía; lo comprueba
+   * `app.borrar_borrador`, no esta ruta.
+   */
+  app.delete('/circuitos/:id', async (req) => {
+    const { id } = z.object({ id: z.string().uuid() }).parse(req.params);
+    const { cuentaId, identidadId } = req.identidad;
+    return borrarBorrador(cuentaId, identidadId, id);
+  });
+
+  /**
+   * El certificado de finalización, en PDF.
+   *
+   * Se ve con alcance `metadatos`, no con `evidencia`: el firmante tiene que
+   * poder quedarse con la constancia de lo que firmó sin que eso le abra el
+   * expediente completo, donde están las IP y los recorridos de los demás.
+   */
+  app.get('/documentos/:id/certificado', async (req, reply) => {
+    const { id } = z.object({ id: z.string().uuid() }).parse(req.params);
+    const { cuentaId, identidadId } = req.identidad;
+    const r = await bajarCertificado(cuentaId, identidadId, id);
+    reply
+      .header('Content-Type', 'application/pdf')
+      .header('Content-Disposition', `inline; filename="${encodeURIComponent(r.nombre)}"`)
+      .header('X-Content-Type-Options', 'nosniff')
+      .header('Cache-Control', 'private, no-store');
+    return reply.send(r.contenido);
+  });
+
   app.patch('/documentos/:id/carpeta', async (req) => {
     const { id } = z.object({ id: z.string().uuid() }).parse(req.params);
     const b = z.object({ carpeta_id: z.string().uuid() }).parse(req.body);

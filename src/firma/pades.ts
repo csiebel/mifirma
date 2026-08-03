@@ -1,11 +1,11 @@
 import { createHash } from 'node:crypto';
-import { PDFDocument } from 'pdf-lib';
-import { plainAddPlaceholder } from '@signpdf/placeholder-plain';
+import { PDFDocument, PDFDict, PDFName } from 'pdf-lib';
 import { SignPdf } from '@signpdf/signpdf';
-import { SUBFILTER_ETSI_CADES_DETACHED } from '@signpdf/utils';
 import forge from 'node-forge';
 import { Signer } from '@signpdf/utils';
 import { insertarSelloEnFirma, loQueSeSella, leerSelloDeFirma, type SelloObtenido } from './tsa';
+import { huecoVisible, type Marca } from './apariencia';
+import { cambiosEntreFirmas, type CambioEntreFirmas } from './cambios';
 import { HttpError } from '../http/errors';
 import type { Firmante } from './adaptadores/tipos';
 
@@ -70,6 +70,13 @@ export interface DatosSello {
   nombre: string;
   lugar?: string;
   contacto?: string;
+  /**
+   * Dónde se dibuja la marca autógrafa, si el firmante tiene uno cargada.
+   *
+   * ⚠ REGLA DE ORO Nº1: esto NO es la firma. Sin marcas se firma igual y el
+   * documento vale lo mismo. Es representación visual y nada más.
+   */
+  marcas?: Marca[];
 }
 
 /**
@@ -80,14 +87,57 @@ export interface DatosSello {
  * nada — que es la única forma de que las firmas anteriores sigan valiendo.
  */
 export async function normalizar(pdf: Buffer): Promise<Buffer> {
+  const roto = () => new HttpError(
+    400,
+    'No se pudo preparar el PDF para firmar. Puede estar dañado o protegido con contraseña.',
+  );
+
+  let doc: PDFDocument;
   try {
-    const doc = await PDFDocument.load(pdf, { ignoreEncryption: true });
-    return Buffer.from(await doc.save({ useObjectStreams: false }));
-  } catch (e) {
-    throw new HttpError(
-      400,
-      'No se pudo preparar el PDF para firmar. Puede estar dañado o protegido con contraseña.',
-    );
+    doc = await PDFDocument.load(pdf, { ignoreEncryption: true });
+  } catch {
+    throw roto();
+  }
+
+  // ═══ ⚠ EL FORMULARIO DEL CLIENTE SE CONGELA ACÁ, Y A PROPÓSITO ═══
+  //
+  // La mitad de lo que sube un cliente —un formulario de banco, del BPS, de la
+  // DGI— trae AcroForm propio, y muchos traen `/NeedAppearances true`. Esa
+  // clave significa «lector, dibujá vos los valores»: lo que se ve lo decide
+  // cada lector, con su fuente y su criterio.
+  //
+  // Sobre un documento firmado eso es inaceptable. Dos lectores mostrarían
+  // cosas distintas del MISMO documento firmado, y no habría forma de decir
+  // cuál de las dos es la que se firmó. Así que las apariencias se generan una
+  // vez, acá, cuando todavía no existe ninguna firma que proteger, y de ahí en
+  // adelante lo que se ve está congelado y cubierto por el ByteRange.
+  //
+  // ⚠ Esto ANTES pasaba solo, porque `save()` de pdf-lib regenera apariencias
+  // por omisión y `huecoVisible` reescribía el AcroForm sin copiar la clave.
+  // El resultado era correcto y nadie lo había decidido — o sea, correcto hasta
+  // la próxima refactorización. Ver `claude/lecciones-2-agosto.md` §13.
+  const acro = doc.catalog.lookupMaybe(PDFName.of('AcroForm'), PDFDict);
+  if (acro) {
+    try {
+      doc.getForm().updateFieldAppearances();
+    } catch {
+      // No se firma un formulario que no sabemos dibujar: quedaría un documento
+      // que se ve distinto en cada lector y con una firma que dice que está bien.
+      throw new HttpError(
+        400,
+        'El documento trae un formulario cuyos campos no se pueden dibujar. ' +
+        'Aplanalo o exportalo a PDF desde el programa que lo generó y volvé a subirlo.',
+      );
+    }
+    acro.delete(PDFName.of('NeedAppearances'));
+  }
+
+  try {
+    // `updateFieldAppearances: false` porque ya se hizo arriba, con su manejo de
+    // error propio. Dejárselo a `save()` es volver a la casualidad.
+    return Buffer.from(await doc.save({ useObjectStreams: false, updateFieldAppearances: false }));
+  } catch {
+    throw roto();
   }
 }
 
@@ -151,6 +201,11 @@ export interface ResultadoSellado {
    *  documentos reales y no mi estimación. Si esto se acerca a 1, hay que
    *  agrandarlo ANTES de que un documento no se pueda firmar. */
   huecoUsado: number;
+  /** Cuántas marcas autógrafas se dibujaron. Cero es un resultado válido. */
+  marcasEstampadas: number;
+  /** Por qué NO se dibujaron, habiéndolas pedido. Va al expediente: la ausencia
+   *  de la marca tiene que ser un hecho explicado y no un vacío. */
+  errorMarca: string | null;
 }
 
 /**
@@ -166,15 +221,57 @@ export async function sellar(
 ): Promise<ResultadoSellado> {
   const largo = conSello ? LARGO_CON_SELLO : LARGO_SIN_SELLO;
 
-  const conHueco = plainAddPlaceholder({
-    pdfBuffer: pdf,
-    reason: datos.razon,
-    name: datos.nombre,
-    location: datos.lugar ?? '',
-    contactInfo: datos.contacto ?? '',
-    signatureLength: largo,
-    subFilter: SUBFILTER_ETSI_CADES_DETACHED,
-  });
+  // ⚠ El hueco lo arma SIEMPRE `huecoVisible`, con marcas o sin ellas.
+  //
+  // Antes el camino sin marca usaba `plainAddPlaceholder`. Se dejó de usar
+  // porque corrompe el diccionario de la página cuando ésta tiene `/Annots`
+  // como referencia indirecta —lo normal en PDF de herramientas de oficina—:
+  // la hoja sale en blanco en algunos visores y la firma verifica igual, así
+  // que nada lo delata. Ver el encabezado de `apariencia.ts`.
+  //
+  // Un camino solo, nuestro, probado con las cuatro combinaciones de dos
+  // firmas y con documentos reales.
+  const hueco = (marcas: Marca[]) =>
+    huecoVisible({
+      pdf,
+      marcas,
+      razon: datos.razon,
+      nombre: datos.nombre,
+      lugar: datos.lugar,
+      contacto: datos.contacto,
+      largoFirma: largo,
+    });
+
+  // ⚠ Si la marca no se puede dibujar, se firma SIN ella y se anota por qué.
+  //
+  // No al revés. Perder la firma —que es lo único con valor legal— porque un
+  // PNG venía en un formato que no sabemos leer sería dejar que la decoración
+  // decida sobre lo jurídico. Regla de oro nº1 aplicada al camino de error:
+  // un documento sin marca está firmado igual.
+  let conHueco: Buffer;
+  let errorMarca: string | null = null;
+  let marcasEstampadas = 0;
+
+  if (datos.marcas?.length) {
+    try {
+      conHueco = hueco(datos.marcas);
+      marcasEstampadas = datos.marcas.length;
+    } catch (e) {
+      // ⚠ PERO EL VALOR DE UN CAMPO NO ES DECORACIÓN.
+      //
+      // La tolerancia de arriba vale para la rúbrica: es una imagen y el
+      // documento vale igual sin ella. Un campo completado es CONTENIDO — es
+      // parte de lo que la persona está aceptando—. Firmar un documento al que
+      // le falta el dato que el firmante escribió es firmarle otra cosa.
+      //
+      // Comparten el mecanismo de dibujo; no comparten el camino de error.
+      if (datos.marcas.some((m) => m.texto != null)) throw e;
+      errorMarca = e instanceof Error ? e.message : 'error desconocido';
+      conHueco = hueco([]);
+    }
+  } else {
+    conHueco = hueco([]);
+  }
 
   if (!conSello) {
     return {
@@ -182,6 +279,8 @@ export async function sellar(
       sello: null,
       errorSello: null,
       huecoUsado: 0,
+      marcasEstampadas,
+      errorMarca,
     };
   }
 
@@ -192,6 +291,8 @@ export async function sellar(
     sello: s.sello,
     errorSello: s.errorSello,
     huecoUsado: Number((s.bytesFirma / largo).toFixed(3)),
+    marcasEstampadas,
+    errorMarca,
   };
 }
 
@@ -247,6 +348,18 @@ export interface VerificacionPdf {
   /** Bytes al final del archivo que ninguna firma cubre. Debería ser 0.
    *  Null si no verifica ninguna firma: ahí el número no significa nada. */
   bytes_sin_firmar: number | null;
+  /** Qué se escribió entre una firma y la siguiente. Vacío con una sola firma. */
+  cambios: CambioEntreFirmas[];
+  /**
+   * ⚠ Alguien cambió lo que MUESTRA una página después de que alguien firmó.
+   *
+   * Es independiente de `integro`, y por eso va aparte: las firmas anteriores
+   * siguen verificando —sus bytes no se tocaron— y no quedan bytes sueltos, así
+   * que `integro` sigue en true. Lo que cambió es lo que el primer firmante vio.
+   * Es exactamente el hueco que DocMDP intenta tapar declarando, y que acá se
+   * responde mirando.
+   */
+  contenido_alterado_entre_firmas: boolean;
 }
 
 /**
@@ -462,14 +575,30 @@ export function verificar(pdf: Buffer): VerificacionPdf {
 
   const sinFirmar = tope === null ? null : Math.max(0, util - tope);
 
+  // Qué se escribió entre firma y firma. Los cortes salen del `/ByteRange` de
+  // cada una, o sea del propio archivo.
+  //
+  // ⚠ En orden de POSICIÓN, no de aparición. Si un archivo trajera las firmas
+  // desordenadas, comparar tramos al azar inventaría cambios.
+  const cortes = firmas
+    .filter((f) => f.verifica)
+    .map((f) => f.cubre_hasta)
+    .sort((x, y) => x - y);
+  const cambios = cambiosEntreFirmas(pdf, cortes);
+
   return {
     firmas,
     bytes_sin_firmar: sinFirmar,
     // ⚠ Lo que esto afirma, con precisión: cada firma cubre exactamente los
     // bytes que cubría cuando se hizo, y no hay bytes que nadie haya firmado.
-    // Lo que NO afirma: que un incremental update posterior no haya cambiado lo
-    // que se VE de una página. Para eso hace falta comprobar DocMDP, y todavía
-    // no lo hacemos. No decir en pantalla más de lo que se comprobó.
     integro: firmas.length > 0 && firmas.every((f) => f.verifica) && sinFirmar === 0,
+    cambios,
+    // ⚠ Va SEPARADO de `integro` a propósito, y es la diferencia que importa:
+    // si alguien reescribió el contenido de una página en un incremento
+    // posterior y después firmó, todas las firmas verifican y no sobra ni un
+    // byte —`integro` da true— pero lo que vio el primer firmante ya no es lo
+    // que muestra el documento. Mezclarlo con `integro` haría que una de las
+    // dos preguntas tapara a la otra.
+    contenido_alterado_entre_firmas: cambios.some((c) => c.contenidoAlterado),
   };
 }

@@ -3,7 +3,9 @@ import { sql } from 'kysely';
 import { withUsuario, exigir } from '../auth/authz';
 import { almacen, nuevaClave } from '../almacenamiento/almacen';
 import { anotar } from './evidencia';
+import { PDFDocument } from 'pdf-lib';
 import { verificar } from '../firma/pades';
+import { contarCambio } from '../firma/cambios';
 import { registrar } from './auditoria';
 import { HttpError } from '../http/errors';
 
@@ -50,6 +52,46 @@ export interface SubirInput {
   userAgent?: string | null;
 }
 
+
+/**
+ * Cuántas páginas tiene el PDF.
+ *
+ * ═══ POR QUÉ SE CUENTA ACÁ Y NO DESPUÉS ═══
+ *
+ * `archivo` es INMUTABLE por política: `archivo_update` es `using (false)`, y
+ * está bien que lo sea —un archivo firmado que se puede editar no prueba nada—.
+ * O sea que `paginas` sólo se puede escribir en el INSERT: no hay un «después»
+ * donde completarlo.
+ *
+ * ⚠ Nadie lo llenaba. La columna existe desde la migración 006 y quedaba
+ * siempre en NULL, así que todo el que la leía caía en su `?? 1`. El editor de
+ * marcas mostraba las 3 hojas del PDF y el servidor rechazaba la marca de la
+ * hoja 3 diciendo que el documento tenía una sola. Se descubrió el 2/8/2026,
+ * con un documento real de tres páginas.
+ *
+ * ═══ Y POR QUÉ TIRA EN VEZ DE DEVOLVER NULL ═══
+ *
+ * Se cuenta con pdf-lib, el mismo que usa `normalizar()` antes de la primera
+ * firma. Si pdf-lib no puede abrirlo acá, tampoco va a poder abrirlo al firmar
+ * — y ahí el error llega DESPUÉS de que los firmantes recibieron el correo.
+ * Fallar al subir es fallar donde la persona todavía puede hacer algo.
+ */
+async function contarPaginas(pdf: Buffer): Promise<number> {
+  let doc;
+  try {
+    doc = await PDFDocument.load(pdf, { ignoreEncryption: true });
+  } catch {
+    throw new HttpError(
+      400,
+      'No se pudo abrir ese PDF: puede estar dañado o protegido con contraseña. ' +
+        'Como tampoco se va a poder firmar, mejor enterarse ahora.',
+    );
+  }
+  const n = doc.getPageCount();
+  if (!n) throw new HttpError(400, 'Ese PDF no tiene ninguna página.');
+  return n;
+}
+
 export async function subirDocumento(cuentaId: string, identidadId: string, input: SubirInput) {
   if (!MIME_ACEPTADOS.has(input.mime)) {
     throw new HttpError(400, 'Por ahora sólo se aceptan PDF.');
@@ -67,6 +109,9 @@ export async function subirDocumento(cuentaId: string, identidadId: string, inpu
 
   const titulo = (input.titulo || input.nombreArchivo || '').trim().slice(0, 200);
   if (!titulo) throw new HttpError(400, 'Falta el título del documento.');
+
+  // Antes de guardar nada: si no se puede abrir, no se sube.
+  const paginas = await contarPaginas(input.contenido);
 
   const sha256 = createHash('sha256').update(input.contenido).digest();
   const clave = nuevaClave();
@@ -116,9 +161,9 @@ export async function subirDocumento(cuentaId: string, identidadId: string, inpu
         archivoId = randomUUID();
         await sql`
           insert into archivo (id, sha256, bytes, mime, clase, cuenta_custodia_id,
-                               region, clave_almacenamiento)
+                               region, clave_almacenamiento, paginas)
           values (${archivoId}::uuid, ${sha256}, ${input.contenido.length}, ${input.mime},
-                  'base', ${cuentaId}::uuid, ${alm.region}, ${clave})
+                  'base', ${cuentaId}::uuid, ${alm.region}, ${clave}, ${paginas})
         `.execute(trx);
       }
 
@@ -234,24 +279,86 @@ export async function subirDocumento(cuentaId: string, identidadId: string, inpu
  * subconsulta, y sus documentos tampoco. No hay que acordarse de filtrar nada
  * acá — si esta función se equivocara, la política seguiría alcanzando.
  */
+/**
+ * Las vistas por estado.
+ *
+ * ⚠ SON VISTAS, NO CARPETAS. Y la diferencia no es de gusto:
+ *
+ *   · Los permisos viven POR CARPETA (`app.puede_en_carpeta`). Si el estado
+ *     fuera una carpeta, quién puede ver un documento cambiaría al avanzar el
+ *     proceso: el que veía el borrador podría perder el terminado. Eso es un
+ *     agujero de autorización disfrazado de organización.
+ *   · Una `ubicacion` es ÚNICA por (cuenta, documento) — lo imponen dos índices
+ *     únicos. Moverlo solo a «Terminados» borraría el archivado de la persona,
+ *     que lo había puesto en «Clientes/Acme».
+ *   · Una carpeta es una decisión de la persona; un estado es un hecho del
+ *     sistema. Mezclarlos hace que ninguna de las dos se pueda usar bien.
+ *
+ * Decidido con Claudio el 2/8/2026.
+ */
+const VISTAS: Record<string, string[]> = {
+  borrador:  ['borrador'],
+  en_curso:  ['enviado'],
+  completo:  ['completo'],
+  cerrado:   ['cancelado', 'vencido'],
+};
+
 export async function listarDocumentos(
   cuentaId: string,
   identidadId: string,
-  carpetaId: string,
+  carpetaId: string | null,
   incluirSubcarpetas = false,
+  vista?: string,
 ) {
+  const estados = vista ? VISTAS[vista] : undefined;
+  if (vista && !estados) throw new HttpError(400, `No existe la vista "${vista}".`);
+
   return withUsuario(cuentaId, identidadId, async (trx) => {
-    const alcance = incluirSubcarpetas
+    // ⚠ SIN CARPETA = TODO EL REPOSITORIO, y no hace falta filtrar nada a mano.
+    //
+    // `ubicacion_select` ya exige `app.puede_en_carpeta(carpeta_id, 'ver')`: sin
+    // cláusula de carpeta salen exactamente las que esta persona puede ver, ni
+    // una más. Agregar acá un filtro «por las dudas» sería duplicar en la
+    // aplicación una decisión que ya toma la base — y duplicarla es la forma de
+    // que un día digan cosas distintas.
+    //
+    // Es lo que hace posibles las carpetas inteligentes: «Esperando firmas»
+    // recorre el repositorio entero sin ser un lugar ni mover nada.
+    // ⚠ La papelera queda fuera de las vistas globales.
+    //
+    // Si no, un documento que mandaste a la papelera sigue apareciendo en
+    // «Firmados» — y una papelera cuyo contenido se sigue viendo no es una
+    // papelera. Cuando se entra a la papelera EXPRESAMENTE sí se ve, que es
+    // justamente para lo que se entra.
+    //
+    // `coalesce(..., true)`: sin carpeta papelera la comparación con ltree da
+    // NULL, y `not null` filtraría todo. Un `not` sobre un nullable es la forma
+    // más silenciosa de vaciar una lista.
+    const fuera = carpetaId
+      ? sql`true`
+      : sql`coalesce(not (cu.ruta <@ (select p.ruta from carpeta p
+                                       where p.cuenta_id = u.cuenta_id and p.sistema = 'papelera')), true)`;
+
+    const alcance = !carpetaId
+      ? sql`true`
+      : incluirSubcarpetas
       ? sql`u.carpeta_id in (
               select c2.id from carpeta c2
                where c2.ruta <@ (select ruta from carpeta where id = ${carpetaId}::uuid))`
       : sql`u.carpeta_id = ${carpetaId}::uuid`;
 
-    // Se listan las ubicaciones de CIRCUITO, que son las del repositorio del
-    // emisor. Cuando exista la bandeja del firmante habrá una segunda consulta
-    // para las ubicaciones de instancia: son dos vistas distintas del mismo
-    // documento y mezclarlas en una sola lista confunde "lo que mandé" con "lo
-    // que me pidieron firmar".
+    // Se listan LAS DOS clases de ubicación:
+    //
+    //   · de CIRCUITO   → lo que esta cuenta mandó a firmar (repositorio del emisor)
+    //   · de INSTANCIA  → lo que le mandaron a firmar (su bandeja de entrada)
+    //
+    // No son dos listas separadas porque no son dos lugares: son documentos en
+    // carpetas, y la carpeta es la que manda. Lo que las distingue se devuelve
+    // como `origen`, para que la pantalla pueda decirlo sin tener que adivinarlo.
+    //
+    // ⚠ `archivo` va con LEFT JOIN. Es lección del 1 de agosto: en una consulta
+    // que atraviesa varias tablas con RLS, las accesorias van con LEFT JOIN —
+    // si una política no alcanza al archivo, se pierde el peso, no el documento.
     //
     // `copias` produce N instancias bajo un solo circuito. La lista muestra UNA
     // fila —el envío— con su conteo, no tres mil filas: el emisor mandó una
@@ -261,11 +368,11 @@ export async function listarDocumentos(
       circuito_estado: string; modo: string; nivel_firma: string;
       bytes: string; paginas: number | null; creado_en: Date;
       instancias: string; firmas_total: string; firmas_hechas: string;
-      sin_avisar: string; cadena_rota: boolean;
+      sin_avisar: string; cadena_rota: boolean; origen: string;
     }>`
       select c.id as circuito_id, c.titulo, u.carpeta_id,
              c.estado as circuito_estado, c.modo, c.nivel_firma,
-             a.bytes::text as bytes, a.paginas, c.creado_en,
+             coalesce(a.bytes, 0)::text as bytes, a.paginas, c.creado_en,
 
              -- Despachado pero sin avisar: la notificación no salió. Sin esto,
              -- el emisor espera indefinidamente la firma de alguien que nunca
@@ -300,8 +407,11 @@ export async function listarDocumentos(
                   group by e.instancia_id
                ) x where x.n <> x.distintos or x.ultimo <> x.n
              ) as cadena_rota,
-             (select i.id from instancia i
-               where i.circuito_id = c.id order by i.numero limit 1) as instancia_id,
+             -- Del recibido, SU instancia; del emitido, la primera.
+             coalesce(u.instancia_id,
+                      (select i.id from instancia i
+                        where i.circuito_id = c.id order by i.numero limit 1)) as instancia_id,
+             case when u.circuito_id is not null then 'emitido' else 'recibido' end as origen,
              (select count(*) from instancia i where i.circuito_id = c.id)::text as instancias,
              (select count(*) from participacion p
                where p.circuito_id = c.id and p.papel = 'firmante')::text as firmas_total,
@@ -309,12 +419,15 @@ export async function listarDocumentos(
                where p.circuito_id = c.id and p.papel = 'firmante'
                  and p.estado = 'firmada')::text as firmas_hechas
         from ubicacion u
-        join circuito c on c.id = u.circuito_id
-        join archivo a on a.id = c.archivo_base_id
+        left join carpeta cu on cu.id = u.carpeta_id
+        left join instancia iu on iu.id = u.instancia_id
+        join circuito c on c.id = coalesce(u.circuito_id, iu.circuito_id)
+        left join archivo a on a.id = coalesce(iu.archivo_firmado_id, c.archivo_base_id)
        where u.cuenta_id = ${cuentaId}::uuid
          and ${alcance}
-         and u.circuito_id is not null
          and not u.archivada
+         and ${fuera}
+         and ${estados ? sql`c.estado = any(${estados}::text[])` : sql`true`}
        order by c.creado_en desc
     `.execute(trx);
 
@@ -327,6 +440,45 @@ export async function listarDocumentos(
       sin_avisar: Number(f.sin_avisar),
     }));
   });
+}
+
+
+/**
+ * Borra un borrador que nunca se despachó. Es la ÚNICA forma de borrar algo.
+ *
+ * ⚠ La condición no la decide este archivo: la decide `app.borrar_borrador`, y
+ * es «no existe ni un otorgamiento emitido». Si una sola persona pudo abrir el
+ * documento, ya no es un borrador —diga lo que diga la columna `estado`— y la
+ * base lo rechaza. Las políticas de borrado siguen todas en `false`.
+ *
+ * Los bytes se borran DESPUÉS de que la transacción cerró, y sólo si el archivo
+ * quedó huérfano: `subirDocumento` reusa la fila cuando la misma cuenta sube dos
+ * veces el mismo contenido, así que el mismo blob puede sostener tres circuitos.
+ * Si el borrado del blob falla, queda basura recuperable; al revés quedaría un
+ * documento sin bytes, que es un 404 para siempre.
+ */
+export async function borrarBorrador(cuentaId: string, identidadId: string, circuitoId: string) {
+  const r = await withUsuario(cuentaId, identidadId, async (trx) => {
+    try {
+      const q = await sql<{ archivo_id: string; clave: string | null; huerfano: boolean }>`
+        select * from app.borrar_borrador(${circuitoId}::uuid)
+      `.execute(trx);
+      return q.rows[0] ?? null;
+    } catch (e) {
+      // 42501 es lo que levanta la función cuando la condición no se cumple, y
+      // su texto está escrito para leerse en pantalla. Sin esto sale como 500
+      // genérico y manda a revisar el log por algo que se explica solo.
+      if ((e as { code?: string }).code === '42501') {
+        throw new HttpError(409, (e as Error).message);
+      }
+      throw e;
+    }
+  });
+
+  if (r?.huerfano && r.clave) {
+    try { await almacen().borrar(r.clave); } catch { /* basura recuperable */ }
+  }
+  return { ok: true, archivo_borrado: !!r?.huerfano };
 }
 
 /**
@@ -517,11 +669,16 @@ export async function verificarFirmas(cuentaId: string, identidadId: string, ins
   // El veredicto lo arma `verificar()` mirando el archivo entero, no este
   // servicio firma por firma: si una firma cubre hasta el final o hasta la
   // firma siguiente sólo se puede decidir conociendo a todas las demás.
+  const v = verificar(contenido);
+
   return {
     titulo: datos.titulo,
     cerrado: datos.firmado,
     origen: datos.origen,
     tamano: contenido.length,
-    ...verificar(contenido),
+    ...v,
+    // El relato se arma acá y no en el navegador: es la misma decisión que
+    // toma el analizador, y tenerla en dos lugares es tenerla en uno solo mal.
+    cambios: v.cambios.map((c) => ({ ...c, relato: contarCambio(c) })),
   };
 }

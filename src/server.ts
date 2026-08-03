@@ -176,13 +176,35 @@ export function construirServidor(): FastifyInstance {
 
   // JavaScript de las páginas públicas. Se sirve como archivo suelto, igual que
   // el HTML: para dos archivos no vale la pena montar un servidor de estáticos.
-  for (const js of ['sitio.js', 'entrar.js', 'consola.js', 'operador.js', 'firmar.js']) {
+  for (const js of ['sitio.js', 'entrar.js', 'consola.js', 'operador.js', 'firmar.js', 'marcas.js']) {
     app.get('/' + js, async (_req, reply) => {
       try {
         const body = readFileSync(new URL('../public/' + js, import.meta.url), 'utf8');
         reply.type('text/javascript').header('Cache-Control', 'no-cache').send(body);
       } catch {
         reply.code(404).send('archivo no encontrado');
+      }
+    });
+  }
+
+  // pdf.js, servido desde nuestro dominio.
+  //
+  // ⚠ No es una comodidad: el CSP es `script-src 'self'` y `worker-src 'self'`,
+  // a propósito. Traerlo de un CDN significaría abrirle la mano al CSP de una
+  // aplicación que muestra documentos ajenos antes de firmarlos. Se copia con
+  // `npm i pdfjs-dist` y queda versionado con el repo.
+  //
+  // El `.mjs` va con tipo JavaScript o el navegador rechaza el `import()`.
+  for (const mj of ['pdf.min.mjs', 'pdf.worker.min.mjs']) {
+    app.get('/vendor/' + mj, async (_req, reply) => {
+      try {
+        const body = readFileSync(new URL('../public/vendor/' + mj, import.meta.url), 'utf8');
+        reply
+          .type('text/javascript')
+          .header('Cache-Control', 'public, max-age=604800, immutable')
+          .send(body);
+      } catch {
+        reply.code(404).send('falta pdfjs: correr npm i pdfjs-dist y copiar a public/vendor');
       }
     });
   }
@@ -246,6 +268,9 @@ export function construirServidor(): FastifyInstance {
     '/consola.js',
     '/operador.js',
     '/firmar.js',
+    '/marcas.js',
+    '/vendor/pdf.min.mjs',
+    '/vendor/pdf.worker.min.mjs',
     // El firmante externo: su autorización es el otorgamiento que lleva el
     // token, no una sesión de cuenta. El hook central no puede autenticarlo
     // porque no pertenece a ninguna.
@@ -254,6 +279,10 @@ export function construirServidor(): FastifyInstance {
     '/firmar/documento',
     '/firmar/firmar',
     '/firmar/rechazar',
+    '/firmar/marca',
+    // La autorización la lleva la cookie de firma, igual que las de arriba.
+    '/firmar/cuenta',
+    '/firmar/cuenta/crear',
     '/manifest.webmanifest',
     '/manifest-empleado.webmanifest',
     '/sw.js',
@@ -273,6 +302,10 @@ export function construirServidor(): FastifyInstance {
     '/auth/reset/solicitar',
     '/auth/reset/confirmar',
     '/auth/registro',
+    // Los dos pasos siguientes del alta: el token del correo ES la
+    // credencial. Ver `services/auth_registro.ts`.
+    '/auth/registro/ver',
+    '/auth/registro/confirmar',
     '/auth/logout',
     // Datos que consume la página comercial sin token
     '/publico/planes',
@@ -420,6 +453,33 @@ export function construirServidor(): FastifyInstance {
   registrarRutasCircuitos(app);
   registrarRutasFirma(app);
 
+  /**
+   * ¿Este error es "no llegué a la base", o es un error de verdad?
+   *
+   * Se mira el código de red del socket y el SQLSTATE de la clase 08, que es la
+   * de fallas de conexión. `pg` puede envolverlo en un `AggregateError` cuando
+   * el host resuelve a varias direcciones, así que también se miran las causas.
+   *
+   * ⚠ Se comprueba por CÓDIGO y no por texto del mensaje: los textos cambian
+   * entre versiones de la librería y del sistema operativo, y un `includes` que
+   * deja de coincidir vuelve a tapar el error sin que nada lo diga.
+   */
+  const CODIGOS_RED = new Set([
+    'ECONNREFUSED', 'ETIMEDOUT', 'ENOTFOUND', 'EHOSTUNREACH', 'ENETUNREACH',
+    'ECONNRESET', 'EPIPE', 'EAI_AGAIN',
+  ]);
+  function esFallaDeConexion(e: unknown, hondura = 0): boolean {
+    if (!e || typeof e !== 'object' || hondura > 4) return false;
+    const c = (e as { code?: unknown }).code;
+    if (typeof c === 'string') {
+      // Clase 08 del SQLSTATE: connection exception. 57P01: el servidor cortó.
+      if (CODIGOS_RED.has(c) || c.startsWith('08') || c === '57P01') return true;
+    }
+    const errores = (e as { errors?: unknown[] }).errors;
+    if (Array.isArray(errores) && errores.some((x) => esFallaDeConexion(x, hondura + 1))) return true;
+    return esFallaDeConexion((e as { cause?: unknown }).cause, hondura + 1);
+  }
+
   app.setErrorHandler((err, _req, reply) => {
     if (err instanceof ZodError) {
       reply.code(400).send({ error: 'Datos inválidos', detalles: err.issues });
@@ -436,6 +496,30 @@ export function construirServidor(): FastifyInstance {
       reply.code(status).send({ error: err.message });
       return;
     }
+    // ── Quedarse sin base NO es "un error en el servidor"
+    //
+    // Es la lección 5 del 1 de agosto: dos errores distintos no pueden tener el
+    // mismo mensaje. En desarrollo esto pasa cada vez que se cae el túnel, y en
+    // producción sería una caída de la base o de la red — dos situaciones
+    // distintas de un bug nuestro, con dos respuestas distintas: en un bug no
+    // sirve reintentar, acá sí.
+    //
+    // Costó dos diagnósticos a ciegas el 2 de agosto: pantalla de login con
+    // "ocurrió un error en el servidor" mientras se revisaba el código de login,
+    // que estaba perfecto.
+    //
+    // No filtra nada: que la base no esté disponible no le dice a un atacante
+    // nada que no vea igual por el 503.
+    if (esFallaDeConexion(err)) {
+      app.log.error({ err }, 'SIN CONEXIÓN A LA BASE — ¿se cayó el túnel? source db/tunel.sh');
+      reply.code(503).send({
+        error:
+          'El servidor no está pudiendo hablar con la base de datos. No es tu ' +
+          'usuario ni tu contraseña: probá de nuevo en unos minutos.',
+      });
+      return;
+    }
+
     if (status >= 500) {
       // No filtrar detalles internos (mensajes de la base, config, stack) al cliente:
       // se loguea del lado servidor y se responde con un mensaje genérico.

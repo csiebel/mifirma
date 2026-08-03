@@ -1,4 +1,5 @@
 import type { FastifyInstance } from 'fastify';
+import { verMarcas, definirMarcas } from '../../services/marcas';
 import { z } from 'zod';
 import {
   verCircuito,
@@ -6,6 +7,7 @@ import {
   quitarFirmante,
   configurarCircuito,
   despachar,
+  cancelar,
   reenviarAvisos,
   enlaceDeFirma,
 } from '../../services/circuito';
@@ -75,6 +77,18 @@ export function registrarRutasCircuitos(app: FastifyInstance) {
 
   // El acto. A partir de acá el circuito está congelado y hay gente afuera con
   // un enlace en la mano.
+  // Cancelar un documento en curso. Motivo obligatorio: va al expediente y es
+  // lo que el firmante va a leer en el aviso.
+  app.post('/circuitos/:id/cancelar', async (req) => {
+    const { id } = z.object({ id: z.string().uuid() }).parse(req.params);
+    const b = z.object({ motivo: z.string().min(1).max(500) }).parse(req.body);
+    const { cuentaId, identidadId } = req.identidad;
+    return cancelar(cuentaId, identidadId, id, b.motivo, {
+      ip: req.ip,
+      userAgent: req.headers['user-agent'] ?? null,
+    });
+  });
+
   app.post('/circuitos/:id/despachar', async (req) => {
     const { id } = z.object({ id: z.string().uuid() }).parse(req.params);
     const { cuentaId, identidadId } = req.identidad;
@@ -103,4 +117,54 @@ export function registrarRutasCircuitos(app: FastifyInstance) {
     const { cuentaId, identidadId } = req.identidad;
     return reenviarAvisos(cuentaId, identidadId, id);
   });
+  // ==========================================================================
+  // Marcas: dónde se estampa la representación VISUAL de cada firmante.
+  //
+  // ⚠ No es la firma. Un documento sin marcas está firmado igual.
+  // ==========================================================================
+
+  app.get('/documentos/:id/marcas', async (req) => {
+    const { id } = z.object({ id: z.string().uuid() }).parse(req.params);
+    const { cuentaId, identidadId } = req.identidad;
+    return verMarcas(cuentaId, identidadId, id);
+  });
+
+  /**
+   * Define las marcas de UN firmante. Reemplaza las que tuviera.
+   *
+   * PUT y no PATCH: el editor manda el estado completo de lo que el usuario ve.
+   */
+  app.put('/participaciones/:id/marcas', async (req) => {
+    const { id } = z.object({ id: z.string().uuid() }).parse(req.params);
+    const b = z
+      .object({
+        marcas: z
+          .array(
+            z.object({
+              tipo: z.enum(['firma', 'rubrica']),
+              pagina: z.number().int().min(0).max(5000).optional(),
+              x: z.number().min(0).max(20000),
+              y: z.number().min(0).max(20000),
+              ancho: z.number().min(8).max(2000),
+              alto: z.number().min(8).max(2000),
+              todas_las_paginas: z.boolean().optional(),
+            }),
+          )
+          // El mismo tope que `definirMarcas`, y por la misma razón: un contrato
+          // de 500 hojas rubricado entero son 500 marcas. Si acá fuera más bajo,
+          // el caso que motivó la pantalla —el contrato largo— fallaría con un
+          // error de validación en vez de con el mensaje que explica el límite.
+          .max(1000),
+      })
+      .parse(req.body);
+
+    const { cuentaId, identidadId } = req.identidad;
+    return definirMarcas(
+      cuentaId,
+      identidadId,
+      id,
+      b.marcas.map((m) => ({ ...m, todasLasPaginas: m.todas_las_paginas })),
+    );
+  });
+
 }

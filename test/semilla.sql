@@ -38,8 +38,22 @@ insert into rol (id, cuenta_id, codigo, nombre_i18n) values
 insert into usuario_rol (identidad_id, cuenta_id, rol_id) values
   ('a0000000-0000-0000-0000-000000000001', 'aaaaaaaa-0000-0000-0000-000000000001', 'a2000000-0000-0000-0000-000000000001');
 
-insert into carpeta (id, cuenta_id, nombre_i18n, sistema) values
-  ('a3000000-0000-0000-0000-000000000001', 'aaaaaaaa-0000-0000-0000-000000000001', '{"es":"Raíz"}', 'raiz');
+-- ⚠ El árbol COMPLETO, igual que el que crea el alta real.
+--
+-- Antes acá había sólo la raíz. Ningún test lo notaba porque ninguno tocaba la
+-- bandeja de entrada ni la papelera — pero el día que alguien escriba uno, va a
+-- fallar contra una cuenta que no se parece a las de producción, y el arreglo
+-- natural va a ser parchear la semilla en vez de mirar el producto.
+--
+-- Es la lección 7 del 1 de agosto vista desde el otro lado: un test que corre
+-- sobre datos que no existen en la realidad no prueba la realidad.
+insert into carpeta (id, cuenta_id, padre_id, nombre_i18n, sistema) values
+  ('a3000000-0000-0000-0000-000000000001', 'aaaaaaaa-0000-0000-0000-000000000001', null,
+   '{"es":"Raíz"}', 'raiz'),
+  ('a3000000-0000-0000-0000-000000000002', 'aaaaaaaa-0000-0000-0000-000000000001',
+   'a3000000-0000-0000-0000-000000000001', '{"es":"Recibidos"}', 'entrada'),
+  ('a3000000-0000-0000-0000-000000000003', 'aaaaaaaa-0000-0000-0000-000000000001',
+   'a3000000-0000-0000-0000-000000000001', '{"es":"Papelera"}', 'papelera');
 insert into carpeta_permiso (carpeta_id, cuenta_id, rol_id, acciones) values
   ('a3000000-0000-0000-0000-000000000001', 'aaaaaaaa-0000-0000-0000-000000000001',
    'a2000000-0000-0000-0000-000000000001', array['ver','leer','crear','enviar','mover','organizar','permisos']);

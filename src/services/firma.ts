@@ -5,10 +5,12 @@ import { fijarContexto } from '../db/contexto';
 import { verificarEnlaceFirma } from '../auth/enlace_firma';
 import { almacen, nuevaClave } from '../almacenamiento/almacen';
 import { normalizar, sellar, verificar } from '../firma/pades';
+import type { Marca } from '../firma/apariencia';
 import { selloDePlataforma } from '../firma/adaptadores/sello_plataforma';
 import { anotar } from './evidencia';
 import { obtenerSello, selloObligatorio, type ResultadoSello } from './tsa';
-import { avisarAlQueSigue } from './circuito';
+import { avisarAlQueSigue, avisarCompletado } from './circuito';
+import { emitirCertificado } from './certificado';
 import { HttpError } from '../http/errors';
 
 /**
@@ -200,6 +202,110 @@ export interface FirmaInput {
   huellaDispositivo?: string | null;
 }
 
+
+/**
+ * Las marcas autógrafas de este firmante, listas para estamparse.
+ *
+ * ⚠ REGLA DE ORO Nº1. Esto NO decide nada sobre la firma: si devuelve la lista
+ * vacía, se firma igual y el documento vale lo mismo. Lo único que cambia es si
+ * el PDF muestra un trazo o no.
+ *
+ * ═══ POR QUÉ SE LEE COMO 'sistema' ═══
+ *
+ * La imagen de la firma autógrafa la ve su dueño y nadie más — ni el admin de su
+ * empresa, ni el emisor del documento, ni el operador de la plataforma. La
+ * política `firma_visual_select` tiene exactamente dos ramas: el dueño con su
+ * identidad probada, o el actor `sistema`. Ésta es la rama `sistema`, y es la
+ * única vez que se ejerce: al estampar.
+ *
+ * El derecho a firmar YA lo resolvió la RLS en el paso 1, con el contexto del
+ * otorgamiento. Acá no se decide nada: se busca una imagen de alguien de quien
+ * ya sabemos que está firmando.
+ *
+ * ⚠ TODO O NADA. Si falta la imagen de un tipo, se descartan las marcas de ese
+ * tipo; si algo impide dibujarlas, no se dibuja ninguna. Estampar la mitad
+ * —rúbricas sí, firma no— produce un documento que parece a medio hacer y sobre
+ * el que después hay que explicar qué pasó.
+ */
+async function marcasDelFirmante(
+  instanciaId: string,
+  participacionId: string,
+  identidadId: string,
+): Promise<{ marcas: Marca[]; imagenes: { tipo: string; sha256: string; id: string }[]; motivo: string | null }> {
+  const datos = await enSistema(async (trx) => {
+    const m = await sql<{ tipo: string; pagina: number; x: string; y: string; ancho: string; alto: string }>`
+      select tipo, pagina, x::text, y::text, ancho::text, alto::text
+        from marca_firma
+       where participacion_id = ${participacionId}::uuid and instancia_id = ${instanciaId}::uuid
+       order by pagina, tipo
+    `.execute(trx);
+
+    const img = await sql<{ id: string; tipo: string; clave: string; mime: string; sha256: Buffer }>`
+      select id, tipo, clave_almacenamiento as clave, mime, sha256
+        from firma_visual
+       where identidad_id = ${identidadId}::uuid and vigente
+    `.execute(trx);
+
+    return { marcas: m.rows, imagenes: img.rows };
+  });
+
+  if (!datos.marcas.length) return { marcas: [], imagenes: [], motivo: null };
+
+  const porTipo = new Map(datos.imagenes.map((i) => [i.tipo, i]));
+  const tiposPedidos = [...new Set(datos.marcas.map((m) => m.tipo))];
+  const faltan = tiposPedidos.filter((t) => !porTipo.has(t));
+  if (faltan.length) {
+    // No es un error: es la decisión de diseño «si no cargó imagen, no se
+    // estampa nada». Pero queda dicho, porque la ausencia tiene que ser un
+    // hecho registrado y no un vacío que parezca un olvido nuestro.
+    return {
+      marcas: [], imagenes: [],
+      motivo: `el firmante no tiene cargada su ${faltan.join(' ni su ')}`,
+    };
+  }
+
+  const noPng = tiposPedidos.filter((t) => porTipo.get(t)!.mime !== 'image/png');
+  if (noPng.length) {
+    return {
+      marcas: [], imagenes: [],
+      motivo: `la imagen de ${noPng.join(' y ')} está en ${porTipo.get(noPng[0]!)!.mime} ` +
+              'y sólo se estampa PNG con fondo transparente',
+    };
+  }
+
+  const bytes = new Map<string, Buffer>();
+  for (const t of tiposPedidos) bytes.set(t, await almacen().leer(porTipo.get(t)!.clave));
+
+  // La principal —la que ES el campo de firma— es la firma completa de la
+  // última hoja donde aparezca. Es la que el lector resalta al hacer clic en el
+  // panel de firmas, y tiene que ser la firma y no una inicial.
+  let iPrincipal = 0;
+  datos.marcas.forEach((m, i) => {
+    const mejor = datos.marcas[iPrincipal]!;
+    const gana = m.tipo === 'firma' && (mejor.tipo !== 'firma' || m.pagina >= mejor.pagina);
+    if (gana) iPrincipal = i;
+  });
+
+  const marcas: Marca[] = datos.marcas.map((m, i) => {
+    const x = Number(m.x), y = Number(m.y);
+    return {
+      pagina: m.pagina,
+      rect: [x, y, x + Number(m.ancho), y + Number(m.alto)] as [number, number, number, number],
+      imagen: bytes.get(m.tipo)!,
+      principal: i === iPrincipal,
+    };
+  });
+
+  return {
+    marcas,
+    imagenes: tiposPedidos.map((t) => ({
+      tipo: t, id: porTipo.get(t)!.id,
+      sha256: Buffer.from(porTipo.get(t)!.sha256).toString('hex'),
+    })),
+    motivo: null,
+  };
+}
+
 export async function firmar(token: string, input: FirmaInput) {
   const e = await verificarEnlaceFirma(token);
 
@@ -217,13 +323,14 @@ export async function firmar(token: string, input: FirmaInput) {
     const r = await sql<{
       participacion_id: string; instancia_id: string; circuito_id: string;
       cuenta_propietaria_id: string; estado: string; papel: string; orden: number;
+      identidad_id: string;
       sha256: Buffer; titulo: string; nivel_firma: string; me_toca: boolean;
       anclaje_email: string | null; clave: string; mime: string;
       archivo_vigente_id: string | null; firmante: string | null; emisor: string | null;
       pais: string | null;
     }>`
       select p.id as participacion_id, p.instancia_id, p.circuito_id,
-             p.cuenta_propietaria_id, p.estado, p.papel, p.orden,
+             p.cuenta_propietaria_id, p.estado, p.papel, p.orden, p.identidad_id,
              a.sha256, c.titulo, c.nivel_firma,
              not exists (
                select 1 from participacion p2
@@ -271,6 +378,11 @@ export async function firmar(token: string, input: FirmaInput) {
   const nombreFirmante = ctx.firmante || 'el firmante';
   const original = await almacen().leer(ctx.clave);
 
+  // Dónde va la firma autógrafa de esta persona. Si no cargó imagen, la lista
+  // vuelve vacía y se firma sin estampar nada — que es la decisión tomada, no
+  // una degradación.
+  const visual = await marcasDelFirmante(ctx.instancia_id, ctx.participacion_id, ctx.identidad_id);
+
   // La normalización sólo hace falta la primera vez: deja el PDF con tabla xref
   // clásica, que es lo que el placeholder sabe leer. Si ya hay una firma, el
   // archivo NO se vuelve a serializar — hacerlo rompería esa firma.
@@ -297,6 +409,9 @@ export async function firmar(token: string, input: FirmaInput) {
         nombre: nombreFirmante,
         lugar: ctx.emisor ?? '',
         contacto: process.env.SOPORTE_EMAIL ?? '',
+        // ⚠ Va adentro del MISMO incremental update que la firma: la marca no
+        // es un cambio posterior al documento, es parte de firmarlo.
+        marcas: visual.marcas.length ? visual.marcas : undefined,
       },
       selloDePlataforma(),
       async (datos) => {
@@ -344,6 +459,7 @@ export async function firmar(token: string, input: FirmaInput) {
   await almacen().guardar(claveNueva, firmado);
 
   // ── PASO 3: registrar. Todo junto, en una transacción.
+  let cerroElCircuito = false;
   const resultado = await enSistema(async (trx) => {
     const archivoId = randomUUID();
     await sql`
@@ -412,6 +528,45 @@ export async function firmar(token: string, input: FirmaInput) {
       // El evento apunta al documento QUE SE FIRMÓ, no al resultado: es el
       // contenido sobre el que esta persona prestó su consentimiento.
       sha256Documento: ctx.sha256,
+    });
+
+    // ── La representación visual. SIEMPRE se anota, incluso cuando no hubo.
+    //
+    // ⚠ Que un documento salga sin el trazo de nadie es correcto y esperable
+    // —la firma vale igual—, pero tiene que quedar dicho. Sin esta anotación,
+    // dentro de tres años la ausencia de la marca parece un olvido nuestro o,
+    // peor, una manipulación. El expediente es inmutable: ésta es la única
+    // oportunidad de explicarla.
+    //
+    // ⚠ Y se anota la HUELLA de cada imagen, no la imagen. El expediente lo
+    // pueden leer el emisor y los demás firmantes; una firma autógrafa es de lo
+    // más copiable que hay. La huella responde «¿qué trazo se estampó acá?» sin
+    // repartir el trazo.
+    await anotar(trx, {
+      ...comun,
+      tipo: 'firma.representacion_visual',
+      datos: salida.marcasEstampadas
+        ? {
+            estampada: true,
+            marcas: salida.marcasEstampadas,
+            paginas: [...new Set(visual.marcas.map((m) => m.pagina + 1))],
+            imagenes: visual.imagenes,
+            // Lo que la persona escribió, si escribió algo. Tampoco es la firma.
+            nombre_escrito: input.nombreEscrito ?? null,
+          }
+        : {
+            estampada: false,
+            motivo:
+              salida.errorMarca ??
+              visual.motivo ??
+              'el emisor no definió dónde estampar la firma en este documento',
+            // Se dice explícitamente para que nadie tenga que deducirlo.
+            aclaracion:
+              'La firma electrónica es válida igual: la representación visual no ' +
+              'aporta valor legal, lo aporta el PAdES.',
+            nombre_escrito: input.nombreEscrito ?? null,
+          },
+      sha256Documento: sha256Firmado,
     });
 
     // ── El sello de tiempo, en la cadena. Salga o no salga.
@@ -526,6 +681,7 @@ export async function firmar(token: string, input: FirmaInput) {
           update circuito set estado = 'completo', cerrado_en = now()
            where id = ${ctx.circuito_id}::uuid and estado = 'enviado'
         `.execute(trx);
+        cerroElCircuito = true;
         await anotar(trx, {
           instanciaId: ctx.instancia_id,
           circuitoId: ctx.circuito_id,
@@ -551,6 +707,30 @@ export async function firmar(token: string, input: FirmaInput) {
     } catch {
       // Si el aviso falla, la lista lo va a mostrar como "no le llegó el aviso"
       // y el emisor lo reintenta. Perder la firma por un SMTP caído sería peor.
+    }
+  }
+
+  // Firmó el último y el circuito cerró: a todos les llega el documento
+  // firmado, con el PDF adjunto. Mismo criterio que arriba — fuera de la
+  // transacción, y si el correo falla la firma ya está hecha y el expediente
+  // registra que ese aviso no salió.
+  if (cerroElCircuito) {
+    // ⚠ El certificado ANTES del aviso, para que viaje adjunto en el mismo
+    // correo. Es lo que un abogado va a mirar: que llegue junto con el
+    // documento y no haya que entrar a buscarlo.
+    //
+    // Si falla, se avisa igual: perder el correo del documento firmado porque
+    // no se pudo dibujar un PDF de resumen sería el peor de los canjes. El
+    // certificado se puede emitir después; el momento de avisar, no.
+    try {
+      await emitirCertificado(ctx.instancia_id);
+    } catch {
+      /* se emite a pedido cuando alguien lo descargue */
+    }
+    try {
+      await avisarCompletado(ctx.circuito_id, ctx.instancia_id);
+    } catch {
+      /* queda anotado en el expediente como notificacion.fallida */
     }
   }
 

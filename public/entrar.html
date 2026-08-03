@@ -239,13 +239,10 @@
       </div>
     </div>
 
-    <label for="cPass" data-t="crear.password">Contraseña</label>
-    <input id="cPass" type="password" autocomplete="new-password" />
-    <p class="pista" data-t="crear.password.p">Mínimo 12 caracteres. No pedimos mayúsculas ni símbolos: el largo defiende más que las reglas.</p>
-
-    <label for="cPass2" data-t="crear.repetir">Repetí la contraseña</label>
-    <input id="cPass2" type="password" autocomplete="new-password" onkeydown="if(event.key==='Enter')crearCuenta()" />
-
+    <!-- ⚠ El alta NO pide contraseña acá, y es el centro del arreglo del 3/8:
+         la elige quien abre el enlace del correo, o sea quien demostró leer esa
+         casilla. Pedirla en este formulario dejaba que un tercero eligiera la
+         contraseña de la identidad de otro. Ver services/auth_registro.ts. -->
     <button class="primary" id="btnCrear" onclick="crearCuenta()" data-t="crear.btn">Crear la cuenta</button>
     <div id="msgCrear"></div>
 
@@ -278,10 +275,12 @@
   <section id="vNuevaPassword" class="card hidden">
     <h1 id="npTitulo" data-t="np.h1">Elegí tu contraseña</h1>
     <p class="lead" data-t="np.lead">Mínimo 12 caracteres.</p>
-    <label for="np1" data-t="np.nueva">Contraseña nueva</label>
-    <input id="np1" type="password" autocomplete="new-password" />
-    <label for="np2" data-t="np.repetir">Repetila</label>
-    <input id="np2" type="password" autocomplete="new-password" onkeydown="if(event.key==='Enter')guardarPassword()" />
+    <div id="bloqueNp">
+      <label for="np1" data-t="np.nueva">Contraseña nueva</label>
+      <input id="np1" type="password" autocomplete="new-password" />
+      <label for="np2" data-t="np.repetir">Repetila</label>
+      <input id="np2" type="password" autocomplete="new-password" onkeydown="if(event.key==='Enter')guardarPassword()" />
+    </div>
     <button class="primary" id="btnNp" onclick="guardarPassword()" data-t="np.guardar">Guardar y entrar</button>
     <div id="msgNp"></div>
   </section>

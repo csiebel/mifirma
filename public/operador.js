@@ -28,9 +28,27 @@
   var DATOS = null;       // respuesta de /operador/planes
   var PLAN_SEL = null;
 
-  var VISTAS = ['correo', 'twilio', 'planes', 'bitacora'];
+  var VISTAS = ['correo', 'twilio', 'planes', 'paises', 'bitacora'];
 
-  var MONEDA_PAIS = { UY: 'UYU', PY: 'PYG', BR: 'BRL' };
+  // El catálogo de países, tal como lo devuelve la base. Antes acá había un
+  // `{ UY:'UYU', PY:'PYG', BR:'BRL' }` escrito a mano: agregar Chile era editar
+  // este archivo, el HTML de al lado y dos archivos del servidor.
+  var PAISES = [];
+
+  /** La moneda de cobro de un país. Sin fila en el catálogo, dólares. */
+  function monedaDe(pais) {
+    for (var i = 0; i < PAISES.length; i++) if (PAISES[i].codigo === pais) return PAISES[i].moneda;
+    return 'USD';
+  }
+  function nombreDe(pais) {
+    for (var i = 0; i < PAISES.length; i++) {
+      if (PAISES[i].codigo === pais) {
+        var n = PAISES[i].nombre_i18n || {};
+        return (PAISES[i].bandera ? PAISES[i].bandera + ' ' : '') + (n.es || n.en || pais);
+      }
+    }
+    return pais;
+  }
 
   var ETIQUETA_METRICA = {
     abono: 'Abono mensual',
@@ -212,6 +230,7 @@
     if (vista === 'correo') cargarCorreo();
     if (vista === 'twilio') cargarTwilio();
     if (vista === 'planes') cargarPlanes();
+    if (vista === 'paises') cargarPaises();
     if (vista === 'bitacora') cargarBitacora();
   }
 
@@ -415,6 +434,12 @@
   async function cargarPlanes() {
     try {
       DATOS = await api('/operador/planes');
+      // El catálogo de países define la moneda de cada precio: sin él, el
+      // selector queda vacío y la columna «Moneda» miente.
+      if (!PAISES.length) {
+        try { PAISES = (await api('/operador/paises')).paises || []; } catch (e) { /* se ve igual */ }
+      }
+      llenarSelectorPaisPrecio();
       pintarPlanes();
       var sigue = PLAN_SEL && DATOS.planes.filter(function (p) { return p.id === PLAN_SEL.id; })[0];
       seleccionarPlan(sigue || DATOS.planes[0] || null);
@@ -427,6 +452,176 @@
     if (!m) return '';
     return m.es || m.pt || m.en || Object.values(m)[0] || '';
   }
+
+  // ===========================================================================
+  // PAÍSES
+  //
+  // ⚠ LA REGLA: la moneda de cobro es el DÓLAR salvo que el catálogo diga otra
+  // cosa. Un país sin fila cobra en USD y funciona sin configurar nada; la
+  // moneda local es la excepción declarada. Al revés —lista blanca de países—
+  // cada país nuevo sería una migración, y es lo que había.
+  //
+  // Esta pantalla NO decide dónde se ofrece el producto: eso lo sigue decidiendo
+  // tener precios cargados. Dos mecanismos para la misma pregunta terminan
+  // siempre en un país que aparece en un lado y no en el otro.
+  // ===========================================================================
+  async function cargarPaises() {
+    try {
+      var j = await api('/operador/paises');
+      PAISES = j.paises || [];
+      pintarPaises();
+      llenarSelectorPaisPrecio();
+    } catch (e) {
+      $('tPaises').innerHTML = '<tr><td colspan="6" class="vacio">' + esc(e.message) + '</td></tr>';
+    }
+  }
+
+  function pintarPaises() {
+    if (!PAISES.length) {
+      $('tPaises').innerHTML =
+        '<tr><td colspan="6" class="vacio">Ningún país configurado. Todo se cobra en dólares.</td></tr>';
+      return;
+    }
+    $('tPaises').innerHTML = PAISES.map(function (p) {
+      var n = p.nombre_i18n || {};
+      // Sin procedencia, el marco legal es una opinión con formato de dato. Se
+      // muestra en rojo hasta que un abogado local lo firme.
+      var verif = p.verificado_por
+        ? '<span class="pill on">' + esc(p.verificado_por) + (p.verificado_en ? ' · ' + esc(p.verificado_en) : '') + '</span>'
+        : '<span class="pill des">SIN VERIFICAR</span>';
+      return '<tr>' +
+        '<td><b>' + (p.bandera ? esc(p.bandera) + ' ' : '') + esc(n.es || n.en || p.codigo) + '</b>' +
+        ' <span class="mut">' + esc(p.codigo) + '</span></td>' +
+        '<td><b>' + esc(p.moneda) + '</b>' +
+        (p.admite_usd ? ' <span class="mut">o USD</span>' : '') +
+        (p.tc_fuente ? '<br><span class="mut">TC: ' + esc(p.tc_fuente) + '</span>' : '') + '</td>' +
+        '<td>' + esc(p.idioma) + '</td>' +
+        '<td>' + esc(p.marco_legal || '—') +
+        (p.certificador ? '<br><span class="mut">' + esc(p.certificador) + '</span>' : '') + '</td>' +
+        '<td>' + verif + '</td>' +
+        '<td style="text-align:right;white-space:nowrap">' +
+        '<button class="btn chico" onclick="abrirPais(\'' + esc(p.codigo) + '\')">Editar</button> ' +
+        '<button class="btn btn-d chico" onclick="borrarPais(\'' + esc(p.codigo) + '\')">Quitar</button>' +
+        '</td></tr>';
+    }).join('');
+  }
+
+  /** El selector de país de la pantalla de precios sale del catálogo. */
+  function llenarSelectorPaisPrecio() {
+    var sel = $('paisPrecio');
+    if (!sel) return;
+    var antes = sel.value;
+    sel.innerHTML = PAISES.map(function (p) {
+      var n = p.nombre_i18n || {};
+      return '<option value="' + esc(p.codigo) + '">' +
+             (p.bandera ? esc(p.bandera) + ' ' : '') + esc(n.es || n.en || p.codigo) +
+             ' · ' + esc(p.moneda) + '</option>';
+    }).join('');
+    if (antes && sel.querySelector('option[value="' + antes + '"]')) sel.value = antes;
+  }
+
+  function abrirPais(codigo) {
+    var p = null;
+    for (var i = 0; i < PAISES.length; i++) if (PAISES[i].codigo === codigo) p = PAISES[i];
+    var n = (p && p.nombre_i18n) || {};
+
+    abrirModal(
+      '<h2>' + (p ? 'Editar ' + esc(p.codigo) : 'Agregar país') + '</h2>' +
+      '<p class="sub">La moneda que se escriba acá es en la que se le factura a las cuentas de ' +
+      'ese país. Si no se configura ningún país, todo se cobra en dólares.</p>' +
+      '<div class="dos">' +
+      '<div><label>Código ISO (2 letras)</label>' +
+      '<input id="pCod" maxlength="2" value="' + esc(p ? p.codigo : '') + '"' + (p ? ' disabled' : '') + ' /></div>' +
+      '<div><label>Bandera</label>' +
+      '<input id="pBan" maxlength="8" value="' + esc((p && p.bandera) || '') + '" placeholder="🇨🇱" /></div>' +
+      '</div>' +
+      '<div class="tres">' +
+      '<div><label>Nombre (es)</label><input id="pEs" value="' + esc(n.es || '') + '" /></div>' +
+      '<div><label>Nombre (pt)</label><input id="pPt" value="' + esc(n.pt || '') + '" /></div>' +
+      '<div><label>Nombre (en)</label><input id="pEn" value="' + esc(n.en || '') + '" /></div>' +
+      '</div>' +
+      '<div class="tres">' +
+      '<div><label>Moneda de cobro</label>' +
+      '<input id="pMon" maxlength="3" value="' + esc((p && p.moneda) || 'USD') + '" /></div>' +
+      '<div><label>Idioma</label>' +
+      '<input id="pIdi" maxlength="5" value="' + esc((p && p.idioma) || 'es') + '" /></div>' +
+      '<div><label>Orden</label>' +
+      '<input id="pOrd" type="number" value="' + esc(String(p ? p.orden : 100)) + '" /></div>' +
+      '</div>' +
+      '<label style="display:flex;gap:8px;align-items:flex-start;margin-top:14px;font-size:13.5px">' +
+      '<input type="checkbox" id="pUsd" style="width:auto;margin-top:3px"' +
+      (p && p.admite_usd ? ' checked' : '') + ' />' +
+      '<span>Además se le puede facturar en dólares.<br>' +
+      '<span class="mut">Es una pregunta legal, no comercial: en Brasil los pagos domésticos ' +
+      'entre residentes están en general restringidos al real. Dejalo sin marcar hasta que el ' +
+      'abogado local lo confirme.</span></span></label>' +
+      '<div class="dos" style="margin-top:14px">' +
+      '<div><label>Marco legal</label>' +
+      '<input id="pLey" value="' + esc((p && p.marco_legal) || '') + '" placeholder="Ley 18.600" /></div>' +
+      '<div><label>Certificador acreditado</label>' +
+      '<input id="pCert" value="' + esc((p && p.certificador) || '') + '" placeholder="tuID (Antel)" /></div>' +
+      '</div>' +
+      '<div class="dos">' +
+      '<div><label>Fuente del tipo de cambio</label>' +
+      '<input id="pTc" maxlength="40" value="' + esc((p && p.tc_fuente) || '') + '" placeholder="BCU" /></div>' +
+      '<div><label>Verificado por</label>' +
+      '<input id="pVer" value="' + esc((p && p.verificado_por) || '') + '" placeholder="Estudio, abogado" /></div>' +
+      '</div>' +
+      '<div class="dos">' +
+      '<div><label>Fecha de verificación</label>' +
+      '<input id="pVerEn" type="date" value="' + esc((p && p.verificado_en) || '') + '" /></div>' +
+      '<div><label>Fuente del dato legal</label>' +
+      '<input id="pFuente" value="' + esc((p && p.fuente) || 'SIN VERIFICAR') + '" /></div>' +
+      '</div>' +
+      '<div id="msgPais"></div>' +
+      '<div class="acc">' +
+      '<button class="btn" onclick="cerrarModal()">Cancelar</button>' +
+      '<button class="btn btn-p" id="pOk">Guardar</button></div>'
+    );
+
+    $('pOk').addEventListener('click', async function () {
+      var cod = (p ? p.codigo : $('pCod').value).trim().toUpperCase();
+      if (!/^[A-Z]{2}$/.test(cod)) return msg('msgPais', 'El código va en dos letras: UY, PY, BR, CL…', 'err');
+      var nom = {};
+      if ($('pEs').value.trim()) nom.es = $('pEs').value.trim();
+      if ($('pPt').value.trim()) nom.pt = $('pPt').value.trim();
+      if ($('pEn').value.trim()) nom.en = $('pEn').value.trim();
+      $('pOk').disabled = true;
+      try {
+        await api('/operador/paises', 'PUT', {
+          codigo: cod,
+          nombre_i18n: nom,
+          bandera: $('pBan').value.trim() || null,
+          idioma: $('pIdi').value.trim() || 'es',
+          orden: Number($('pOrd').value || 100),
+          moneda: ($('pMon').value.trim() || 'USD').toUpperCase(),
+          admite_usd: $('pUsd').checked,
+          tc_fuente: $('pTc').value.trim() || null,
+          marco_legal: $('pLey').value.trim() || null,
+          certificador: $('pCert').value.trim() || null,
+          fuente: $('pFuente').value.trim() || 'SIN VERIFICAR',
+          verificado_por: $('pVer').value.trim() || null,
+          verificado_en: $('pVerEn').value || null,
+        });
+        cerrarModal();
+        cargarPaises();
+      } catch (e) {
+        $('pOk').disabled = false;
+        msg('msgPais', e.message, 'err');
+      }
+    });
+  }
+
+  async function borrarPais(codigo) {
+    try {
+      await api('/operador/paises/' + codigo, 'DELETE');
+      cargarPaises();
+    } catch (e) {
+      msg('msgPaises', e.message, 'err');
+    }
+  }
+
+
 
   function pintarPlanes() {
     if (!DATOS.planes.length) {
@@ -491,7 +686,7 @@
       return;
     }
     var pais = $('paisPrecio').value;
-    var moneda = MONEDA_PAIS[pais] || 'USD';
+    var moneda = monedaDe(pais);
     $('nomPrecios').textContent = 'Precios de ' + (texto(PLAN_SEL.nombre_i18n) || PLAN_SEL.codigo);
     $('subPrecios').textContent = 'Lo que no tenga precio, no se cobra ni se ofrece.';
 
@@ -792,6 +987,8 @@
   window.probarTwilio = probarTwilio;
   window.abrirPlan = abrirPlan;
   window.pintarPrecios = pintarPrecios;
+  window.abrirPais = abrirPais;
+  window.borrarPais = borrarPais;
   window.cargarBitacora = cargarBitacora;
   window.cerrarModal = cerrarModal;
 

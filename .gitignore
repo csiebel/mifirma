@@ -36,3 +36,7 @@ db/.env.tunel
 db/*.p12
 db/*.pfx
 *.pem
+
+# Materiales del laboratorio de PDF: se generan solos en la primera corrida.
+# Adentro hay claves privadas de prueba y PDF de terceros. Ver test/pdf/fixtures.ts
+test/pdf/fixtures/

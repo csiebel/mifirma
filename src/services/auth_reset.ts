@@ -39,8 +39,22 @@ function baseUrl(): string {
   return (process.env.APP_BASE_URL || 'http://localhost:3000').replace(/\/$/, '');
 }
 
+/**
+ * ⚠ Va a `/entrar`, NO a `/app`.
+ *
+ * `/app` sirve la consola. Sin sesión, la consola hace `location.href =
+ * '/entrar'` y **en ese salto se pierde el fragmento**, o sea el token: la
+ * persona termina en el login pelado, sin forma de elegir su contraseña.
+ *
+ * Estuvo mal desde el principio y no lo notó nadie porque ni el recupero ni la
+ * invitación se habían recorrido enteros hasta el 3/8/2026. Es la lección 12
+ * otra vez: un camino ejercido cero veces no está de más, está sin probar.
+ *
+ * El token va en el FRAGMENTO y no en la query a propósito: el fragmento no
+ * viaja al servidor, así que no queda en los logs ni se filtra por el Referer.
+ */
 function enlace(token: string, tipo: 'reset' | 'invitacion'): string {
-  return `${baseUrl()}/app#token=${token}&t=${tipo === 'invitacion' ? 'inv' : 'reset'}`;
+  return `${baseUrl()}/entrar#token=${token}&t=${tipo === 'invitacion' ? 'inv' : 'reset'}`;
 }
 
 function enmascararEmailLog(email: string): string {

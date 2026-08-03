@@ -91,9 +91,16 @@ export const LOGIN_PATHS: ReadonlyMap<string, Realm> = new Map<string, Realm>([
   // más de una. Se llamaba 'elegir-empresa' en payroll y quedó apuntando a una
   // ruta que ya no existe: el que tenía dos cuentas entraba sin cookie.
   ['/auth/login/elegir-cuenta', 'emp'],
-  // El alta emite sesión igual que un login. Sin esto, la empresa se crea, el
+  // El alta emite sesión igual que un login. Sin esto, la cuenta se crea, el
   // navegador salta a /app y ahí no hay cookie: consola vacía y a /entrar.
-  ['/auth/registro', 'emp'],
+  //
+  // ⚠ Desde el 3/8 el alta es en DOS pasos y la sesión sale del SEGUNDO. El
+  // primero devuelve `{ok:true}` y nada más — dejar acá `/auth/registro` no
+  // rompería nada, pero diría que ese endpoint emite sesión, y ya no lo hace.
+  ['/auth/registro/confirmar', 'emp'],
+  // El firmante que se queda con su repositorio. Emite sesión de empresa igual
+  // que un alta, porque una cuenta persona es una cuenta como cualquier otra.
+  ['/firmar/cuenta/crear', 'emp'],
   // Estudio (sess_est)
   ['/estudio/login', 'est'],
   ['/estudio/login/elegir', 'est'],

@@ -1,6 +1,7 @@
 import { sql } from 'kysely';
 import { withOperador } from '../db/pool';
 import { HttpError } from '../http/errors';
+import { monedaDeCobro } from './paises';
 
 /**
  * Planes comerciales y su lista de precios. Todo esto es parametría del
@@ -245,6 +246,20 @@ export async function setPrecio(
   if (pais.length !== 2) throw new HttpError(400, 'El país va en dos letras (ISO 3166).');
   if (moneda.length !== 3) throw new HttpError(400, 'La moneda va en tres letras (ISO 4217).');
   if (!(d.precio >= 0)) throw new HttpError(400, 'El precio no puede ser negativo.');
+
+  // ⚠ Esto lo vuelve a comprobar un trigger de la base (migración 032), y no es
+  // redundancia: el trigger vale también para un script y para psql, pero su
+  // mensaje NUNCA llega al usuario —el manejador de errores responde 500
+  // genérico ante cualquier error que no sea un HttpError, y hace bien—. Acá se
+  // explica; allá se impide.
+  const local = await monedaDeCobro(pais);
+  if (moneda !== local && moneda !== 'USD') {
+    throw new HttpError(
+      400,
+      `${pais} cobra en ${local}. Un precio en ${moneda} no se puede facturar ahí: cargalo en ` +
+        `${local} o en USD, o cambiá la moneda del país en Países.`,
+    );
+  }
 
   return withOperador(operadorId, async (trx) => {
     const vigente = await sql<{ id: string; precio: string; moneda: string; desde: string; hoy: boolean }>`

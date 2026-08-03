@@ -5,6 +5,7 @@ import type { DB } from '../db/schema';
 import { fijarContexto } from '../db/contexto';
 import { hashPassword } from '../auth/password';
 import { HttpError } from '../http/errors';
+import { monedaDeCobro, idiomaDePais } from '../services/paises';
 
 /**
  * Alta de una cuenta nueva.
@@ -35,7 +36,8 @@ export interface ProvisionInput {
   nombre: string;
   tipo?: 'empresa' | 'persona';
   pais: string;
-  moneda: string;
+  /** Opcional: sin esto la resuelve el catálogo de países (USD por defecto). */
+  moneda?: string;
   idioma?: string;
   razonSocial?: string | null;
   idFiscal?: string | null;
@@ -98,10 +100,15 @@ const ROLES_BASE = [
 
 /** Carpetas del sistema. Se crean siempre: un repositorio vacío sin estructura
  *  obliga a cada cliente a inventar la suya en el primer minuto de uso. */
+// ⚠ NO hay carpeta «Borradores», y es a propósito. El estado del documento
+// —borrador, esperando firmas, terminado— se muestra como VISTA sobre la lista,
+// no como lugar. Tener las dos cosas obliga a preguntarse cuál manda, y la
+// respuesta cambia según a quién se le pregunte. `carpeta.sistema` sigue
+// admitiendo 'borradores' para las cuentas que ya la tienen: ahí quedó como una
+// carpeta común y nada la toca.
 const CARPETAS = [
   { sistema: 'raiz' as const, ruta: 'raiz', nombre: { es: 'Documentos', pt: 'Documentos', en: 'Documents' } },
   { sistema: 'entrada' as const, ruta: 'raiz.entrada', nombre: { es: 'Recibidos', pt: 'Recebidos', en: 'Inbox' } },
-  { sistema: 'borradores' as const, ruta: 'raiz.borradores', nombre: { es: 'Borradores', pt: 'Rascunhos', en: 'Drafts' } },
   { sistema: 'papelera' as const, ruta: 'raiz.papelera', nombre: { es: 'Papelera', pt: 'Lixeira', en: 'Trash' } },
 ];
 
@@ -117,7 +124,13 @@ export async function provisionarCuenta(input: ProvisionInput): Promise<Provisio
   if (!/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(email)) throw new HttpError(400, 'El correo del administrador no es válido.');
   if (!input.nombre?.trim()) throw new HttpError(400, 'Falta el nombre de la cuenta.');
   if (!/^[A-Z]{2}$/.test(input.pais)) throw new HttpError(400, 'El país va en ISO 3166-1 alfa-2, por ejemplo UY.');
-  if (!/^[A-Z]{3}$/.test(input.moneda)) throw new HttpError(400, 'La moneda va en ISO 4217, por ejemplo UYU.');
+
+  // ⚠ La moneda de cobro NO la elige quien se registra: la resuelve el catálogo
+  // de países, y si el país no está configurado es el dólar. Dejarla en el
+  // formulario sería dejar que el cliente decida en qué moneda le facturamos.
+  const moneda = (input.moneda || (await monedaDeCobro(input.pais))).toUpperCase();
+  if (!/^[A-Z]{3}$/.test(moneda)) throw new HttpError(400, 'La moneda va en ISO 4217, por ejemplo UYU.');
+  const idioma = input.idioma ?? (await idiomaDePais(input.pais));
 
   // El id se genera acá y se pasa al contexto ANTES de insertar: así el WITH
   // CHECK de las políticas se cumple sobre la fila que se está creando.
@@ -141,6 +154,16 @@ export async function provisionarCuenta(input: ProvisionInput): Promise<Provisio
 
     await fijarContexto(trx, { actor: 'sistema', cuentaId });
 
+    // ⚠ Qué plan recibe una cuenta nueva lo decide el OPERADOR, marcándolo en
+    // el catálogo, no el código. Decidido el 3/8: «lo define el operador por
+    // país y plan». Sin ninguno marcado queda en null, que es lo correcto para
+    // una cuenta que sólo recibe documentos: no despacha nada, así que no
+    // dispara ninguna métrica de cobro. Ver migración 036.
+    const planPorDefecto = input.planId
+      ? input.planId
+      : (await sql<{ id: string | null }>`select app.plan_por_defecto(${tipo}) as id`
+          .execute(trx)).rows[0]?.id ?? null;
+
     await trx
       .insertInto('cuenta')
       .values({
@@ -148,9 +171,9 @@ export async function provisionarCuenta(input: ProvisionInput): Promise<Provisio
         tipo,
         nombre_mostrado: input.nombre.trim(),
         pais: input.pais,
-        moneda: input.moneda,
-        idioma: input.idioma ?? idiomaPorPais(input.pais),
-        plan_id: input.planId ?? null,
+        moneda,
+        idioma,
+        plan_id: planPorDefecto,
         // Una cuenta de tipo persona necesita titular; una de empresa, no.
         identidad_titular_id: tipo === 'persona' ? identidadAdmin : null,
       })
@@ -171,6 +194,27 @@ export async function provisionarCuenta(input: ProvisionInput): Promise<Provisio
 
     const roles = await crearRolesBase(trx, cuentaId);
     const carpetas = await crearCarpetas(trx, cuentaId, roles, identidadAdmin);
+
+    // ⚠ Lo que esta persona ya tenía para firmar, ubicado en su bandeja.
+    //
+    // Alguien puede haber firmado cuarenta documentos antes de tener cuenta: el
+    // otorgamiento le daba acceso, pero no había dónde ponerlos. El día que se
+    // registra aparecen. No se migra nada — la ubicación se crea, el
+    // otorgamiento ya estaba. Ver `repositorio-campos-y-envio-masivo.md` §6.
+    //
+    // Sólo en la cuenta PERSONA: un documento personal no entra al repositorio
+    // de la empresa donde alguien trabaja.
+    if (tipo === 'persona') {
+      await sql`
+        insert into ubicacion (cuenta_id, carpeta_id, instancia_id)
+        select ${cuentaId}::uuid, ${carpetas.entrada}::uuid, o.instancia_id
+          from otorgamiento o
+         where o.identidad_id = ${identidadAdmin}::uuid
+           and o.revocado_en is null
+         group by o.instancia_id
+        on conflict do nothing
+      `.execute(trx);
+    }
 
     await trx
       .insertInto('membresia')
@@ -210,14 +254,6 @@ export async function provisionarCuenta(input: ProvisionInput): Promise<Provisio
 
     return { cuentaId, adminIdentidadId: identidadAdmin, roles, carpetaRaizId: carpetas.raiz };
   });
-}
-
-/**
- * Idioma por defecto del país. Es una conveniencia del alta, no una regla: la
- * cuenta lo cambia cuando quiere, y cada persona tiene el suyo.
- */
-function idiomaPorPais(pais: string): string {
-  return pais === 'BR' ? 'pt-BR' : 'es';
 }
 
 async function resolverIdentidad(

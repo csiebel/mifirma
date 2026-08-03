@@ -1,6 +1,5 @@
 import type { FastifyInstance } from 'fastify';
 import { z } from 'zod';
-import { emitirSesion } from '../../auth/identity';
 import {
   loginConPassword,
   elegirCuentaLogin,
@@ -9,8 +8,7 @@ import {
   enviarOtpElegido,
 } from '../../services/auth_login';
 import { solicitarReset, confirmarReset } from '../../services/auth_reset';
-import { validarPassword } from '../../auth/password';
-import { provisionarCuenta } from '../../admin/provisioning';
+import { solicitarRegistro, verRegistro, confirmarRegistro } from '../../services/auth_registro';
 import { clearCookieSesion } from '../cookies_sesion';
 import { HttpError } from '../errors';
 
@@ -96,13 +94,15 @@ export function registrarRutasAuth(app: FastifyInstance) {
     return confirmarReset(b.token, b.password);
   });
 
-  // ---- Alta self-service ----
+  // ---- Alta self-service, en DOS PASOS ----
   //
-  // Tope de altas por IP más estricto que el del resto: sin esto, crear cuentas
-  // en masa es gratis y cada una arrastra su árbol de carpetas y sus roles.
+  // ⚠ El primer paso NO crea nada y NO devuelve sesión, ni siquiera para un
+  // correo que no existe. Ver el encabezado de `services/auth_registro.ts`: si
+  // la respuesta fuera distinta según el correo exista o no, este formulario
+  // sería una herramienta pública para averiguar quién usa MiFirma.
   //
-  // TODO antes de abrirlo al público: verificación del correo antes de crear la
-  // cuenta, y captcha. Hoy alcanza para la contratación asistida.
+  // Tope por IP más estricto que el del resto: sin esto, pedir altas en masa es
+  // gratis y cada una manda un correo a la casilla de alguien.
   const cuerpoRegistro = z.object({
     nombre: z.string().min(1).max(120),
     tipo: z.enum(['empresa', 'persona']).optional(),
@@ -114,50 +114,47 @@ export function registrarRutasAuth(app: FastifyInstance) {
     admin: z.object({
       nombre: z.string().min(1).max(120),
       email: z.string().email(),
-      password: z.string().min(1),
     }),
   });
-
-  const MONEDA: Record<string, string> = { UY: 'UYU', PY: 'PYG', BR: 'BRL' };
 
   app.post(
     '/auth/registro',
     { config: { rateLimit: { max: 5, timeWindow: '1 hour' } } },
     async (req) => {
       const b = cuerpoRegistro.parse(req.body);
-      const errPwd = validarPassword(b.admin.password);
-      if (errPwd) throw new HttpError(400, errPwd);
+      return solicitarRegistro(
+        {
+          nombre: b.nombre,
+          tipo: b.tipo ?? 'empresa',
+          pais: b.pais,
+          razonSocial: b.razon_social ?? null,
+          idFiscal: b.id_fiscal ?? null,
+          domicilio: b.domicilio ?? null,
+          industriaId: b.industria_id ?? null,
+          adminNombre: b.admin.nombre,
+          email: b.admin.email,
+        },
+        req.ip,
+      );
+    },
+  );
 
-      const r = await provisionarCuenta({
-        nombre: b.nombre,
-        tipo: b.tipo ?? 'empresa',
-        pais: b.pais,
-        moneda: MONEDA[b.pais],
-        razonSocial: b.razon_social ?? null,
-        idFiscal: b.id_fiscal ?? null,
-        domicilio: b.domicilio ?? null,
-        industriaId: b.industria_id ?? null,
-        admin: b.admin,
-      });
+  // Qué se está por crear, para pintar la pantalla. No crea nada.
+  app.post('/auth/registro/ver', async (req) => {
+    const b = z.object({ token: z.string().min(1) }).parse(req.body);
+    return verRegistro(b.token);
+  });
 
-      // La sesión recién creada arranca sin anclaje probado: el correo todavía
-      // no se verificó. El nivel sube cuando la persona prueba algo — un código
-      // por correo, un certificado— no por haberse registrado.
-      //
-      // Por lo mismo NO se confía en el dispositivo acá: confiar es extender una
-      // prueba que ocurrió, y en el alta no ocurrió ninguna.
-      const token = await emitirSesion(r.cuentaId, r.adminIdentidadId, {
-        anclajesProbados: [],
-        nivelGarantia: 'bajo',
-      });
-
-      return {
-        token,
-        cuenta_id: r.cuentaId,
-        identidad_id: r.adminIdentidadId,
-        cuenta_nombre: b.nombre,
-        email: b.admin.email,
-      };
+  // El clic en el correo. Acá sí se crea la cuenta, y la sesión sale con el
+  // anclaje de correo ya probado — porque abrir este enlace ES la prueba.
+  app.post(
+    '/auth/registro/confirmar',
+    { config: { rateLimit: { max: 10, timeWindow: '1 hour' } } },
+    async (req) => {
+      const b = z
+        .object({ token: z.string().min(1), password: z.string().min(1).optional() })
+        .parse(req.body);
+      return confirmarRegistro(b.token, b.password, req.ip);
     },
   );
 }

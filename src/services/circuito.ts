@@ -7,6 +7,8 @@ import { anotar } from './evidencia';
 import { registrarSistema } from './auditoria';
 import { emitirEnlaceFirma, urlDeFirma } from '../auth/enlace_firma';
 import { enviarCorreo } from './correo';
+import { avisar } from './mensajes';
+import { almacen } from '../almacenamiento/almacen';
 import { HttpError } from '../http/errors';
 
 /**
@@ -344,9 +346,26 @@ export async function despachar(
       cuentaNombre: c.cuenta_nombre,
       idioma: c.idioma,
       aNotificar: enlaces.filter((e) => e.orden === minOrden),
+      // Todos, no sólo los que se notifican ahora: el documento aparece en la
+      // bandeja del segundo firmante aunque todavía no sea su turno. Ver ahí lo
+      // que le va a tocar no es lo mismo que poder firmarlo — eso lo sigue
+      // decidiendo la RLS.
+      todos: enlaces,
       total: enlaces.length,
     };
   });
+
+  // La bandeja de entrada de cada destinatario que tenga cuenta. Va antes de
+  // los correos: si el correo se demora, el documento ya está donde tiene que
+  // estar. Y si esto falla, el despacho no se cae — el otorgamiento ya da
+  // acceso y el alta reubica lo pendiente.
+  try {
+    await ubicarEnBandeja(
+      preparado.todos.map((e) => ({ identidadId: e.identidadId, instanciaId: e.instanciaId })),
+    );
+  } catch {
+    /* el acceso no depende de esto: lo da el otorgamiento */
+  }
 
   const resultados = await Promise.all(
     preparado.aNotificar.map((e) => notificar(cuentaId, circuitoId, preparado, e)),
@@ -643,6 +662,369 @@ async function notificar(
   });
 
   return error ? { ok: false, email: e.email, error } : { ok: true, email: e.email };
+}
+
+
+
+/**
+ * Deja el documento en la bandeja de entrada de quien lo recibe.
+ *
+ * ⚠ VA A LA CUENTA PERSONA, NUNCA A LA EMPRESA DONDE TRABAJA.
+ *
+ * Si a María, que es empleada de Acme, le mandan a firmar algo personal, ese
+ * documento NO puede aparecer en el repositorio de Acme: `Recibidos` hereda los
+ * permisos de la raíz, y el administrador de Acme los tiene. Sería filtrarle a
+ * su empleador un documento que no le corresponde.
+ *
+ * Está en `claude/repositorio-campos-y-envio-masivo.md` §3: la ubicación va a
+ * `raiz.entrada` de la **cuenta persona** del firmante. Si no tiene cuenta, no
+ * hay ubicación y el otorgamiento le da acceso igual; el día que se registra,
+ * el alta le ubica todo lo que ya tenía.
+ *
+ * Corre como `sistema` porque escribe en el repositorio de OTRA cuenta: el
+ * contexto del emisor no puede —ni debe— insertar ahí.
+ *
+ * Idempotente: el índice único (cuenta, instancia) lo garantiza, y esto se
+ * puede reintentar sin duplicar nada.
+ */
+async function ubicarEnBandeja(destinos: { identidadId: string; instanciaId: string }[]) {
+  if (!destinos.length) return 0;
+  return enSistema(async (trx) => {
+    let n = 0;
+    for (const d of destinos) {
+      const r = await sql<{ id: string }>`
+        insert into ubicacion (cuenta_id, carpeta_id, instancia_id)
+        select cu.id, ca.id, ${d.instanciaId}::uuid
+          from cuenta cu
+          join carpeta ca on ca.cuenta_id = cu.id and ca.sistema = 'entrada'
+         where cu.tipo = 'persona' and cu.identidad_titular_id = ${d.identidadId}::uuid
+        on conflict do nothing
+        returning id
+      `.execute(trx);
+      n += r.rows.length;
+    }
+    return n;
+  });
+}
+
+// ---------------------------------------------------------------------------
+// El documento terminado
+// ---------------------------------------------------------------------------
+
+/**
+ * Tope de lo que se manda adjunto. Gmail rechaza por encima de 25 MB y el
+ * codificado en base64 agrega ~33%, así que 15 MB de PDF es el techo real.
+ * Arriba de eso se avisa igual, sin adjunto y diciéndolo.
+ */
+const MAX_ADJUNTO = 15 * 1024 * 1024;
+
+/**
+ * Avisa que el documento quedó firmado, con el PDF adjunto.
+ *
+ * ⚠ POR QUÉ ADJUNTO Y NO UN ENLACE. Quien firmó algo tiene que quedarse con su
+ * copia sin depender de que MiFirma siga existiendo, ni de que un enlace siga
+ * vivo, ni de tener cuenta. El firmante externo sobre todo: firmó, y hasta hoy
+ * no le quedaba nada en la mano.
+ *
+ * ⚠ Esto NO existía. Al firmar el último se anotaba `circuito.completo` en el
+ * expediente y no se le avisaba a nadie: el emisor se enteraba entrando a la
+ * consola y el firmante no se enteraba nunca. Se detectó el 2/8/2026 —«no lo
+ * mandó firmado por correo, lo vi en la consola»— y no era un fallo del envío:
+ * el aviso no estaba escrito.
+ *
+ * Va FUERA de la transacción de la firma y sin bloquearla: la firma ya está
+ * registrada y un SMTP lento no es problema de quien acaba de firmar.
+ */
+export async function avisarCompletado(circuitoId: string, instanciaId: string) {
+  const datos = await enSistema(async (trx) => {
+    const c = await sql<{
+      titulo: string; cuenta_nombre: string; cuenta_id: string;
+      clave: string | null; bytes: string | null;
+      emisor_id: string | null; emisor_email: string | null; emisor_nombre: string | null;
+    }>`
+      select c.titulo, cu.nombre_mostrado as cuenta_nombre, c.cuenta_propietaria_id as cuenta_id,
+             a.clave_almacenamiento as clave, a.bytes::text as bytes,
+             ie.id as emisor_id, ie.email_mostrado as emisor_email, ie.nombre_mostrado as emisor_nombre
+        from circuito c
+        join cuenta cu on cu.id = c.cuenta_propietaria_id
+        join instancia i on i.id = ${instanciaId}::uuid
+        left join archivo a on a.id = i.archivo_firmado_id
+        left join identidad ie on ie.id = c.creado_por_identidad_id
+       where c.id = ${circuitoId}::uuid
+    `.execute(trx);
+    if (!c.rows.length) return null;
+
+    // Los firmantes que efectivamente firmaron. Un veedor no recibe el
+    // documento: mirar no es firmar, y el alcance de la decisión del 2/8 fue
+    // «emisor y firmantes».
+    const p = await sql<{ id: string; identidad_id: string; email: string; nombre: string | null }>`
+      select p.id, p.identidad_id, i.email_mostrado as email, i.nombre_mostrado as nombre
+        from participacion p
+        join identidad i on i.id = p.identidad_id
+       where p.instancia_id = ${instanciaId}::uuid
+         and p.papel = 'firmante' and p.estado = 'firmada'
+       order by p.orden
+    `.execute(trx);
+
+    // El certificado de finalización, si ya se emitió. Va adjunto junto con el
+    // documento: es lo que se presenta en un juicio, y hacerlo buscar en una
+    // consola es la forma de que nadie lo tenga cuando lo necesita.
+    const cert = await sql<{ clave: string }>`
+      select a.clave_almacenamiento as clave
+        from certificado_finalizacion cf
+        join archivo a on a.id = cf.archivo_id
+       where cf.instancia_id = ${instanciaId}::uuid
+    `.execute(trx);
+
+    return { ...c.rows[0]!, firmantes: p.rows, claveCert: cert.rows[0]?.clave ?? null };
+  });
+
+  if (!datos) return { avisados: 0 };
+
+  // ⚠ Se lee UNA vez, no una por destinatario. Un PDF de 10 MB leído seis veces
+  // del almacenamiento son 60 MB de I/O para mandar el mismo archivo.
+  let pdf: Buffer | null = null;
+  let motivoSinAdjunto: string | null = null;
+  if (!datos.clave) {
+    motivoSinAdjunto = 'el documento firmado todavía no está disponible';
+  } else if (Number(datos.bytes ?? 0) > MAX_ADJUNTO) {
+    motivoSinAdjunto = 'el documento pesa más de lo que admite el correo';
+  } else {
+    try {
+      pdf = await almacen().leer(datos.clave);
+    } catch (e) {
+      motivoSinAdjunto = 'no se pudo leer el documento firmado';
+    }
+  }
+
+  // Emisor y firmantes, sin repetir: el emisor suele firmar también, y recibir
+  // dos veces el mismo correo se lee como un error del sistema.
+  const destinos = new Map<string, { email: string; nombre: string | null; participacionId: string | null; identidadId: string | null }>();
+  if (datos.emisor_email) {
+    destinos.set(datos.emisor_email.toLowerCase(), {
+      email: datos.emisor_email, nombre: datos.emisor_nombre,
+      participacionId: null, identidadId: datos.emisor_id,
+    });
+  }
+  for (const f of datos.firmantes) {
+    const k = f.email.toLowerCase();
+    // Si ya está como emisor, se le agrega su participación para que el
+    // expediente lo ate a su fila y no a nadie.
+    const previo = destinos.get(k);
+    destinos.set(k, {
+      email: f.email, nombre: f.nombre ?? previo?.nombre ?? null,
+      participacionId: f.id, identidadId: f.identidad_id,
+    });
+  }
+  if (!destinos.size) return { avisados: 0 };
+
+  let certificado: Buffer | null = null;
+  if (datos.claveCert) {
+    try { certificado = await almacen().leer(datos.claveCert); } catch { /* va sin él */ }
+  }
+
+  const limpio = (datos.titulo || 'documento').replace(/[^\p{L}\p{N} ._-]/gu, '').slice(0, 80) || 'documento';
+  const archivo = `${limpio}.pdf`;
+  const firmaron = datos.firmantes
+    .map((f) => escapar(f.nombre || f.email))
+    .join(', ');
+
+  let avisados = 0;
+  for (const d of destinos.values()) {
+    let error: string | null = null;
+    try {
+      await enviarCorreo({
+        para: d.email,
+        asunto: `Firmado: ${datos.titulo}`,
+        html:
+          `<p>${d.nombre ? `Hola ${escapar(d.nombre)},` : 'Hola,'}</p>` +
+          `<p>El documento <b>${escapar(datos.titulo)}</b> quedó firmado por todas las partes.</p>` +
+          (firmaron ? `<p style="color:#5a6878">Firmaron: ${firmaron}.</p>` : '') +
+          (pdf
+            ? '<p>Va adjunto el documento firmado. Guardalo: vale por sí mismo, ' +
+              'sin depender de MiFirma.</p>' +
+              (certificado
+                ? '<p>Y con él, el <b>certificado de finalización</b>: quién firmó, cómo se ' +
+                  'identificó cada uno, cuándo, con qué sello de tiempo, y cómo comprobarlo ' +
+                  'sin nosotros. Es lo que se presenta si alguna vez hay que probar algo.</p>'
+                : '')
+            : `<p style="color:#b42318">No pudimos adjuntarlo porque ${motivoSinAdjunto}. ` +
+              `Pedíselo a ${escapar(datos.cuenta_nombre)}.</p>`) +
+          '<p style="color:#5a6878;font-size:13px">La firma electrónica está dentro del PDF: ' +
+          'cualquier lector que valide firmas puede comprobarla sin pedirnos nada.</p>',
+        texto:
+          `El documento "${datos.titulo}" quedó firmado por todas las partes.` +
+          (firmaron ? `\nFirmaron: ${datos.firmantes.map((f) => f.nombre || f.email).join(', ')}.` : '') +
+          (pdf ? '\n\nVa adjunto el documento firmado.' : `\n\nNo pudimos adjuntarlo porque ${motivoSinAdjunto}.`),
+        adjuntos: [
+          ...(pdf ? [{ filename: archivo, content: pdf, contentType: 'application/pdf' }] : []),
+          ...(certificado
+            ? [{ filename: `Certificado - ${limpio}.pdf`, content: certificado,
+                 contentType: 'application/pdf' }]
+            : []),
+        ],
+      });
+      avisados += 1;
+    } catch (err) {
+      error = err instanceof Error ? err.message : 'error desconocido';
+    }
+
+    // Al expediente, salga o no. Que a alguien no le haya llegado su copia es
+    // parte de la historia del documento.
+    await enSistema(async (trx) => {
+      await anotar(trx, {
+        instanciaId,
+        circuitoId,
+        cuentaPropietariaId: datos.cuenta_id,
+        tipo: error ? 'notificacion.fallida' : 'notificacion.enviada',
+        actorTipo: 'sistema',
+        identidadId: d.identidadId ?? undefined,
+        participacionId: d.participacionId ?? undefined,
+        datos: {
+          canal: 'email',
+          motivo: 'documento_completo',
+          destino: enmascarar(d.email),
+          adjunto: !!pdf,
+          certificado_adjunto: !!certificado,
+          sin_adjunto_porque: pdf ? null : motivoSinAdjunto,
+          error,
+        },
+        canal: 'email',
+      });
+    });
+
+    await registrarSistema(datos.cuenta_id, null, {
+      accion: error ? 'correo.fallido' : 'correo.enviado',
+      recursoTipo: 'circuito',
+      recursoId: circuitoId,
+      despues: {
+        motivo: 'documento_completo',
+        destino: enmascarar(d.email),
+        circuito_id: circuitoId,
+        error,
+      },
+    });
+  }
+
+  return { avisados };
+}
+
+/**
+ * Cancelar un documento en curso.
+ *
+ * Implementa `claude/motor-de-flujo.md` §4.2. Lo que hay que tener claro:
+ *
+ * **Una firma aplicada no se deshace.** Si de tres firmantes ya firmaron dos,
+ * esas dos firmas existieron, quedan en el repositorio de esas personas, y el
+ * documento queda con dos firmas para siempre. Cancelar no borra: cierra.
+ *
+ * ⚠ **Lo que impide firmar después no está acá.** El trigger
+ * `instancia_transicion_valida` (migración 006) declara que un estado terminal
+ * es inmutable, así que una firma que llegue tarde se estrella contra la base.
+ * Poner además un `if` en el servicio sería dar dos respuestas a la misma
+ * pregunta, y la carrera entre «cancelar» y «firmar» la tiene que resolver la
+ * transacción — no el orden en que llegaron los dos clics.
+ *
+ * El aviso sale por `avisar()`, no por `enviarCorreo()`: mañana esto también va
+ * por push y por WhatsApp, y no queremos volver a escribir el texto.
+ */
+export async function cancelar(
+  cuentaId: string,
+  identidadId: string,
+  circuitoId: string,
+  motivo: string,
+  ctx: { ip?: string | null; userAgent?: string | null } = {},
+) {
+  if (!motivo?.trim()) throw new HttpError(400, 'Contá por qué lo cancelás. Queda en el expediente.');
+
+  const preparado = await withUsuario(cuentaId, identidadId, async (trx, autz) => {
+    exigir(autz, 'circuito', 'cancelar', 'No tenés permiso para cancelar documentos.');
+
+    // ⚠ `app.cancelar_circuito` es SECURITY DEFINER: adentro no corre la RLS.
+    // La pertenencia se comprueba ACÁ, con el contexto del usuario, y por eso
+    // esta consulta no es decorativa: es la autorización.
+    const c = await sql<{ titulo: string; idioma: string; cuenta_nombre: string }>`
+      select c.titulo, c.idioma, cu.nombre_mostrado as cuenta_nombre
+        from circuito c
+        join cuenta cu on cu.id = c.cuenta_propietaria_id
+       where c.id = ${circuitoId}::uuid and c.cuenta_propietaria_id = ${cuentaId}::uuid
+    `.execute(trx);
+    if (!c.rows.length) throw new HttpError(404, 'Ese documento no existe o no lo podés ver.');
+
+    // A quién avisarle: los que NO firmaron. Al que ya firmó no se le cambia
+    // nada de lo suyo, pero se entera igual — abajo.
+    const gente = await sql<{
+      identidad_id: string; email: string; nombre: string | null;
+      instancia_id: string; participacion_id: string; estado: string; idioma: string | null;
+    }>`
+      select p.identidad_id, i.email_mostrado as email, i.nombre_mostrado as nombre,
+             p.instancia_id, p.id as participacion_id, p.estado, p.idioma_efectivo as idioma
+        from participacion p
+        join identidad i on i.id = p.identidad_id
+       where p.circuito_id = ${circuitoId}::uuid
+    `.execute(trx);
+
+    const r = await sql<{ instancias_canceladas: number; participaciones_cerradas: number }>`
+      select * from app.cancelar_circuito(${circuitoId}::uuid, ${motivo.trim()})
+    `.execute(trx);
+
+    // Una entrada de expediente POR INSTANCIA: el expediente es del documento,
+    // no del circuito, y en modo copias son 3.000 expedientes distintos.
+    for (const inst of [...new Set(gente.rows.map((g) => g.instancia_id))]) {
+      await anotar(trx, {
+        instanciaId: inst,
+        circuitoId,
+        cuentaPropietariaId: cuentaId,
+        tipo: 'circuito.cancelado',
+        actorTipo: 'emisor',
+        identidadId,
+        datos: { motivo: motivo.trim() },
+        ip: ctx.ip ?? null,
+        userAgent: ctx.userAgent ?? null,
+      });
+    }
+
+    return {
+      titulo: c.rows[0]!.titulo,
+      idioma: c.rows[0]!.idioma,
+      emisor: c.rows[0]!.cuenta_nombre,
+      gente: gente.rows,
+      ...r.rows[0]!,
+    };
+  });
+
+  // Fuera de la transacción: si el aviso falla, la cancelación ya ocurrió. Al
+  // revés —un SMTP caído impidiendo cancelar— sería mucho peor.
+  const aviso = await avisar(
+    'cancelado',
+    preparado.gente.map((g) => ({
+      identidadId: g.identidad_id,
+      email: g.email,
+      nombre: g.nombre,
+      idioma: g.idioma ?? preparado.idioma,
+    })),
+    { titulo: preparado.titulo, emisor: preparado.emisor, motivo: motivo.trim() },
+    { cuentaId, circuitoId },
+  );
+
+  await registrarSistema(cuentaId, identidadId, {
+    accion: 'circuito.cancelado',
+    recursoTipo: 'circuito',
+    recursoId: circuitoId,
+    despues: {
+      instancias: preparado.instancias_canceladas,
+      participaciones: preparado.participaciones_cerradas,
+      avisos: aviso.enviados,
+      avisos_fallidos: aviso.fallidos,
+    },
+  });
+
+  return {
+    ok: true,
+    instancias_canceladas: preparado.instancias_canceladas,
+    participaciones_cerradas: preparado.participaciones_cerradas,
+    avisados: aviso.enviados,
+  };
 }
 
 // ---------------------------------------------------------------------------

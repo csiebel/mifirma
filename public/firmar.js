@@ -139,7 +139,72 @@
       '<div class="listo" style="grid-column:1/-1">' +
       '<div><div class="tick"><svg viewBox="0 0 24 24"><path d="M20 6L9 17l-5-5"/></svg></div>' +
       '<h1>' + esc(texto) + '</h1>' +
-      '<p class="lead">' + esc(detalle || 'Podés cerrar esta ventana.') + '</p></div></div>';
+      '<p class="lead">' + esc(detalle || 'Podés cerrar esta ventana.') + '</p>' +
+      '<div id="ofrecerCuenta"></div></div></div>';
+    ofrecerCuenta();
+  }
+
+  /**
+   * El único momento en que esta persona nos está prestando atención.
+   *
+   * Firmó, salió bien, y hasta hoy la pantalla le decía «podés cerrar esta
+   * ventana». Acá se le ofrece quedarse con el documento — y la oferta es
+   * literal: al crear la cuenta aparece TODO lo que firmó antes, porque el
+   * relleno de la bandeja ya está construido.
+   *
+   * No pide el correo: lo sabe. Quien llegó por este enlace ya probó que
+   * controla esa casilla, así que no hay que hacérselo probar de nuevo.
+   */
+  async function ofrecerCuenta() {
+    var caja = $('ofrecerCuenta');
+    if (!caja) return;
+    var d;
+    try { d = await api('/firmar/cuenta', {}); } catch (e) { return; }
+    if (d.ya_tiene) {
+      caja.innerHTML =
+        '<p class="lead">Este documento ya está en tu repositorio. ' +
+        '<a href="/entrar">Entrá a MiFirma</a> para verlo.</p>';
+      return;
+    }
+
+    var paises = [['UY', 'Uruguay'], ['PY', 'Paraguay'], ['BR', 'Brasil']];
+    caja.innerHTML =
+      '<div class="oferta">' +
+      '<h2>Quedate con tu copia</h2>' +
+      '<p class="lead">Creá tu cuenta gratis y este documento —y todos los que ' +
+      'hayas firmado antes— quedan guardados a tu nombre. No hace falta que ' +
+      'confirmes nada por correo: ya lo hiciste al abrir este enlace.</p>' +
+      '<label for="ocPais">Tu país</label>' +
+      '<select id="ocPais">' +
+      paises.map(function (p) {
+        return '<option value="' + p[0] + '"' +
+               (p[0] === d.pais_sugerido ? ' selected' : '') + '>' + esc(p[1]) + '</option>';
+      }).join('') +
+      '</select>' +
+      '<p class="pista">Define qué ley y qué certificadores aplican a lo tuyo. ' +
+      'No se puede cambiar después.</p>' +
+      (d.necesita_password
+        ? '<label for="ocPass">Elegí una contraseña</label>' +
+          '<input id="ocPass" type="password" autocomplete="new-password" />' +
+          '<p class="pista">Mínimo 12 caracteres.</p>'
+        : '<p class="pista">Vas a entrar con la contraseña que ya usás en MiFirma.</p>') +
+      '<button class="btn btn-p" id="ocBtn">Crear mi cuenta</button>' +
+      '<div id="ocMsg"></div></div>';
+
+    $('ocBtn').addEventListener('click', async function () {
+      var b = $('ocBtn');
+      b.disabled = true; b.textContent = 'Creando…';
+      try {
+        await api('/firmar/cuenta/crear', {
+          pais: $('ocPais').value,
+          password: d.necesita_password ? $('ocPass').value : undefined,
+        });
+        location.href = '/app';
+      } catch (e) {
+        $('ocMsg').innerHTML = '<div class="msg err">' + esc(e.message) + '</div>';
+        b.disabled = false; b.textContent = 'Crear mi cuenta';
+      }
+    });
   }
 
   async function firmarAhora() {

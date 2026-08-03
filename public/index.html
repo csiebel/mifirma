@@ -153,6 +153,17 @@
                          gap:14px;padding:14px 18px;border-bottom:1px solid var(--line)}
   .modal.visor iframe{flex:1;width:100%;border:0;background:var(--soft)}
 
+  /* Vistas por estado. Son un FILTRO sobre la lista, no carpetas: el árbol es
+     para organizar y el estado es un hecho del sistema. */
+  .vistas{display:flex;gap:4px;flex-wrap:wrap}
+  .vistas button{font:inherit;font-size:13px;font-weight:600;padding:6px 12px;border-radius:999px;
+                 border:1px solid transparent;background:transparent;color:var(--mut);cursor:pointer}
+  .vistas button:hover{background:var(--soft)}
+  .vistas button[aria-pressed="true"]{background:var(--brand-50);color:var(--brand);border-color:#d6e4f2}
+
+  /* El editor de marcas: una hoja A4 a escala legible no entra en 440px. */
+  .modal.ancho{max-width:min(980px,94vw)}
+
   .modal h2{font-size:19px;margin:0 0 6px}
   .modal p.sub{color:var(--mut);font-size:14px;margin:0 0 18px}
   label.campo{display:block;font-size:13px;font-weight:600;margin:14px 0 6px}
@@ -223,11 +234,15 @@
     </div>
 
     <div class="doscol">
-      <div class="panel arbol" id="arbolDocs"></div>
+      <div class="panel arbol">
+        <div id="inteligentesDocs"></div>
+        <div id="arbolDocs"></div>
+      </div>
       <div class="panel zona" id="zonaDocs">
         <div class="cabPanel">
           <div><b id="nomCarpetaDocs">Documentos</b><span id="subDocs"></span></div>
           <div class="acc">
+            <div class="vistas" id="vistasDocs"></div>
             <label style="display:inline-flex;align-items:center;gap:6px;font-size:13px;
                           color:var(--mut);cursor:pointer">
               <input type="checkbox" id="subcarpetas" onchange="cambiarAlcance()"
@@ -424,5 +439,7 @@
 
 <div id="modal"></div>
 <script src="/consola.js"></script>
+<!-- El editor visual de marcas. Va después: usa `window.uiMiFirma`. -->
+<script src="/marcas.js"></script>
 </body>
 </html>

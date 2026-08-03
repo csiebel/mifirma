@@ -45,6 +45,9 @@
       'np.h1':'Escolha sua senha','np.h1.inv':'Bem-vindo: escolha sua senha','np.lead':'Mínimo 12 caracteres.',
       'np.nueva':'Nova senha','np.repetir':'Repita','np.guardar':'Salvar e entrar',
       'np.ok':'Pronto. Entre com sua nova senha.',
+      'np.h1.alta':'Confirme seu e-mail e escolha sua senha',
+      'np.confirmar':'Confirmar e entrar',
+      'crear.revisa':'Enviamos um e-mail para {email}. Abra-o para confirmar que é seu e escolher sua senha — até esse momento nenhuma conta foi criada.',
       'footer':'Assinatura eletrônica com validade jurídica','esperando':'Um momento…',
       'err.faltan':'Preencha o e-mail e a senha.','err.codigo':'O código tem 6 dígitos.',
       'err.correo':'Escreva seu e-mail.','err.noCoinciden':'As duas senhas precisam ser iguais.',
@@ -88,6 +91,9 @@
       'np.h1':'Choose your password','np.h1.inv':'Welcome — choose your password','np.lead':'At least 12 characters.',
       'np.nueva':'New password','np.repetir':'Repeat it','np.guardar':'Save and sign in',
       'np.ok':'Done. Sign in with your new password.',
+      'np.h1.alta':'Confirm your email and choose your password',
+      'np.confirmar':'Confirm and sign in',
+      'crear.revisa':'We sent an email to {email}. Open it to confirm it is yours and choose your password — no account exists until you do.',
       'footer':'Electronic signature with legal validity','esperando':'One moment…',
       'err.faltan':'Fill in the email and password.','err.codigo':'The code has 6 digits.',
       'err.correo':'Type your email.','err.noCoinciden':'Both passwords must match.',
@@ -104,6 +110,9 @@
     'np.h1.inv':'Bienvenido: elegí tu contraseña',
     'reset.ok':'Si ese correo tiene cuenta, te llega un enlace en unos minutos.',
     'np.ok':'Listo. Entrá con tu contraseña nueva.',
+    'np.h1.alta':'Confirmá tu correo y elegí tu contraseña',
+    'np.confirmar':'Confirmar y entrar',
+    'crear.revisa':'Te mandamos un correo a {email}. Abrilo para confirmar que es tuyo y elegir tu contraseña — hasta ese momento no se creó ninguna cuenta.',
     'err.faltan':'Completá el correo y la contraseña.','err.codigo':'El código tiene 6 dígitos.',
     'err.correo':'Escribí tu correo.','err.noCoinciden':'Las dos contraseñas tienen que ser iguales.',
     'err.corta':'Mínimo 12 caracteres.','err.crear':'Completá el nombre de la empresa, tu nombre, correo y contraseña.',
@@ -143,6 +152,7 @@
      ------------------------------------------------------------------------- */
   var TIPO = 'empresa';
   var DESAFIO_OTP = null, DESAFIO_CUENTA = null, TOKEN_RESET = null, CANAL_TEL = 'sms';
+  var TIPO_TOKEN = 'reset', NECESITA_PASSWORD = true;
 
   function $(id){ return document.getElementById(id); }
   function esc(s){ return String(s==null?'':s).replace(/[&<>"]/g, function(c){
@@ -344,24 +354,18 @@
 
   async function crearCuenta(){
     var esP    = TIPO === 'persona';
-    var admin  = { nombre: $('cAdminNombre').value.trim(), email: $('cAdminEmail').value.trim(), password: $('cPass').value };
+    var admin  = { nombre: $('cAdminNombre').value.trim(), email: $('cAdminEmail').value.trim() };
     // Una cuenta de persona se llama como la persona. Pedir "nombre de la
     // cuenta" y "tu nombre" por separado es hacer que alguien escriba dos veces
     // lo mismo y después dude de si escribió mal alguno.
     var nombre = esP ? admin.nombre : $('cNombre').value.trim();
-    if (!nombre || !admin.nombre || !admin.email || !admin.password) {
+    if (!nombre || !admin.nombre || !admin.email) {
       return msg('msgCrear', t(esP ? 'err.crear.persona' : 'err.crear'), 'err');
     }
-    // Repetirla no es burocracia: es la única red contra un error de tipeo en
-    // la contraseña del ADMINISTRADOR de la cuenta, que además todavía no tiene
-    // el correo verificado. Equivocarse acá es quedar afuera de la empresa que
-    // se acaba de crear.
-    if (admin.password !== $('cPass2').value) return msg('msgCrear', t('err.noCoinciden'), 'err');
-    if (admin.password.length < 12) return msg('msgCrear', t('err.corta'), 'err');
 
     msg('msgCrear','',''); ocupado('btnCrear', true);
     try{
-      var j = await api('/auth/registro','POST',{
+      await api('/auth/registro','POST',{
         tipo: TIPO,
         nombre: nombre,
         pais: $('cPais').value,
@@ -371,10 +375,19 @@
         razon_social: esP ? undefined : ($('cRazon').value.trim() || undefined),
         admin: admin
       });
-      entrar(j);
+      // ⚠ La respuesta es la misma exista o no ese correo, y por eso el mensaje
+      // también tiene que serlo: "te mandamos un correo", nunca "ya tenías
+      // cuenta". Ver services/auth_registro.ts. La contraseña se elige al
+      // abrir el enlace, o sea la elige quien probó leer esa casilla.
+      msg('msgCrear', t('crear.revisa').replace('{email}', admin.email), 'ok');
+      // Se le devuelve el texto al botón y recién ahí se lo deja quieto: si no,
+      // queda diciendo «Esperá…» para siempre y parece colgado.
+      ocupado('btnCrear', false);
+      $('btnCrear').disabled = true;
     }catch(e){
       msg('msgCrear', e.message, 'err');
-    }finally{ ocupado('btnCrear', false); }
+      ocupado('btnCrear', false);
+    }
   }
 
   // ---------------- Recupero ----------------
@@ -394,10 +407,20 @@
 
   async function guardarPassword(){
     var a = $('np1').value, b = $('np2').value;
-    if (a !== b) return msg('msgNp', t('err.noCoinciden'), 'err');
-    if (a.length < 12) return msg('msgNp', t('err.corta'), 'err');
+    if (TIPO_TOKEN !== 'alta' || NECESITA_PASSWORD) {
+      if (a !== b) return msg('msgNp', t('err.noCoinciden'), 'err');
+      if (a.length < 12) return msg('msgNp', t('err.corta'), 'err');
+    }
     ocupado('btnNp', true);
     try{
+      if (TIPO_TOKEN === 'alta') {
+        // Acá recién se crea la cuenta. La sesión vuelve con el anclaje de
+        // correo ya probado, así que "Recibidos" se ve lleno desde el primer
+        // momento y no después de volver a entrar.
+        var j = await api('/auth/registro/confirmar','POST',
+                          { token:TOKEN_RESET, password: NECESITA_PASSWORD ? a : undefined });
+        return entrar(j);
+      }
       await api('/auth/reset/confirmar','POST',{ token:TOKEN_RESET, password:a });
       msg('msgNp', t('np.ok'), 'ok');
       setTimeout(function(){ location.hash=''; ver('vLogin'); }, 1200);
@@ -414,7 +437,22 @@
     var tk = h.get('token');
     if (!tk) return false;
     TOKEN_RESET = tk;
-    if (h.get('t') === 'inv') $('npTitulo').textContent = t('np.h1.inv');
+    TIPO_TOKEN  = h.get('t') || 'reset';
+    if (TIPO_TOKEN === 'inv') $('npTitulo').textContent = t('np.h1.inv');
+    if (TIPO_TOKEN === 'alta') {
+      $('npTitulo').textContent = t('np.h1.alta');
+      // Qué se está por crear. No crea nada: sirve para que la pantalla diga
+      // el nombre de la cuenta, y para saber si esta persona ya tiene
+      // contraseña —porque ya entra al sistema— y no hay que pedirle otra.
+      api('/auth/registro/ver','POST',{ token: tk }).then(function(d){
+        NECESITA_PASSWORD = !!d.necesita_password;
+        $('npTitulo').textContent = t('np.h1.alta').replace('{cuenta}', d.nombre);
+        if (!NECESITA_PASSWORD) {
+          $('bloqueNp').style.display = 'none';
+          $('btnNp').textContent = t('np.confirmar');
+        }
+      }).catch(function(e){ msg('msgNp', e.message, 'err'); });
+    }
     ver('vNuevaPassword');
     return true;
   }

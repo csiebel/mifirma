@@ -75,16 +75,43 @@ export function registrarRutasPublico(app: FastifyInstance) {
    * un país anunciado sin precios que nadie puede contratar.
    */
   app.get('/publico/paises', async () => {
+    // Qué países se ofrecen lo sigue decidiendo tener precios cargados; el
+    // catálogo `pais` sólo aporta cómo se llaman, en qué moneda se cobra y bajo
+    // qué ley se firma. Hasta hoy esos tres datos estaban escritos a mano en
+    // `sitio.js`, que es el peor lugar posible para una afirmación legal.
+    //
+    // LEFT JOIN a propósito: un país con precios y sin fila en el catálogo
+    // existe y cobra en dólares. No devolverlo lo haría desaparecer de la
+    // página sin que nada lo explique.
     const r = await anonimo((trx) =>
-      sql<{ pais: string }>`
-        select distinct pm.pais
-          from precio_metrica pm
-          join plan p on p.id = pm.plan_id
-         where pm.vigente_hasta is null and p.activo and p.publico
-         order by 1
+      sql<{
+        pais: string; nombre_i18n: Record<string, string> | null; bandera: string | null;
+        moneda: string; marco_legal: string | null; certificador: string | null;
+      }>`
+        select pm.pais,
+               p.nombre_i18n,
+               p.bandera,
+               coalesce(p.moneda, 'USD') as moneda,
+               p.marco_legal,
+               p.certificador
+          from (select distinct pm.pais
+                  from precio_metrica pm
+                  join plan pl on pl.id = pm.plan_id
+                 where pm.vigente_hasta is null and pl.activo and pl.publico) pm
+          left join pais p on p.codigo = pm.pais
+         order by coalesce(p.orden, 999), pm.pais
       `.execute(trx),
     );
-    return { paises: r.rows };
+    return {
+      paises: r.rows.map((x) => ({
+        pais: x.pais,
+        nombre_i18n: x.nombre_i18n ?? { es: x.pais },
+        bandera: x.bandera,
+        moneda: x.moneda,
+        marco_legal: x.marco_legal,
+        certificador: x.certificador,
+      })),
+    };
   });
 
   /**

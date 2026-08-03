@@ -29,6 +29,18 @@ import { HttpError } from '../http/errors';
  * Validar es obligatorio aunque el recorte sea del cliente: estos bytes van a
  * terminar embebidos en un PDF firmado, y aceptar cualquier cosa que diga ser
  * una imagen es exactamente cómo se cuela algo que no lo es.
+ *
+ * ═══ ⚠ SÓLO PNG, Y NO ES UN CAPRICHO ═══
+ *
+ * El estampado embebe el trazo como `ImageMask` de 1 bit, y para eso hay que
+ * decodificar la imagen: `src/firma/apariencia.ts` lee PNG y nada más. Un JPEG
+ * además no tiene canal alfa, así que la firma llegaría con su rectángulo
+ * blanco encima del texto del contrato.
+ *
+ * Aceptarlo acá y descubrirlo al firmar sería lo peor de los dos mundos: la
+ * persona cree que tiene su firma cargada, el documento sale sin ella, y el
+ * expediente registra un motivo que la persona no llega a leer nunca. Se
+ * rechaza en el único momento en que puede hacer algo al respecto.
  */
 
 export type TipoFirmaVisual = 'firma' | 'rubrica';
@@ -95,6 +107,14 @@ export async function guardarFirmaVisual(
   }
 
   const img = medirImagen(contenido);
+  if (img.mime !== 'image/png') {
+    throw new HttpError(
+      400,
+      'La firma tiene que ser un PNG con fondo transparente: un JPEG llega con su ' +
+        'recuadro blanco y taparía el texto del documento. Guardala como PNG, o ' +
+        'dibujala acá mismo y la generamos nosotros.',
+    );
+  }
   if (img.ancho < 40 || img.alto < 20) {
     throw new HttpError(400, 'La imagen es demasiado chica para estamparla legible.');
   }

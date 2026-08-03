@@ -103,6 +103,7 @@
   .msg.err{background:#fef3f2;color:var(--danger);border:1px solid #fecdc9}
   .msg.ok{background:#ecfdf3;color:var(--ok);border:1px solid #abefc6}
   .vacio{padding:44px 24px;text-align:center;color:var(--mut);font-size:14.5px}
+  .mut{color:var(--mut);font-size:12.5px}
   .hidden{display:none!important}
 
   /* ---------- login ---------- */
@@ -163,6 +164,10 @@
     <button onclick="ir('planes')" data-v="planes">
       <svg viewBox="0 0 24 24"><path d="M3 6a2 2 0 012-2h14a2 2 0 012 2v12a2 2 0 01-2 2H5a2 2 0 01-2-2z"/><path d="M3 10h18M8 15h4"/></svg>
       Planes y precios
+    </button>
+    <button onclick="ir('paises')" data-v="paises">
+      <svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="9"/><path d="M3 12h18M12 3c2.5 2.7 2.5 15.3 0 18M12 3c-2.5 2.7-2.5 15.3 0 18"/></svg>
+      Países
     </button>
     <button onclick="ir('bitacora')" data-v="bitacora">
       <svg viewBox="0 0 24 24"><path d="M12 8v4l3 2"/><circle cx="12" cy="12" r="9"/></svg>
@@ -319,6 +324,29 @@
         <tbody id="tPrecios"></tbody>
       </table>
       <div id="msgPrecios" style="padding:0 18px 18px"></div>
+    </div>
+  </section>
+
+  <!-- ============ Países ============
+       La moneda de cobro es el dólar salvo que acá diga otra cosa. Un país sin
+       fila cobra en USD y funciona sin configurar nada. -->
+  <section id="vPaises" class="hidden">
+    <div class="cab">
+      <div>
+        <h1>Países</h1>
+        <p>La moneda de cobro es el <b>dólar</b> salvo que acá se diga otra cosa. Un país que no
+           esté en esta lista funciona igual: cobra en USD. La moneda local es la excepción que
+           se declara, no el caso normal.</p>
+      </div>
+      <button class="btn btn-p" onclick="abrirPais(null)">Agregar país</button>
+    </div>
+
+    <div class="panel">
+      <table>
+        <thead><tr><th>País</th><th>Moneda de cobro</th><th>Idioma</th><th>Marco legal</th><th>Verificado</th><th></th></tr></thead>
+        <tbody id="tPaises"></tbody>
+      </table>
+      <div id="msgPaises" style="padding:0 18px 18px"></div>
     </div>
   </section>
 

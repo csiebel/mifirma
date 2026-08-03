@@ -16,8 +16,8 @@
     pt: {
       'nav.comparar':'Comparar',
       'comp.kicker':'Com o que você vai nos comparar','comp.h2':'Hoje você escolhe entre uma plataforma global ou um certificador local.',
-      'comp.p':'As duas resolvem uma parte. As globais têm o melhor produto e cobram por usuário em moeda estrangeira, com a assinatura credenciada como adicional à parte. Os certificadores locais têm o certificado que a sua lei reconhece, mas atuam em um só país.',
-      'comp.a.q':'Plataformas globais','comp.a.h':'Bom produto, modelo alheio',
+      'comp.p':'As duas resolvem uma parte. As globais trazem um produto maduro, mas cobram por usuário e em moeda estrangeira, com a assinatura credenciada como adicional à parte. Os certificadores locais têm o certificado que a sua lei reconhece, mas atuam em um só país.',
+      'comp.a.q':'Plataformas globais','comp.a.h':'Produto maduro, modelo alheio',
       'comp.a.1':'Fluxo, campos e trilha de auditoria bem maduros',
       'comp.a.2':'Cobrança por usuário e por mês, em moeda estrangeira',
       'comp.a.3':'Com limite de envios por usuário, mesmo que você não use',
@@ -87,8 +87,8 @@
     en: {
       'nav.comparar':'Compare',
       'comp.kicker':'What you’ll compare us to','comp.h2':'Today you choose between a global platform and a local certifier.',
-      'comp.p':'Each solves part of it. The global ones have the better product and charge per user in foreign currency, with accredited signing as a separate surcharge. Local certifiers have the certificate your law recognises, but they operate in a single country.',
-      'comp.a.q':'Global platforms','comp.a.h':'Good product, someone else’s model',
+      'comp.p':'Each solves part of it. The global ones bring a mature product, but they charge per user and in foreign currency, with accredited signing as a separate surcharge. Local certifiers have the certificate your law recognises, but they operate in a single country.',
+      'comp.a.q':'Global platforms','comp.a.h':'Mature product, someone else’s model',
       'comp.a.1':'Very mature workflow, fields and audit trail',
       'comp.a.2':'Charged per user per month, in foreign currency',
       'comp.a.3':'With send limits per user, whether you use them or not',
@@ -183,23 +183,33 @@
   }
 
   /* ---------------- Países ----------------
-     El marco legal de cada país es contenido nuestro, verificado por un abogado
-     local. Cuando exista el "paquete de país" en la base, sale de ahí. */
-  var PAISES = {
+     Sale de `/publico/paises`, que lo lee del catálogo de la base.
+
+     ⚠ Acá estaban escritos a mano los tres países del MVP con su ley y su
+     certificador. Un archivo del navegador es el peor lugar posible para una
+     afirmación legal: nadie lo revisa cuando cambia una ley, y no tiene dónde
+     anotar quién la verificó. Ahora eso es dato del paquete de país.
+
+     Se conserva un respaldo mínimo para el caso de que la API no conteste: sin
+     él la página quedaría sin países y sin explicación. */
+  var RESPALDO = {
     UY:{ nombre:{es:'Uruguay',pt:'Uruguai',en:'Uruguay'}, ley:'Ley 18.600', cert:'tuID (Antel)', b:'🇺🇾' },
     PY:{ nombre:{es:'Paraguay',pt:'Paraguai',en:'Paraguay'}, ley:'Ley 4017', cert:'e-Firma', b:'🇵🇾' },
     BR:{ nombre:{es:'Brasil',pt:'Brasil',en:'Brazil'}, ley:'MP 2.200-2', cert:'ICP-Brasil (SERPRO)', b:'🇧🇷' }
   };
+  var PAISES = JSON.parse(JSON.stringify(RESPALDO));
   var ORDEN = ['UY','PY','BR'], DISPONIBLES = ORDEN.slice(), PAIS = 'UY';
 
   function pintarPaises(){
     var c = document.getElementById('paisesDetalle');
     if (!c) return;
-    c.innerHTML = ORDEN.map(function(k){
+    c.innerHTML = ORDEN.filter(function(k){ return PAISES[k]; }).map(function(k){
       var p = PAISES[k];
-      return '<div class="card rev on"><div class="ico t" style="font-size:24px">' + p.b + '</div>' +
-             '<h3>' + p.nombre[LANG] + '</h3>' +
-             '<p><b style="color:var(--ink)">' + p.ley + '</b><br>' + t('pais.cert') + p.cert + '.</p></div>';
+      var nom = p.nombre[LANG] || p.nombre.es || k;
+      return '<div class="card rev on"><div class="ico t" style="font-size:24px">' + (p.b||'') + '</div>' +
+             '<h3>' + nom + '</h3>' +
+             '<p>' + (p.ley ? '<b style="color:var(--ink)">' + p.ley + '</b><br>' : '') +
+             (p.cert ? t('pais.cert') + p.cert + '.' : '') + '</p></div>';
     }).join('');
   }
 
@@ -207,8 +217,9 @@
     var c = document.getElementById('selPais');
     if (!c) return;
     c.innerHTML = DISPONIBLES.map(function(k){
+      var p = PAISES[k] || { b:'', nombre:{} };
       return '<button data-p="' + k + '" onclick="elegirPais(\'' + k + '\')">' +
-             PAISES[k].b + ' ' + PAISES[k].nombre[LANG] + '</button>';
+             (p.b ? p.b + ' ' : '') + (p.nombre[LANG] || p.nombre.es || k) + '</button>';
     }).join('');
     marcarPais();
   }
@@ -240,10 +251,26 @@
     try{
       var r = await fetch('/publico/paises');
       var j = await r.json();
-      var l = (j.paises||[]).map(function(x){ return x.pais; }).filter(function(p){ return PAISES[p]; });
-      if (l.length) DISPONIBLES = l;
-    }catch(e){ /* sin API, el selector queda con los tres del MVP */ }
+      var l = j.paises || [];
+      if (l.length){
+        // ⚠ Se REEMPLAZA el mapa, no se completa. Si el catálogo dejó de
+        // devolver un país, es porque dejamos de operar ahí; conservar la
+        // versión vieja lo mantendría en la página con su ley y todo.
+        PAISES = {};
+        l.forEach(function(x){
+          PAISES[x.pais] = {
+            nombre: x.nombre_i18n || { es:x.pais },
+            ley: x.marco_legal || '',
+            cert: x.certificador || '',
+            b: x.bandera || ''
+          };
+        });
+        ORDEN = l.map(function(x){ return x.pais; });
+        DISPONIBLES = ORDEN.slice();
+      }
+    }catch(e){ /* sin API, quedan los tres del respaldo */ }
     if (DISPONIBLES.indexOf(PAIS) < 0) PAIS = DISPONIBLES[0];
+    pintarPaises();
     pintarSelector();
   }
 

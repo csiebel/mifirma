@@ -44,6 +44,38 @@
     catch (e) { return new Set(); }
   })();
   /** Si la lista incluye toda la rama. Preferencia de vista, igual que el pliegue. */
+  // La vista activa. Cadena vacía = todos los estados.
+  //
+  // ⚠ Es un FILTRO, no una carpeta. El árbol sirve para archivar como quiera la
+  // persona; el estado es un hecho del sistema y no puede mover documentos de
+  // lugar. Si lo hiciera, borraría el archivado de quien lo guardó en
+  // «Clientes/Acme» y ataría los permisos —que viven por carpeta— al avance del
+  // proceso. Decidido con Claudio el 2/8/2026.
+  var VISTAS = [
+    { k: '',          n: 'Todos' },
+    { k: 'borrador',  n: 'Borradores' },
+    { k: 'en_curso',  n: 'Esperando firmas' },
+    { k: 'completo',  n: 'Terminados' },
+    { k: 'cerrado',   n: 'Cancelados o vencidos' },
+  ];
+  var VISTA = '';
+
+  function pintarVistas() {
+    var c = $('vistasDocs');
+    if (!c) return;
+    c.innerHTML = VISTAS.map(function (v) {
+      return '<button data-v="' + v.k + '" aria-pressed="' + (v.k === VISTA) + '">' +
+             esc(v.n) + '</button>';
+    }).join('');
+    c.querySelectorAll('button').forEach(function (b) {
+      b.addEventListener('click', function () {
+        VISTA = b.dataset.v || '';
+        pintarVistas();
+        cargarDocumentos();
+      });
+    });
+  }
+
   var CON_SUB = (function () {
     try { return localStorage.getItem('mifirma.sub') === '1'; } catch (e) { return false; }
   })();
@@ -181,12 +213,82 @@
     return salida;
   }
 
+
+  // ═══════════════════════════════════════════════════════════════════════════
+  // Carpetas inteligentes
+  //
+  // Se ven como carpetas, están siempre a la vista, y recorren el repositorio
+  // entero. Lo que NO hacen es mover documentos: el que archivaste en
+  // «Clientes/Acme» sigue ahí cuando termina de firmarse, y además aparece acá.
+  //
+  // ⚠ Es la diferencia que importa. Una carpeta de verdad por estado obligaría a
+  // sacar el documento de donde lo pusiste —una `ubicacion` es única por
+  // (cuenta, documento)— y ataría los permisos, que viven por carpeta, al avance
+  // del proceso: quien veía el borrador podría perder el terminado.
+  //
+  // Que sean seguras no lo garantiza este archivo: `ubicacion_select` exige
+  // `app.puede_en_carpeta(carpeta_id,'ver')`, así que buscar sin carpeta
+  // devuelve exactamente lo que esta persona puede ver. La base ya lo resuelve.
+  // ═══════════════════════════════════════════════════════════════════════════
+  var INTELIGENTES = [
+    { k: 'en_curso', n: 'Esperando firmas', d: 'M12 8v4l3 2', c: 'circle' },
+    { k: 'completo', n: 'Firmados',         d: 'M5 13l4 4L19 7', c: '' },
+    { k: 'borrador', n: 'Borradores',       d: 'M4 20h4L19 9a2 2 0 00-3-3L5 17z', c: '' },
+  ];
+
+  function iconoInteligente(v) {
+    return '<svg viewBox="0 0 24 24" style="width:16px;height:16px;flex:none;stroke:currentColor;' +
+           'fill:none;stroke-width:1.9;stroke-linecap:round;stroke-linejoin:round">' +
+           (v.c === 'circle' ? '<circle cx="12" cy="12" r="9"/>' : '') +
+           '<path d="' + v.d + '"/></svg>';
+  }
+
+  /** La carpeta de sistema que se pida —papelera, entrada—, esté donde esté. */
+  function buscarSistema(nodos, clave) {
+    for (var i = 0; i < (nodos || []).length; i++) {
+      if (nodos[i].sistema === clave) return nodos[i];
+      var h = buscarSistema(nodos[i].hijos, clave);
+      if (h) return h;
+    }
+    return null;
+  }
+
+  function montarInteligentes(contenedorId) {
+    var cont = $(contenedorId);
+    if (!cont) return;
+    cont.innerHTML =
+      INTELIGENTES.map(function (v) {
+        var sel = !CARPETA && VISTA === v.k;
+        return '<div class="nodo" role="treeitem" data-int="' + v.k + '" aria-selected="' + sel + '">' +
+               '<span class="chev hueco"></span>' + iconoInteligente(v) +
+               '<span class="nom">' + esc(v.n) + '</span></div>';
+      }).join('') +
+      '<div style="height:1px;background:var(--line);margin:8px 4px"></div>';
+
+    cont.querySelectorAll('[data-int]').forEach(function (n) {
+      n.addEventListener('click', function () { elegirInteligente(n.dataset.int); });
+    });
+  }
+
+  function elegirInteligente(k) {
+    CARPETA = null;
+    VISTA = k;
+    var nom = INTELIGENTES.filter(function (v) { return v.k === k; })[0];
+    $('nomCarpetaDocs').textContent = nom ? nom.n : 'Documentos';
+    $('subDocs').textContent = 'todo el repositorio';
+    montarInteligentes('inteligentesDocs');
+    montarArbol('arbolDocs', null, elegirCarpetaDocs, true);
+    cargarDocumentos();
+  }
+
   async function cargarArbolDocs() {
     try {
       if (!ARBOL.length) ARBOL = (await api('/carpetas')).carpetas || [];
       // Si la carpeta que estaba abierta sigue existiendo se respeta; si no, la
       // raíz. Volver a la raíz cada vez que se cambia de pantalla es la clase de
       // detalle que hace que la gente deje de usar las carpetas.
+      montarInteligentes('inteligentesDocs');
+      if (!CARPETA && VISTA) { elegirInteligente(VISTA); return; }
       var previa = CARPETA && buscarNodo(ARBOL, CARPETA.id);
       elegirCarpetaDocs(previa || ARBOL[0] || null);
     } catch (e) {
@@ -196,6 +298,11 @@
 
   function elegirCarpetaDocs(nodo) {
     CARPETA = nodo;
+    // Volver a una carpeta de verdad limpia el filtro: si no, elegir «Clientes»
+    // después de «Esperando firmas» muestra una carpeta a medias sin decir por
+    // qué faltan documentos.
+    VISTA = '';
+    montarInteligentes('inteligentesDocs');
     montarArbol('arbolDocs', nodo && nodo.id, elegirCarpetaDocs, true);
     $('nomCarpetaDocs').textContent = nodo ? nodo.nombre : 'Sin carpetas';
     $('subDocs').textContent = nodo && !nodo.sistema ? nodo.ruta : '';
@@ -211,13 +318,22 @@
 
   async function cargarDocumentos() {
     var carpetaId = CARPETA && CARPETA.id;
-    if (!carpetaId) return;
+    // Sin carpeta y sin vista no hay nada que pedir: es el estado de arranque
+    // antes de que llegue el árbol.
+    if (!carpetaId && !VISTA) return;
     if ($('subcarpetas')) $('subcarpetas').checked = CON_SUB;
+    // En una carpeta inteligente el alcance ya es todo el repositorio: ofrecer
+    // «incluir subcarpetas» ahí es ofrecer algo que ya está puesto.
+    var cab = $('subcarpetas') && $('subcarpetas').closest('label');
+    if (cab) cab.style.display = carpetaId ? '' : 'none';
+    pintarVistas();
     msg('msgDocs', '', '');
     $('tDocumentos').innerHTML = '<tr><td colspan="5" class="vacio">Un momento…</td></tr>';
     try {
-      var j = await api('/documentos?carpeta_id=' + encodeURIComponent(carpetaId) +
-        (CON_SUB ? '&sub=1' : ''));
+      var j = await api('/documentos?' +
+        (carpetaId ? 'carpeta_id=' + encodeURIComponent(carpetaId) : '') +
+        (carpetaId && CON_SUB ? '&sub=1' : '') +
+        (VISTA ? '&vista=' + VISTA : ''));
       pintarDocumentos(j.documentos || []);
     } catch (e) {
       $('tDocumentos').innerHTML = '<tr><td colspan="5" class="vacio">' + esc(e.message) + '</td></tr>';
@@ -234,11 +350,19 @@
 
   function pintarDocumentos(docs) {
     if (!docs.length) {
+      var vacio = !CARPETA
+        ? { en_curso:  'No hay ningún documento esperando firmas.',
+            completo:  'Todavía no terminó de firmarse ningún documento.',
+            borrador:  'No tenés ningún borrador sin enviar.',
+            cerrado:   'No hay documentos cancelados ni vencidos.' }[VISTA] ||
+            'No hay documentos.'
+        : VISTA
+        ? 'No hay documentos en ese estado en esta carpeta.'
+        : CON_SUB
+        ? 'No hay documentos en esta carpeta ni en las que cuelgan de ella.'
+        : 'No hay documentos en esta carpeta.';
       $('tDocumentos').innerHTML =
-        '<tr><td colspan="5" class="vacio">' +
-        (CON_SUB ? 'No hay documentos en esta carpeta ni en las que cuelgan de ella.'
-                 : 'No hay documentos en esta carpeta.') +
-        '</td></tr>';
+        '<tr><td colspan="5" class="vacio">' + vacio + '</td></tr>';
       return;
     }
     $('tDocumentos').innerHTML = docs
@@ -248,13 +372,18 @@
         // en una apuesta. El nombre sale del árbol que ya tenemos en memoria, no
         // de una columna más en la consulta.
         var otraCarpeta = '';
-        if (CON_SUB && CARPETA && d.carpeta_id && d.carpeta_id !== CARPETA.id) {
+        if ((!CARPETA || CON_SUB) && d.carpeta_id && (!CARPETA || d.carpeta_id !== CARPETA.id)) {
           var nodo = buscarNodo(ARBOL, d.carpeta_id);
           if (nodo) otraCarpeta = ' · en ' + esc(nodo.nombre);
         }
         return (
           '<tr draggable="true" data-doc="' + esc(d.instancia_id) + '">' +
-          '<td><b>' + esc(d.titulo) + '</b><br>' +
+          '<td><b>' + esc(d.titulo) + '</b>' +
+          // Lo que te mandaron a firmar no es lo mismo que lo que mandaste vos,
+          // y en la misma lista hay que poder distinguirlo de un vistazo.
+          (d.origen === 'recibido'
+            ? ' <span class="pill esp" style="font-size:11px">Recibido</span>'
+            : '') + '<br>' +
           '<span style="font-size:12.5px;color:var(--mut)">' + tamano(d.bytes) +
           (d.paginas ? ' · ' + d.paginas + ' págs' : '') + otraCarpeta + '</span></td>' +
           '<td>' + (ESTADO_DOC[d.circuito_estado] || esc(d.circuito_estado)) +
@@ -274,25 +403,117 @@
             : '<span style="color:var(--mut)">sin firmantes</span>') + '</td>' +
           '<td>' + esc(fecha(d.creado_en)) + '</td>' +
           '<td><div class="acc" style="justify-content:flex-end">' +
+          // ⚠ Este botón NO envía: abre la preparación —firmantes, orden,
+          // dónde va cada firma— y el envío es el botón del pie de ese modal.
+          // Se llamaba «Enviar a firmar» y mandaba a buscar en «Ver» lo que
+          // estaba acá. Una etiqueta que promete el último paso y da el primero
+          // esconde todo lo que hay en el medio.
           (d.circuito_estado === 'borrador'
-            ? '<button class="btn btn-p chico" data-prep="' + esc(d.circuito_id) + '">Enviar a firmar</button>'
+            ? '<button class="btn btn-p chico" data-prep="' + esc(d.circuito_id) + '">Preparar</button>'
             : '') +
           (d.circuito_estado === 'enviado'
             ? '<button class="btn ' + (d.sin_avisar ? 'btn-p' : 'btn-s') + ' chico" data-reenv="' +
-              esc(d.circuito_id) + '">Reenviar aviso</button>'
+              esc(d.circuito_id) + '">Reenviar aviso</button>' +
+              // Cancelar es sólo del que emitió: al que lo recibió para firmar
+              // no le corresponde cerrarle el documento a los demás.
+              (d.origen !== 'recibido'
+                ? '<button class="btn btn-s chico" data-cancelar="' + esc(d.circuito_id) +
+                  '" data-tit="' + esc(d.titulo) + '">Cancelar</button>'
+                : '')
             : '') +
           '<button class="btn btn-s chico" data-ver="' + esc(d.instancia_id) +
           '" data-tit="' + esc(d.titulo) + '">Ver</button>' +
           (d.circuito_estado === 'completo'
-            ? '<button class="btn btn-s chico" data-firmas="' + esc(d.instancia_id) + '">Firmas</button>'
+            ? '<button class="btn btn-s chico" data-firmas="' + esc(d.instancia_id) + '">Firmas</button>' +
+              // Es el entregable: lo que se presenta si hay que probar algo.
+              '<button class="btn btn-s chico" data-cert="' + esc(d.instancia_id) + '">Certificado</button>'
             : '') +
           '<button class="btn btn-s chico" data-exp="' + esc(d.instancia_id) + '">Expediente</button>' +
           '<button class="btn btn-s chico" data-mover="' + esc(d.instancia_id) +
           '" data-tit="' + esc(d.titulo) + '">Mover</button>' +
+          // Borrar de verdad SÓLO el borrador que nunca salió. En cuanto
+          // alguien recibió acceso deja de ser un borrador, y la base lo
+          // rechaza aunque este botón se muestre por error.
+          (d.circuito_estado === 'borrador' && d.origen !== 'recibido'
+            ? '<button class="btn btn-d chico" data-borrar="' + esc(d.circuito_id) +
+              '" data-tit="' + esc(d.titulo) + '">Eliminar</button>'
+            : '<button class="btn btn-s chico" data-papelera="' + esc(d.instancia_id) +
+              '" data-tit="' + esc(d.titulo) + '">A la papelera</button>') +
           '</div></td></tr>'
         );
       })
       .join('');
+
+    $('tDocumentos').querySelectorAll('[data-cancelar]').forEach(function (b) {
+      b.addEventListener('click', function () {
+        abrirModal(
+          '<h2>Cancelar «' + esc(b.dataset.tit) + '»</h2>' +
+          // Decir exactamente qué pasa con lo ya firmado evita la pregunta que
+          // sigue, que siempre es la misma: «¿se borra lo que ya firmaron?».
+          '<p class="sub">Se les avisa a los firmantes que ya no tienen que firmarlo. ' +
+          'Lo que alguien haya firmado antes <b>sigue firmado y sigue valiendo</b>: ' +
+          'una firma aplicada no se deshace. El documento queda cerrado, no borrado.</p>' +
+          '<label for="mMotivo">Por qué lo cancelás</label>' +
+          '<textarea id="mMotivo" maxlength="500" ' +
+          'placeholder="Se firmó una versión nueva del contrato"></textarea>' +
+          '<p class="pista">Va al expediente y se lo mandamos a los firmantes.</p>' +
+          '<div id="msgModal"></div>' +
+          '<div class="acc"><button class="btn btn-s" id="mCancel">Volver</button>' +
+          '<button class="btn btn-d" id="mOk">Cancelar el documento</button></div>'
+        );
+        $('mCancel').addEventListener('click', cerrarModal);
+        $('mOk').addEventListener('click', async function () {
+          var motivo = ($('mMotivo').value || '').trim();
+          if (!motivo) return msg('msgModal', 'Contá por qué lo cancelás.', 'err');
+          $('mOk').disabled = true;
+          try {
+            var r = await api('/circuitos/' + b.dataset.cancelar + '/cancelar', 'POST',
+                              { motivo: motivo });
+            cerrarModal();
+            await cargarDocumentos();
+            msg('msgDocs', 'Documento cancelado. Avisamos a ' + r.avisados + ' persona(s).', 'ok');
+          } catch (e) {
+            msg('msgModal', e.message, 'err');
+            $('mOk').disabled = false;
+          }
+        });
+      });
+    });
+
+    $('tDocumentos').querySelectorAll('[data-borrar]').forEach(function (b) {
+      b.addEventListener('click', function () {
+        abrirModal(
+          '<h2>Eliminar «' + esc(b.dataset.tit) + '»</h2>' +
+          '<p class="sub">Todavía no se lo mandaste a nadie, así que se borra de verdad: ' +
+          'el archivo, el circuito y su expediente. No queda nada.</p>' +
+          '<div id="msgModal"></div>' +
+          '<div class="acc"><button class="btn btn-s" id="mCancel">Cancelar</button>' +
+          '<button class="btn btn-d" id="mOk">Eliminar</button></div>'
+        );
+        $('mCancel').addEventListener('click', cerrarModal);
+        $('mOk').addEventListener('click', async function () {
+          $('mOk').disabled = true;
+          try {
+            await api('/circuitos/' + b.dataset.borrar, 'DELETE');
+            cerrarModal();
+            cargarDocumentos();
+          } catch (e) { $('mOk').disabled = false; msg('msgModal', e.message, 'err'); }
+        });
+      });
+    });
+
+    $('tDocumentos').querySelectorAll('[data-papelera]').forEach(function (b) {
+      b.addEventListener('click', async function () {
+        var pap = buscarSistema(ARBOL, 'papelera');
+        if (!pap) return msg('msgDocs', 'Esta cuenta no tiene papelera.', 'err');
+        b.disabled = true;
+        try {
+          await api('/documentos/' + b.dataset.papelera + '/carpeta', 'PATCH',
+                    { carpeta_id: pap.id });
+          cargarDocumentos();
+        } catch (e) { b.disabled = false; msg('msgDocs', e.message, 'err'); }
+      });
+    });
 
     $('tDocumentos').querySelectorAll('[data-ver]').forEach(function (b) {
       b.addEventListener('click', function () { abrirVisor(b.dataset.ver, b.dataset.tit); });
@@ -318,6 +539,12 @@
     $('tDocumentos').querySelectorAll('[data-exp]').forEach(function (b) {
       b.addEventListener('click', function () { verExpediente(b.dataset.exp); });
     });
+    $('tDocumentos').querySelectorAll('[data-cert]').forEach(function (b) {
+      b.addEventListener('click', function () {
+        window.open('/documentos/' + b.dataset.cert + '/certificado', '_blank');
+      });
+    });
+
     $('tDocumentos').querySelectorAll('[data-firmas]').forEach(function (b) {
       b.addEventListener('click', function () { verFirmas(b.dataset.firmas); });
     });
@@ -576,7 +803,15 @@
               ? (p.estado === 'firmada' || p.estado === 'rechazada'
                   ? ''
                   : '<button class="btn btn-s chico" data-enlace="' + esc(p.id) + '">Copiar enlace</button>')
-              : '<button class="btn btn-d chico" data-quitar="' + esc(p.id) + '">Quitar</button>') +
+              // Ubicar la firma es del EMISOR y sólo en borrador: después del
+              // despacho no se mueve, porque el firmante ya vio dónde iba. Lo
+              // decide `app.puede_definir_marcas`; acá sólo se oculta el botón.
+              : (p.papel === 'firmante'
+                  ? '<button class="btn btn-s chico" data-marcas="' + esc(p.id) + '" ' +
+                    'data-inst="' + esc(p.instancia_id) + '" ' +
+                    'data-quien="' + esc(p.nombre || p.email) + '">Ubicar firma</button> '
+                  : '') +
+                '<button class="btn btn-d chico" data-quitar="' + esc(p.id) + '">Quitar</button>') +
             '</td></tr>'
           );
         }).join('')
@@ -588,8 +823,13 @@
       '<p class="sub">' +
       (enviado
         ? 'Ya se envió. El camino de firmas no se puede cambiar: la base lo congela después del despacho.'
-        : 'Agregá a quién tiene que firmar y en qué orden. Ninguno necesita tener cuenta en MiFirma.') +
+        : 'Agregá a quién tiene que firmar y en qué orden. Ninguno necesita tener cuenta en MiFirma. ' +
+          'Si el que firma sos vos, agregate con tu correo.') +
       '</p>' +
+      (enviado ? '' :
+        '<p class="pista" style="margin:-10px 0 0">Con <b>Ubicar firma</b>, en la fila de cada uno, ' +
+        'elegís en qué hoja y en qué lugar se estampa su firma y su rúbrica. Es opcional: si no ' +
+        'ubicás nada, el documento se firma igual y sale sin ningún trazo dibujado.</p>') +
 
       (enviado ? '' :
         '<div class="dos">' +
@@ -658,6 +898,21 @@
           await api('/circuitos/' + circuitoId + '/firmantes/' + b.dataset.quitar, 'DELETE');
           abrirCircuito(circuitoId);
         } catch (e) { msg('msgModal', e.message, 'err'); }
+      });
+    });
+
+    // El editor visual vive en marcas.js: trae pdf.js y no tiene por qué
+    // cargarse en cada visita a la consola.
+    $('modal').querySelectorAll('[data-marcas]').forEach(function (b) {
+      b.addEventListener('click', function () {
+        if (!window.abrirEditorMarcas) {
+          return msg('msgModal', 'No pude cargar el editor de firmas. Recargá la página.', 'err');
+        }
+        window.abrirEditorMarcas(b.dataset.inst, {
+          id: b.dataset.marcas,
+          nombre: b.dataset.quien,
+          circuitoId: circuitoId,
+        });
       });
     });
 
@@ -816,6 +1071,32 @@
       // firma se agrega escribiendo bytes al final, así que la primera nunca
       // puede cubrir a las que vinieron después. Decía "no cubre hasta el final"
       // y se leía como "te modificaron el documento", que es falso y asusta.
+      // ⚠ Lo que cambió ENTRE firma y firma. Va arriba de las firmas y no al
+      // final: si alguien tocó el documento después de que otro lo firmó, es lo
+      // primero que hay que leer, no una nota al pie.
+      //
+      // Y va SEPARADO del veredicto de arriba a propósito: un documento
+      // adulterado entre dos firmas da «íntegro» igual —las firmas no se
+      // tocaron y no sobran bytes—, así que si esto se mezclara con aquello,
+      // una de las dos preguntas taparía a la otra.
+      var cambios = '';
+      if (j.contenido_alterado_entre_firmas) {
+        cambios += '<div class="msg err" style="margin-top:12px"><b>⚠ Alguien cambió lo que ' +
+          'muestra el documento después de que alguien lo firmó.</b><br>' +
+          'Las firmas verifican igual —no se tocaron sus bytes— pero la hoja que vio el ' +
+          'primer firmante ya no dice lo mismo. No lo uses como prueba sin mirar el detalle.</div>';
+      }
+      if ((j.cambios || []).length) {
+        cambios += '<div style="margin-top:14px">' +
+          '<div style="font-size:11.5px;text-transform:uppercase;letter-spacing:.07em;' +
+          'color:var(--mut);font-weight:700">Qué pasó entre firma y firma</div>' +
+          j.cambios.map(function (c) {
+            return '<div style="font-size:12.5px;margin-top:6px;padding-left:10px;' +
+              'border-left:2px solid ' + (c.contenidoAlterado ? 'var(--danger)' : 'var(--line)') + '">' +
+              '<b>Después de la firma ' + c.despuesDeFirma + ':</b> ' + esc(c.relato) + '</div>';
+          }).join('') + '</div>';
+      }
+
       var alcances = {
         final: ['', 'Cubre el archivo completo'],
         firma_posterior: ['', 'Cubre hasta el byte %B; lo que sigue son las firmas posteriores'],
@@ -857,11 +1138,11 @@
         '<p class="sub">Se comprueba el PDF en sí, no nuestra base de datos: por cada firma ' +
         'se recalcula el resumen de los bytes que dice cubrir.</p>' +
         estado +
+        cambios +
         '<div style="max-height:50vh;overflow:auto;margin-top:12px">' + filas + '</div>' +
         '<div class="msg" style="background:var(--soft);color:var(--mut);border:1px solid var(--line)">' +
         'El certificado de sello es de desarrollo y está autofirmado: prueba que el documento ' +
-        'no cambió, no la identidad de quien firmó. Tampoco se comprueba todavía DocMDP, ' +
-        'que es lo que detectaría un agregado posterior que altere lo que se ve de una página.</div>' +
+        'no cambió, no la identidad de quien firmó.</div>' +
         '<div class="acc"><button class="btn btn-p" id="mCancel">Cerrar</button></div>'
       );
       $('mCancel').addEventListener('click', cerrarModal);
@@ -1962,6 +2243,15 @@
   window.abrirNuevoRol = abrirNuevoRol;
   window.guardarCuenta = guardarCuenta;
   window.cerrarModal = cerrarModal;
+
+  // Lo que necesitan las pantallas que viven en otro archivo (marcas.js). Es un
+  // objeto y no cinco globales sueltas para que se vea de un vistazo cuál es la
+  // superficie compartida. `api` sobre todo NO se copia: sabe del CSRF y del
+  // 401, y dos versiones de esa decisión son una que se olvida de actualizar.
+  window.uiMiFirma = {
+    $: $, esc: esc, api: api, msg: msg,
+    abrirModal: abrirModal, cerrarModal: cerrarModal,
+  };
 
   arrancar();
 })();

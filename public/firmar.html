@@ -69,6 +69,15 @@
   .hidden{display:none!important}
 
   .listo{display:grid;place-items:center;text-align:center;padding:60px 24px}
+  /* La oferta de quedarse con el documento. Va DEBAJO del tick y con el texto a
+     la izquierda: es un formulario, no un cartel, y centrarlo lo haría ilegible. */
+  .oferta{margin:34px auto 0;max-width:420px;text-align:left;padding:22px;
+          border:1px solid var(--line);border-radius:var(--r);background:var(--paper)}
+  .oferta h2{font-size:17px;margin:0 0 6px}
+  .oferta label{display:block;margin:14px 0 6px;font-size:13.5px;font-weight:600}
+  .oferta select,.oferta input{width:100%;font:inherit;padding:11px 12px;
+          border:1.5px solid var(--line);border-radius:var(--r);background:#fff}
+  .oferta .btn{margin-top:18px;width:100%}
   .listo .tick{width:64px;height:64px;border-radius:50%;background:#ecfdf3;display:grid;place-items:center;
                margin-bottom:18px}
   .listo .tick svg{width:30px;height:30px;stroke:var(--ok);fill:none;stroke-width:2.5;

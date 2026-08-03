@@ -1,6 +1,8 @@
 import type { FastifyInstance, FastifyReply, FastifyRequest } from 'fastify';
+import { moverMarca } from '../../services/marcas';
 import { z } from 'zod';
 import { abrirParaFirmar, documentoParaFirmar, firmar, rechazar } from '../../services/firma';
+import { estadoDeCuenta, crearCuentaDesdeFirma } from '../../services/cuenta_del_firmante';
 import { HttpError } from '../errors';
 
 /**
@@ -91,6 +93,24 @@ export function registrarRutasFirma(app: FastifyInstance) {
     });
   });
 
+  // ---- Quedarse con el documento ----
+  //
+  // ⚠ Estas dos rutas NO reciben el correo: sale de la identidad del
+  // otorgamiento que trae la cookie. Es lo que las hace seguras y lo que las
+  // distingue del alta en frío. Ver `services/cuenta_del_firmante.ts`.
+  app.post('/firmar/cuenta', async (req) => estadoDeCuenta(tokenDe(req)));
+
+  app.post(
+    '/firmar/cuenta/crear',
+    { config: { rateLimit: { max: 5, timeWindow: '1 hour' } } },
+    async (req) => {
+      const b = z
+        .object({ pais: z.string().length(2), password: z.string().min(1).optional() })
+        .parse(req.body);
+      return crearCuentaDesdeFirma(tokenDe(req), { pais: b.pais.toUpperCase(), password: b.password });
+    },
+  );
+
   app.post('/firmar/rechazar', async (req) => {
     const b = z.object({ motivo: z.string().min(1).max(500) }).parse(req.body);
     return rechazar(tokenDe(req), b.motivo, {
@@ -98,4 +118,29 @@ export function registrarRutasFirma(app: FastifyInstance) {
       userAgent: req.headers['user-agent'] ?? null,
     });
   });
+  /**
+   * El firmante corre una marca dentro de su hoja.
+   *
+   * Sólo x e y: cambiar de página o de tamaño sería rehacer la marca, y eso es
+   * del emisor. Lo que se permite es acomodarla cuando tapa un párrafo.
+   */
+  // ⚠ Ruta SIN parámetro en el camino, y el id va en el cuerpo. No es capricho:
+  // `PUBLICAS` en server.ts compara la ruta EXACTA, así que `/firmar/marcas/:id`
+  // nunca coincidiría y el firmante externo —que no tiene sesión de cuenta—
+  // recibiría 401. Es el mismo error que ya nos costó tres rutas del login.
+  app.post('/firmar/marca', async (req) => {
+    const b = z
+      .object({
+        token: z.string().min(10),
+        marca_id: z.string().uuid(),
+        x: z.number().min(0).max(20000),
+        y: z.number().min(0).max(20000),
+      })
+      .parse(req.body);
+    return moverMarca(b.token, b.marca_id, b.x, b.y, {
+      ip: req.ip,
+      userAgent: req.headers['user-agent'] ?? null,
+    });
+  });
+
 }
