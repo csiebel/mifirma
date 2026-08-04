@@ -368,6 +368,7 @@ export async function listarDocumentos(
       circuito_estado: string; modo: string; nivel_firma: string;
       bytes: string; paginas: number | null; creado_en: Date;
       instancias: string; firmas_total: string; firmas_hechas: string;
+      esperando: string | null;
       sin_avisar: string; cadena_rota: boolean; origen: string;
     }>`
       select c.id as circuito_id, c.titulo, u.carpeta_id,
@@ -417,7 +418,27 @@ export async function listarDocumentos(
                where p.circuito_id = c.id and p.papel = 'firmante')::text as firmas_total,
              (select count(*) from participacion p
                where p.circuito_id = c.id and p.papel = 'firmante'
-                 and p.estado = 'firmada')::text as firmas_hechas
+                 and p.estado = 'firmada')::text as firmas_hechas,
+
+             -- A QUIÉN SE ESTÁ ESPERANDO. «1 de 3» dice cuánto falta; no dice a
+             -- quién hay que llamar por teléfono, que es la pregunta que
+             -- realmente se hace quien mandó el documento.
+             --
+             -- Los pendientes del orden más bajo abierto: en serie es uno, en
+             -- paralelo son todos los que faltan. Misma regla que el despacho y
+             -- que avisarAlQueSigue — tres lugares, una sola definición de
+             -- «le toca ahora», y por eso los tres dicen lo mismo.
+             (select string_agg(coalesce(ie.nombre_mostrado, ie.email_mostrado), ', '
+                                order by ie.email_mostrado)
+                from participacion pe
+                join identidad ie on ie.id = pe.identidad_id
+               where pe.circuito_id = c.id and pe.papel = 'firmante'
+                 and pe.estado in ('pendiente','notificada','vista')
+                 and pe.orden = (
+                   select min(p2.orden) from participacion p2
+                    where p2.circuito_id = c.id and p2.papel = 'firmante'
+                      and p2.estado not in ('firmada','no_requerida','delegada','rechazada')
+                 )) as esperando
         from ubicacion u
         left join carpeta cu on cu.id = u.carpeta_id
         left join instancia iu on iu.id = u.instancia_id
@@ -437,6 +458,7 @@ export async function listarDocumentos(
       instancias: Number(f.instancias),
       firmas_total: Number(f.firmas_total),
       firmas_hechas: Number(f.firmas_hechas),
+      esperando: f.esperando,
       sin_avisar: Number(f.sin_avisar),
     }));
   });

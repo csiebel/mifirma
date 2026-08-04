@@ -9,8 +9,9 @@ import type { Marca } from '../firma/apariencia';
 import { selloDePlataforma } from '../firma/adaptadores/sello_plataforma';
 import { anotar } from './evidencia';
 import { obtenerSello, selloObligatorio, type ResultadoSello } from './tsa';
-import { avisarAlQueSigue, avisarCompletado } from './circuito';
+import { avisarAlQueSigue, avisarCompletado, ubicarEnBandeja, consolidarOtorgamiento } from './circuito';
 import { emitirCertificado } from './certificado';
+import { prepararCampos, congelarCampos } from './campos';
 import { HttpError } from '../http/errors';
 
 /**
@@ -171,7 +172,13 @@ export async function documentoParaFirmar(token: string) {
       select a.mime, a.clave_almacenamiento as clave, a.sha256, c.titulo
         from participacion p
         join circuito c on c.id = p.circuito_id
-        join archivo a on a.id = c.archivo_base_id
+        join instancia i on i.id = p.instancia_id
+        -- El PDF tal como está AHORA, no el original: quien firma segundo tiene
+        -- que ver lo que firmó el primero. Es el MISMO archivo sobre el que va a
+        -- firmar —firmar() hace este mismo coalesce—, así que lo que mira y lo
+        -- que sella son el mismo documento. Mostrarle el base sería enseñarle
+        -- una versión que ya no existe.
+        join archivo a on a.id = coalesce(i.archivo_vigente_id, c.archivo_base_id)
        where p.id = ${e.participacionId}::uuid
     `.execute(trx);
     const f = r.rows[0];
@@ -323,7 +330,7 @@ export async function firmar(token: string, input: FirmaInput) {
     const r = await sql<{
       participacion_id: string; instancia_id: string; circuito_id: string;
       cuenta_propietaria_id: string; estado: string; papel: string; orden: number;
-      identidad_id: string;
+      identidad_id: string; caracter: string | null; cuenta_representada_id: string | null;
       sha256: Buffer; titulo: string; nivel_firma: string; me_toca: boolean;
       anclaje_email: string | null; clave: string; mime: string;
       archivo_vigente_id: string | null; firmante: string | null; emisor: string | null;
@@ -331,6 +338,7 @@ export async function firmar(token: string, input: FirmaInput) {
     }>`
       select p.id as participacion_id, p.instancia_id, p.circuito_id,
              p.cuenta_propietaria_id, p.estado, p.papel, p.orden, p.identidad_id,
+             p.caracter, p.cuenta_representada_id,
              a.sha256, c.titulo, c.nivel_firma,
              not exists (
                select 1 from participacion p2
@@ -383,6 +391,17 @@ export async function firmar(token: string, input: FirmaInput) {
   // una degradación.
   const visual = await marcasDelFirmante(ctx.instancia_id, ctx.participacion_id, ctx.identidad_id);
 
+  // Los campos que le tocan a esta persona: se validan los obligatorios y se
+  // arma lo que hay que dibujar. **No escribe nada todavía** — el congelado va
+  // en la transacción del PASO 3, junto con la firma.
+  //
+  // ⚠ Si se congelara acá y después fallara el sellado, esta persona quedaría
+  // con sus valores inmutables y sin firma: no podría corregir un error de
+  // tipeo ni reintentar. Es el mismo motivo por el que la evidencia tampoco se
+  // anota antes de sellar.
+  const campos = await withExterno(e.otorgamientoId, e.identidadId, (trx) =>
+    prepararCampos(trx, ctx.instancia_id, ctx.orden));
+
   // La normalización sólo hace falta la primera vez: deja el PDF con tabla xref
   // clásica, que es lo que el placeholder sabe leer. Si ya hay una firma, el
   // archivo NO se vuelve a serializar — hacerlo rompería esa firma.
@@ -411,7 +430,12 @@ export async function firmar(token: string, input: FirmaInput) {
         contacto: process.env.SOPORTE_EMAIL ?? '',
         // ⚠ Va adentro del MISMO incremental update que la firma: la marca no
         // es un cambio posterior al documento, es parte de firmarlo.
-        marcas: visual.marcas.length ? visual.marcas : undefined,
+        // ⚠ Las marcas autógrafas y los valores de los campos van JUNTOS, en el
+        // mismo incremental update. Son la misma operación: lo que esta persona
+        // aporta al documento en el acto de firmarlo.
+        marcas: visual.marcas.length || campos.marcas.length
+          ? [...visual.marcas, ...campos.marcas]
+          : undefined,
       },
       selloDePlataforma(),
       async (datos) => {
@@ -468,6 +492,15 @@ export async function firmar(token: string, input: FirmaInput) {
       values (${archivoId}::uuid, ${sha256Firmado}, ${firmado.length}, ${ctx.mime},
               'firmado', ${ctx.cuenta_propietaria_id}::uuid, ${almacen().region}, ${claveNueva})
     `.execute(trx);
+
+    // ⚠ El congelado va ACÁ y no antes: en la misma transacción que guarda la
+    // firma. Si algo de esto falla, no queda ni la firma ni los valores fijados.
+    // Y comprueba que el valor sea EXACTAMENTE el que se dibujó — si cambió
+    // mientras firmábamos, se levanta y no se guarda nada.
+    await congelarCampos(
+      trx, ctx.instancia_id, ctx.circuito_id, ctx.cuenta_propietaria_id,
+      e.identidadId, ctx.participacion_id, campos.congelar,
+    );
 
     const ahora = new Date();
     const comun = {
@@ -698,6 +731,60 @@ export async function firmar(token: string, input: FirmaInput) {
     return { quedan };
   });
 
+  // ── Lo que pasa con su acceso ahora que ya firmó ────────────────────────
+  //
+  // El derecho a FIRMAR se agotó: lo usó. Y en su lugar nace otro, el de
+  // conservar lo que firmó, que no es el mismo y no dura lo mismo.
+  //
+  // ⚠ No se puede «marcar irrevocable» el que ya existe: el trigger
+  // `otorgamiento_solo_revocacion` de la 008 sólo deja tocar la revocación —«un
+  // otorgamiento no se modifica: revocá y emití uno nuevo»—. Así que se hace
+  // exactamente eso, que además es lo correcto de contar: un otorgamiento es un
+  // hecho con fecha, y acá hay dos hechos distintos.
+  //
+  // Personal → irrevocable y perpetuo. Es su prueba de qué firmó y se la lleva
+  // aunque cambie de trabajo o cierre su cuenta. Legalmente no es opcional.
+  //
+  // Representación → condicionado a la membresía, como el anterior. El
+  // documento es de la empresa; la persona conserva el registro de haberlo
+  // firmado, no el contenido. Y el CHECK de la 008 ni siquiera deja que sea
+  // irrevocable teniendo condición, así que las dos ramas no se pueden
+  // confundir ni por error.
+  //
+  // ⚠ Va DESPUÉS de la transacción de la firma, y no adentro: revocar el
+  // otorgamiento que esta misma sesión está usando —`app.otorgamiento_externo()`—
+  // dejaría a la RLS sin base a mitad de camino. Y si esto falla, la firma ya
+  // está hecha y el acceso sigue como estaba, que es un estado seguro.
+  try {
+    await consolidarOtorgamiento(ctx.participacion_id);
+  } catch (e) {
+    console.error('[otorgamiento] no se pudo consolidar tras firmar:', e);
+  }
+
+  // ── La bandeja del que acaba de firmar ──────────────────────────────────
+  //
+  // Ya se hizo al despachar, y se vuelve a hacer acá. No es duplicación: en el
+  // despacho, quien no tenía cuenta persona no tenía dónde poner nada, y entre
+  // aquel momento y éste pudo abrirla —el alta desde la propia pantalla de
+  // firma es el camino que más la crea—. El alta también rellena hacia atrás,
+  // pero sólo alcanza a lo que ya existía cuando se registró.
+  //
+  // El caso que quedaba afuera es el del medio: abrió su cuenta con un
+  // documento ya despachado y firmó después. Ahí ni el despacho ni el alta lo
+  // ubican, y el documento le da acceso pero no le aparece en Recibidos.
+  //
+  // Es idempotente (`on conflict do nothing`) y va fuera de la transacción: si
+  // falla, la firma ya está hecha y el otorgamiento ya da acceso.
+  try {
+    await ubicarEnBandeja([{
+      identidadId: ctx.identidad_id,
+      instanciaId: ctx.instancia_id,
+      cuentaRepresentadaId: ctx.cuenta_representada_id,
+    }]);
+  } catch (e) {
+    console.error('[bandeja] falló al ubicar tras firmar:', e);
+  }
+
   // Firmó uno y quedan otros: le toca al siguiente, y hay que avisarle. Va
   // FUERA de la transacción y sin bloquear la respuesta al que acaba de firmar:
   // su firma ya está registrada y un correo lento no es su problema.
@@ -787,5 +874,128 @@ async function enSistema<T>(fn: (trx: any) => Promise<T>): Promise<T> {
   return db.transaction().execute(async (trx) => {
     await fijarContexto(trx, { actor: 'sistema' });
     return fn(trx);
+  });
+}
+
+/**
+ * Con qué carácter va a firmar, y qué empresas puede nombrar.
+ *
+ * ⚠ La lista NO la arma la pantalla ni la elige el emisor: sale de las
+ * membresías activas de esa persona. Si está vacía, no hay pregunta que hacer
+ * —firma a título personal y punto— y eso es lo que le pasa a la enorme mayoría
+ * de los firmantes, que no pertenecen a ninguna empresa del sistema.
+ */
+export async function caracterParaFirmar(token: string) {
+  const e = await verificarEnlaceFirma(token);
+
+  return withExterno(e.otorgamientoId, e.identidadId, async (trx) => {
+    const p = await sql<{ caracter: string | null; cuenta_representada_id: string | null }>`
+      select caracter, cuenta_representada_id from participacion
+       where id = ${e.participacionId}::uuid
+    `.execute(trx);
+    if (!p.rows.length) throw new HttpError(403, 'Este enlace ya no está disponible.');
+
+    const emp = await sql<{ id: string; nombre: string }>`
+      select cu.id, cu.nombre_mostrado as nombre
+        from cuenta cu
+       where app.puede_representar(${e.identidadId}::uuid, cu.id)
+       order by cu.nombre_mostrado
+    `.execute(trx);
+
+    return {
+      caracter: p.rows[0]!.caracter,
+      cuenta_representada_id: p.rows[0]!.cuenta_representada_id,
+      empresas: emp.rows,
+    };
+  });
+}
+
+/** Lo declara la persona, antes de firmar. La base comprueba las dos cosas. */
+export async function declararCaracter(
+  token: string,
+  caracter: 'personal' | 'representacion',
+  cuentaRepresentadaId: string | null,
+) {
+  const e = await verificarEnlaceFirma(token);
+
+  return withExterno(e.otorgamientoId, e.identidadId, async (trx) => {
+    // ⚠ Se guarda POR QUÉ podía, no sólo que podía.
+    //
+    // `app.puede_representar` contesta si puede HOY: membresía activa más la
+    // capacidad `empresa.representar`. Dentro de tres años, cuando alguien
+    // discuta el contrato, la pregunta va a ser si podía ESE DÍA — y para
+    // entonces el rol puede no existir, la persona puede haberse ido, y la
+    // empresa puede haber reorganizado sus permisos cinco veces.
+    //
+    // Una tabla de permisos dice qué es cierto ahora. El expediente tiene que
+    // decir qué era cierto entonces. Por eso el fundamento se congela acá, con
+    // el hecho, y no se sale a buscarlo después.
+    let fundamento: unknown = null;
+
+    if (caracter === 'representacion') {
+      if (!cuentaRepresentadaId) throw new HttpError(400, 'Decime a qué empresa representás.');
+      const ok = await sql<{
+        puede: boolean; empresa: string | null; roles: string | null; desde: Date | null;
+      }>`
+        select app.puede_representar(${e.identidadId}::uuid, ${cuentaRepresentadaId}::uuid) as puede,
+               (select nombre_mostrado from cuenta where id = ${cuentaRepresentadaId}::uuid) as empresa,
+               (select string_agg(r.codigo, ', ' order by r.codigo)
+                  from usuario_rol ur
+                  join rol r on r.id = ur.rol_id
+                  join rol_capacidad rc on rc.rol_id = r.id
+                  join capacidad ca on ca.id = rc.capacidad_id
+                 where ur.identidad_id = ${e.identidadId}::uuid
+                   and ur.cuenta_id = ${cuentaRepresentadaId}::uuid
+                   and ca.recurso = 'empresa' and ca.accion = 'representar') as roles,
+               (select min(m.desde) from membresia m
+                 where m.identidad_id = ${e.identidadId}::uuid
+                   and m.cuenta_id = ${cuentaRepresentadaId}::uuid
+                   and m.estado = 'activa') as desde
+      `.execute(trx);
+      const f = ok.rows[0];
+      if (!f?.puede) {
+        throw new HttpError(
+          403,
+          'No estás habilitado para firmar en nombre de esa empresa. Ser miembro no alcanza: ' +
+            'el administrador tiene que darte el permiso de representarla.',
+        );
+      }
+      fundamento = {
+        empresa: f.empresa,
+        roles_con_el_permiso: f.roles,
+        miembro_desde: f.desde,
+      };
+    }
+
+    const r = await sql<{ id: string }>`
+      update participacion
+         set caracter = ${caracter},
+             cuenta_representada_id = ${caracter === 'representacion' ? cuentaRepresentadaId : null}
+       where id = ${e.participacionId}::uuid
+      returning id
+    `.execute(trx);
+    if (!r.rows.length) {
+      throw new HttpError(409, 'Ya firmaste este documento: el carácter no se cambia después.');
+    }
+
+    await anotar(trx, {
+      instanciaId: (await sql<{ i: string }>`
+        select instancia_id as i from participacion where id = ${e.participacionId}::uuid
+      `.execute(trx)).rows[0]!.i,
+      circuitoId: (await sql<{ c: string }>`
+        select circuito_id as c from participacion where id = ${e.participacionId}::uuid
+      `.execute(trx)).rows[0]!.c,
+      cuentaPropietariaId: (await sql<{ c: string }>`
+        select cuenta_propietaria_id as c from participacion where id = ${e.participacionId}::uuid
+      `.execute(trx)).rows[0]!.c,
+      participacionId: e.participacionId,
+      identidadId: e.identidadId,
+      actorTipo: 'firmante',
+      tipo: 'firma.caracter_declarado',
+      datos: { caracter, cuenta_representada_id: cuentaRepresentadaId, fundamento },
+      canal: 'web',
+    });
+
+    return { ok: true, caracter };
   });
 }

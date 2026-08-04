@@ -1,8 +1,18 @@
 import type { FastifyInstance, FastifyReply, FastifyRequest } from 'fastify';
-import { moverMarca } from '../../services/marcas';
+import { moverMarca, agregarMarca, quitarMarca, misMarcas } from '../../services/marcas';
+import {
+  firmasVisualesDelFirmante,
+  guardarFirmaVisualDelFirmante,
+  bajarFirmaVisualDelFirmante,
+  quitarFirmaVisualDelFirmante,
+} from '../../services/firma_visual';
 import { z } from 'zod';
-import { abrirParaFirmar, documentoParaFirmar, firmar, rechazar } from '../../services/firma';
+import {
+  abrirParaFirmar, documentoParaFirmar, firmar, rechazar,
+  caracterParaFirmar, declararCaracter,
+} from '../../services/firma';
 import { estadoDeCuenta, crearCuentaDesdeFirma } from '../../services/cuenta_del_firmante';
+import { camposParaFirmar, guardarValor } from '../../services/campos';
 import { HttpError } from '../errors';
 
 /**
@@ -93,6 +103,19 @@ export function registrarRutasFirma(app: FastifyInstance) {
     });
   });
 
+  // ---- Campos rellenables ----
+  //
+  // Un campo por llamada: el error de uno no se lleva puestos los otros cuatro
+  // que estaban bien. Quién puede completar qué lo decide la RLS, no esto.
+  app.post('/firmar/campos', async (req) => camposParaFirmar(tokenDe(req)));
+
+  app.post('/firmar/campos/guardar', async (req) => {
+    const b = z
+      .object({ campo_id: z.string().uuid(), valor: z.string().max(2000).nullable() })
+      .parse(req.body);
+    return guardarValor(tokenDe(req), b.campo_id, b.valor);
+  });
+
   // ---- Quedarse con el documento ----
   //
   // ⚠ Estas dos rutas NO reciben el correo: sale de la identidad del
@@ -129,15 +152,122 @@ export function registrarRutasFirma(app: FastifyInstance) {
   // nunca coincidiría y el firmante externo —que no tiene sesión de cuenta—
   // recibiría 401. Es el mismo error que ya nos costó tres rutas del login.
   app.post('/firmar/marca', async (req) => {
+    // El token sale de la COOKIE, igual que en todas las demás de esta pantalla.
+    // Antes venía en el cuerpo, y eso obligaba al navegador a conservar el token
+    // del enlace después de habérselo sacado de la barra de direcciones — que es
+    // justo lo que la cookie existe para evitar.
     const b = z
       .object({
-        token: z.string().min(10),
         marca_id: z.string().uuid(),
         x: z.number().min(0).max(20000),
         y: z.number().min(0).max(20000),
       })
       .parse(req.body);
-    return moverMarca(b.token, b.marca_id, b.x, b.y, {
+    return moverMarca(tokenDe(req), b.marca_id, b.x, b.y, {
+      ip: req.ip,
+      userAgent: req.headers['user-agent'] ?? null,
+    });
+  });
+
+
+  // ==========================================================================
+  // La rúbrica del firmante
+  //
+  // ⚠ Quien pone su firma autógrafa en un documento es el FIRMANTE, en el acto
+  // de firmar. El emisor reserva dónde va; la imagen es de la persona. Estas
+  // rutas son la mitad de esa historia que faltaba: la de quien no tiene cuenta
+  // y por lo tanto no puede llegar a `/mi/firma-visual`.
+  //
+  // ⚠ NINGUNA lleva parámetro en el camino. `PUBLICAS` en server.ts compara la
+  // ruta EXACTA, así que `/firmar/rubrica/:tipo` nunca coincidiría y el firmante
+  // externo —que no tiene sesión de cuenta— recibiría 401. Es el mismo error que
+  // ya nos costó tres rutas del login. El tipo va en el cuerpo o en la query.
+  // ==========================================================================
+
+  /** Qué imágenes tiene cargadas hoy. Sin bytes: la lista no necesita la imagen. */
+  app.post('/firmar/rubrica', async (req) => firmasVisualesDelFirmante(tokenDe(req)));
+
+  app.post('/firmar/rubrica/cargar', async (req) => {
+    const parte = await (req as any).file();
+    if (!parte) throw new HttpError(400, 'No llegó ninguna imagen.');
+    const contenido = await parte.toBuffer();
+
+    // Los campos del multipart llegan junto al archivo, no en `req.body`.
+    const campos: Record<string, string> = {};
+    for (const [k, v] of Object.entries<any>(parte.fields ?? {})) {
+      if (v && typeof v.value === 'string') campos[k] = v.value;
+    }
+    const tipo = campos.tipo === 'rubrica' ? 'rubrica' : 'firma';
+    const origen = campos.origen === 'subida' ? 'subida' : 'dibujada';
+
+    return guardarFirmaVisualDelFirmante(tokenDe(req), tipo, contenido, origen);
+  });
+
+  app.get('/firmar/rubrica/imagen', async (req, reply) => {
+    const { tipo } = z
+      .object({ tipo: z.enum(['firma', 'rubrica']).default('firma') })
+      .parse(req.query);
+    const r = await bajarFirmaVisualDelFirmante(tokenDe(req), tipo);
+    // `no-store` y no `private`: es una imagen que sirve para suplantar a
+    // alguien. Que no quede en el disco de un locutorio.
+    reply
+      .header('Content-Type', r.mime)
+      .header('X-Content-Type-Options', 'nosniff')
+      .header('Cache-Control', 'no-store');
+    return reply.send(r.contenido);
+  });
+
+  app.post('/firmar/rubrica/quitar', async (req) => {
+    const { tipo } = z.object({ tipo: z.enum(['firma', 'rubrica']) }).parse(req.body);
+    return quitarFirmaVisualDelFirmante(tokenDe(req), tipo);
+  });
+
+  // ==========================================================================
+  // Dónde va: colocar, mover y sacar
+  // ==========================================================================
+
+  /** Las marcas del documento: las suyas, arrastrables, y las ajenas, para no pisarlas. */
+  /**
+   * Con qué carácter firma. ⚠ Lo declara quien firma, nunca quien manda el
+   * documento: es una afirmación sobre quién es esa persona.
+   */
+  app.post('/firmar/caracter', async (req) => caracterParaFirmar(tokenDe(req)));
+
+  app.post('/firmar/caracter/declarar', async (req) => {
+    const b = z
+      .object({
+        caracter: z.enum(['personal', 'representacion']),
+        cuenta_representada_id: z.string().uuid().nullable().optional(),
+      })
+      .parse(req.body);
+    return declararCaracter(tokenDe(req), b.caracter, b.cuenta_representada_id ?? null);
+  });
+
+  app.post('/firmar/marcas', async (req) => misMarcas(tokenDe(req)));
+
+  app.post('/firmar/marca/agregar', async (req) => {
+    const b = z
+      .object({
+        tipo: z.enum(['firma', 'rubrica']),
+        pagina: z.number().int().min(0).max(5000),
+        x: z.number().min(0).max(20000),
+        y: z.number().min(0).max(20000),
+        // Un tope generoso pero real: una rúbrica de más de 400 puntos de ancho
+        // no cabe en una hoja A4 con márgenes, y sin tope el cliente puede
+        // mandar una que tape el contrato entero.
+        ancho: z.number().min(20).max(400),
+        alto: z.number().min(10).max(200),
+      })
+      .parse(req.body);
+    return agregarMarca(tokenDe(req), b, {
+      ip: req.ip,
+      userAgent: req.headers['user-agent'] ?? null,
+    });
+  });
+
+  app.post('/firmar/marca/quitar', async (req) => {
+    const b = z.object({ marca_id: z.string().uuid() }).parse(req.body);
+    return quitarMarca(tokenDe(req), b.marca_id, {
       ip: req.ip,
       userAgent: req.headers['user-agent'] ?? null,
     });

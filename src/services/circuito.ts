@@ -4,7 +4,7 @@ import { withUsuario, exigir } from '../auth/authz';
 import { db } from '../db/pool';
 import { fijarContexto } from '../db/contexto';
 import { anotar } from './evidencia';
-import { registrarSistema } from './auditoria';
+import { registrar, registrarSistema } from './auditoria';
 import { emitirEnlaceFirma, urlDeFirma } from '../auth/enlace_firma';
 import { enviarCorreo } from './correo';
 import { avisar } from './mensajes';
@@ -61,18 +61,84 @@ export async function verCircuito(cuentaId: string, identidadId: string, circuit
       id: string; instancia_id: string; identidad_id: string; email: string;
       nombre: string | null; papel: string; orden: number; estado: string;
       nivel_garantia_minimo: string; firmada_en: Date | null; motivo_rechazo: string | null;
+      aviso_en: Date | null; aviso_error: string | null; abierto_en: Date | null;
+      caracter: string | null; cuenta_representada_id: string | null;
+      representada: string | null;
     }>`
       select p.id, p.instancia_id, p.identidad_id,
              i.email_mostrado as email, i.nombre_mostrado as nombre,
              p.papel, p.orden, p.estado, p.nivel_garantia_minimo,
-             p.firmada_en, p.motivo_rechazo
+             p.firmada_en, p.motivo_rechazo,
+             p.caracter, p.cuenta_representada_id,
+             -- ⚠ LEFT JOIN, no subconsulta con INNER: si la política no
+             -- alcanzara esa cuenta se pierde el NOMBRE, no el firmante.
+             -- Es la lección §19 del 3 de agosto, aplicada de entrada.
+             (select cr.nombre_mostrado from cuenta cr
+               where cr.id = p.cuenta_representada_id) as representada,
+
+             -- EL AVISO: cuándo salió, o por qué no.
+             --
+             -- No se puede deducir del estado. 'pendiente' significa dos cosas
+             -- muy distintas —«todavía no le toca» y «le tocaba y el correo
+             -- falló»— y la diferencia es lo único que le dice al emisor si
+             -- tiene que esperar o levantar el teléfono.
+             --
+             -- Sale del EXPEDIENTE, que es donde ya se anotaba: notificar()
+             -- escribe notificacion.enviada o notificacion.fallida por
+             -- participación desde el principio. No hacía falta guardar nada
+             -- nuevo, hacía falta mostrarlo.
+             --
+             -- ⚠ Subconsultas escalares y no join: si una política no alcanzara
+             -- a la evidencia, se pierde el dato del aviso, no el firmante.
+             -- Lección del 1 de agosto.
+             (select max(ev.ocurrido_en) from evidencia ev
+               where ev.participacion_id = p.id
+                 and ev.tipo = 'notificacion.enviada') as aviso_en,
+
+             -- El último fallo, sólo si NO hubo un envío bueno después. Un
+             -- reintento que funcionó no deja al firmante en rojo para siempre.
+             (select ev.datos->>'error' from evidencia ev
+               where ev.participacion_id = p.id
+                 and ev.tipo = 'notificacion.fallida'
+                 and ev.ocurrido_en > coalesce(
+                       (select max(e2.ocurrido_en) from evidencia e2
+                         where e2.participacion_id = p.id
+                           and e2.tipo = 'notificacion.enviada'),
+                       '-infinity'::timestamptz)
+               order by ev.ocurrido_en desc limit 1) as aviso_error,
+
+             -- Cuándo lo abrió. 'vista' dice que lo abrió; no dice cuándo, y
+             -- «lo abrió hace diez días y no firmó» es otra conversación que
+             -- «lo abrió recién».
+             (select min(ev.ocurrido_en) from evidencia ev
+               where ev.participacion_id = p.id
+                 and ev.tipo = 'documento.abierto') as abierto_en
         from participacion p
         join identidad i on i.id = p.identidad_id
        where p.circuito_id = ${circuitoId}::uuid
        order by p.orden, i.email_mostrado
     `.execute(trx);
 
-    return { circuito: { ...c.rows[0]!, instancias: Number(c.rows[0]!.instancias) }, participaciones: p.rows };
+    // Las empresas que se pueden nombrar como representadas. La pantalla no las
+    // puede inventar: son la cuenta emisora y aquellas donde algún firmante
+    // tenga membresía activa. Van con el id del firmante para que el selector de
+    // cada fila muestre sólo lo que vale para esa persona.
+    const rep = await sql<{ identidad_id: string; cuenta_id: string; nombre: string }>`
+      select p.identidad_id, cu.id as cuenta_id, cu.nombre_mostrado as nombre
+        from participacion p
+        join cuenta cu on cu.tipo = 'empresa' and cu.estado <> 'cerrada'
+       where p.circuito_id = ${circuitoId}::uuid
+         and p.papel = 'firmante'
+         and app.puede_representar(p.identidad_id, cu.id)
+       group by p.identidad_id, cu.id, cu.nombre_mostrado
+       order by cu.nombre_mostrado
+    `.execute(trx);
+
+    return {
+      circuito: { ...c.rows[0]!, instancias: Number(c.rows[0]!.instancias) },
+      participaciones: p.rows,
+      representables: rep.rows,
+    };
   });
 }
 
@@ -86,6 +152,13 @@ export interface FirmanteInput {
   papel?: 'firmante' | 'veedor' | 'copia';
   orden?: number;
   nivelGarantiaMinimo?: 'bajo' | 'sustancial' | 'alto';
+  /**
+   * Con qué carácter firma. `null` = todavía sin decidir, y así se queda hasta
+   * que alguien lo elija: el trigger de la 045 no deja despachar sin esto.
+   * No hay default porque no hay default seguro — ver `propiedad-y-otorgamientos.md` §7.2.
+   */
+  caracter?: 'personal' | 'representacion' | null;
+  cuentaRepresentadaId?: string | null;
 }
 
 export async function agregarFirmante(
@@ -138,6 +211,28 @@ export async function agregarFirmante(
 
     const papel = input.papel ?? 'firmante';
     const orden = input.orden ?? 1;
+
+    // ⚠ Una copia informativa no firma, así que no tiene carácter que elegir:
+    // se marca 'personal' para que no frene el despacho. A un firmante NO se le
+    // pone nada: queda en null hasta que alguien decida, y ésa es la decisión.
+    const caracter = papel === 'firmante' ? (input.caracter ?? null) : 'personal';
+
+    if (caracter === 'representacion') {
+      if (!input.cuentaRepresentadaId) {
+        throw new HttpError(400, 'Decime a qué empresa representa.');
+      }
+      const ok = await sql<{ puede: boolean }>`
+        select app.puede_representar(${destino}::uuid, ${input.cuentaRepresentadaId}::uuid) as puede
+      `.execute(trx);
+      if (!ok.rows[0]?.puede) {
+        throw new HttpError(
+          403,
+          'No podés declarar que esa persona firma en representación de esa empresa. ' +
+            'Sólo vale tu propia cuenta, o una donde esa persona sea miembro activo.',
+        );
+      }
+    }
+
     const creadas: string[] = [];
 
     for (const inst of instancias.rows) {
@@ -145,9 +240,11 @@ export async function agregarFirmante(
       try {
         await sql`
           insert into participacion (id, instancia_id, circuito_id, cuenta_propietaria_id,
-                                     identidad_id, papel, orden, nivel_garantia_minimo)
+                                     identidad_id, papel, orden, nivel_garantia_minimo,
+                                     caracter, cuenta_representada_id)
           values (${id}::uuid, ${inst.id}::uuid, ${circuitoId}::uuid, ${cuentaId}::uuid,
-                  ${destino}::uuid, ${papel}, ${orden}, ${input.nivelGarantiaMinimo ?? 'bajo'})
+                  ${destino}::uuid, ${papel}, ${orden}, ${input.nivelGarantiaMinimo ?? 'bajo'},
+                  ${caracter}, ${caracter === 'representacion' ? input.cuentaRepresentadaId ?? null : null})
         `.execute(trx);
         creadas.push(id);
       } catch (e: any) {
@@ -186,6 +283,159 @@ export async function quitarFirmante(
        where circuito_id = ${circuitoId}::uuid and identidad_id = ${r.rows[0]!.identidad_id}::uuid
     `.execute(trx);
     return { ok: true };
+  });
+}
+
+/**
+ * Cambia el orden en que firman, y compacta la numeración.
+ *
+ * ═══ POR QUÉ RECIBE LA LISTA ENTERA Y NO «SUBIR ÉSTE» ═══
+ *
+ * Porque «subí al de la posición 3» depende de qué había cuando la pantalla se
+ * dibujó, y entre eso y el clic pudo entrar otro. La lista completa es el
+ * estado que el emisor está mirando: si lo que manda ya no coincide con lo que
+ * hay, se rechaza entero en vez de aplicar la mitad.
+ *
+ * ⚠ Sólo en borrador, y no lo comprueba este servicio: lo impide el trigger
+ * `participacion_orden_congelado` de la 042. Después del despacho a cada
+ * firmante ya se le dijo cuándo le toca, y moverlo es cambiarle el turno a
+ * alguien que recibió un correo. Lo que corresponde ahí es cancelar y rehacer.
+ *
+ * ⚠ Sólo firmantes. Las copias informativas no tienen turno —se notifican
+ * todas al despachar— y meterlas en la fila haría que el documento «espere» a
+ * alguien que no tiene nada que hacer.
+ */
+export async function reordenarFirmantes(
+  cuentaId: string,
+  identidadId: string,
+  circuitoId: string,
+  ordenIds: string[],
+) {
+  return withUsuario(cuentaId, identidadId, async (trx, autz) => {
+    exigir(autz, 'circuito', 'crear', 'No tenés permiso para preparar circuitos de firma.');
+    await exigirBorrador(trx, circuitoId, cuentaId);
+
+    // Las participaciones de firmante de la PRIMERA instancia son las que el
+    // emisor ve en la pantalla: en modo copias hay una tanda por instancia, con
+    // las mismas personas y el mismo orden, y se replica al final.
+    const actuales = await sql<{ id: string; identidad_id: string }>`
+      select p.id, p.identidad_id
+        from participacion p
+        join instancia i on i.id = p.instancia_id
+       where p.circuito_id = ${circuitoId}::uuid and p.papel = 'firmante'
+         and i.numero = (select min(i2.numero) from instancia i2
+                          where i2.circuito_id = ${circuitoId}::uuid)
+       order by p.orden
+    `.execute(trx);
+
+    if (!actuales.rows.length) throw new HttpError(404, 'Este documento todavía no tiene firmantes.');
+
+    const hay = new Set(actuales.rows.map((r) => r.id));
+    const pedidos = new Set(ordenIds);
+    if (pedidos.size !== ordenIds.length) {
+      throw new HttpError(400, 'La lista trae un firmante repetido.');
+    }
+    // ⚠ Tiene que venir la lista COMPLETA. Con una parcial, los que faltan
+    // quedarían con su número viejo y podrían empatar con uno nuevo — y dos
+    // firmantes con el mismo orden en serie es que los dos reciben el correo a
+    // la vez, que es exactamente lo que el modo serie promete que no pasa.
+    if (pedidos.size !== hay.size || ordenIds.some((id) => !hay.has(id))) {
+      throw new HttpError(
+        409,
+        'La lista de firmantes cambió mientras la estabas ordenando. Recargá y probá de nuevo.',
+      );
+    }
+
+    // Se numera de 1 en adelante, sin huecos. Los huecos no rompen el despacho
+    // —la regla es el orden MÍNIMO abierto, no el número 1— pero dejan una
+    // pantalla que dice «1. 3. 4.» y hace dudar de si falta alguien.
+    for (let i = 0; i < ordenIds.length; i++) {
+      const idn = actuales.rows.find((r) => r.id === ordenIds[i])!.identidad_id;
+      // Se actualiza por IDENTIDAD y no por id de fila: en modo copias la misma
+      // persona tiene una participación por instancia y todas tienen que quedar
+      // en la misma posición. Por eso la pantalla muestra personas, no filas.
+      await sql`
+        update participacion
+           set orden = ${i + 1}
+         where circuito_id = ${circuitoId}::uuid
+           and identidad_id = ${idn}::uuid
+           and papel = 'firmante'
+      `.execute(trx);
+    }
+
+    await registrar(trx, cuentaId, identidadId, {
+      accion: 'circuito.orden_cambiado',
+      recursoTipo: 'circuito',
+      recursoId: circuitoId,
+      despues: { orden: ordenIds.length },
+    });
+
+    return { ok: true, firmantes: ordenIds.length };
+  });
+}
+
+/**
+ * Con qué carácter firma ESTA PERSONA. La declara ella, no el emisor.
+ *
+ * ⚠ Quién puede llamarla lo decide la base, no este servicio: el trigger
+ * `participacion_caracter_congelado` (046) exige que el actor sea el sujeto de
+ * la participación y que todavía no haya firmado. Acá se traduce ese rechazo
+ * en una frase que se entiende.
+ *
+ * Se usa desde la pantalla de firma. Existe también el camino con sesión de
+ * cuenta —alguien que tiene usuario y recibe un documento— y es el mismo:
+ * la persona es la misma y la pregunta también.
+ */
+export async function definirCaracter(
+  cuentaId: string,
+  identidadId: string,
+  circuitoId: string,
+  participacionId: string,
+  caracter: 'personal' | 'representacion',
+  cuentaRepresentadaId: string | null,
+) {
+  return withUsuario(cuentaId, identidadId, async (trx) => {
+    const q = await sql<{ identidad_id: string }>`
+      select identidad_id from participacion
+       where id = ${participacionId}::uuid and circuito_id = ${circuitoId}::uuid
+         and papel = 'firmante'
+    `.execute(trx);
+    const f = q.rows[0];
+    if (!f) throw new HttpError(404, 'Ese firmante no existe en este circuito.');
+
+    if (caracter === 'representacion') {
+      if (!cuentaRepresentadaId) throw new HttpError(400, 'Decime a qué empresa representa.');
+      const ok = await sql<{ puede: boolean }>`
+        select app.puede_representar(${f.identidad_id}::uuid, ${cuentaRepresentadaId}::uuid) as puede
+      `.execute(trx);
+      if (!ok.rows[0]?.puede) {
+        throw new HttpError(
+          403,
+          'No podés declarar que esa persona firma en representación de esa empresa. ' +
+            'Sólo vale tu propia cuenta, o una donde esa persona sea miembro activo.',
+        );
+      }
+    }
+
+    // Se actualiza por IDENTIDAD: en modo copias la misma persona tiene una
+    // participación por instancia y todas firman con el mismo carácter.
+    await sql`
+      update participacion
+         set caracter = ${caracter},
+             cuenta_representada_id = ${caracter === 'representacion' ? cuentaRepresentadaId : null}
+       where circuito_id = ${circuitoId}::uuid
+         and identidad_id = ${f.identidad_id}::uuid
+         and papel = 'firmante'
+    `.execute(trx);
+
+    await registrar(trx, cuentaId, identidadId, {
+      accion: 'circuito.caracter_definido',
+      recursoTipo: 'participacion',
+      recursoId: participacionId,
+      despues: { caracter, cuenta_representada_id: cuentaRepresentadaId },
+    });
+
+    return { ok: true, caracter };
   });
 }
 
@@ -253,9 +503,11 @@ export async function despachar(
     const parts = await sql<{
       id: string; instancia_id: string; identidad_id: string; papel: string; orden: number;
       email: string; nombre: string | null;
+      caracter: string | null; cuenta_representada_id: string | null;
     }>`
       select p.id, p.instancia_id, p.identidad_id, p.papel, p.orden,
-             i.email_mostrado as email, i.nombre_mostrado as nombre
+             i.email_mostrado as email, i.nombre_mostrado as nombre,
+             p.caracter, p.cuenta_representada_id
         from participacion p
         join identidad i on i.id = p.identidad_id
        where p.circuito_id = ${circuitoId}::uuid
@@ -266,6 +518,14 @@ export async function despachar(
     if (!firmantes.length) {
       throw new HttpError(400, 'Agregá al menos un firmante antes de enviarlo.');
     }
+
+    // ⚠ NO se exige el carácter acá, y es a propósito.
+    //
+    // La 045 lo pedía en el despacho. Estaba mal: con qué carácter firma cada
+    // persona lo declara ella al firmar —no lo puede saber quien manda el
+    // documento— así que en este momento la respuesta todavía no existe. Ver
+    // la migración 046 y `consolidarOtorgamiento`, que es donde el carácter se
+    // vuelve otorgamientos.
 
     const vence = c.dias_vigencia
       ? sql`now() + (${c.dias_vigencia} || ' days')::interval`
@@ -292,6 +552,7 @@ export async function despachar(
     const enlaces: {
       participacionId: string; otorgamientoId: string; identidadId: string;
       instanciaId: string; email: string; nombre: string | null; orden: number;
+      cuentaRepresentadaId: string | null;
     }[] = [];
 
     for (const p of parts.rows) {
@@ -300,6 +561,11 @@ export async function despachar(
           ? ['metadatos', 'leer', 'firmar', 'evidencia']
           : ['metadatos', 'leer'];
       const oid = randomUUID();
+
+      // Un solo otorgamiento, el de poder abrir y firmar. Los definitivos —el
+      // perpetuo de quien firmó a título personal, o el de la empresa cuando
+      // firmó representándola— se emiten al firmar, cuando ya se sabe con qué
+      // carácter lo hizo. `consolidarOtorgamiento`.
       await sql`
         insert into otorgamiento (id, instancia_id, identidad_id, alcances,
                                   origen, otorgado_por, cuenta_otorgante_id)
@@ -315,6 +581,8 @@ export async function despachar(
         email: p.email,
         nombre: p.nombre,
         orden: p.orden,
+        cuentaRepresentadaId:
+          p.caracter === 'representacion' ? p.cuenta_representada_id : null,
       });
     }
 
@@ -361,10 +629,17 @@ export async function despachar(
   // acceso y el alta reubica lo pendiente.
   try {
     await ubicarEnBandeja(
-      preparado.todos.map((e) => ({ identidadId: e.identidadId, instanciaId: e.instanciaId })),
+      preparado.todos.map((e) => ({
+        identidadId: e.identidadId,
+        instanciaId: e.instanciaId,
+        cuentaRepresentadaId: e.cuentaRepresentadaId,
+      })),
     );
-  } catch {
-    /* el acceso no depende de esto: lo da el otorgamiento */
+  } catch (e) {
+    // No tumba el despacho —el acceso lo da el otorgamiento, no la ubicación—
+    // pero deja rastro. El `catch` vacío que había acá es la razón por la que
+    // un fallo de política se pudo esconder durante días.
+    console.error('[bandeja] falló al ubicar en el despacho:', e);
   }
 
   const resultados = await Promise.all(
@@ -687,23 +962,145 @@ async function notificar(
  * Idempotente: el índice único (cuenta, instancia) lo garantiza, y esto se
  * puede reintentar sin duplicar nada.
  */
-async function ubicarEnBandeja(destinos: { identidadId: string; instanciaId: string }[]) {
+export interface DestinoBandeja {
+  identidadId: string;
+  instanciaId: string;
+  /** Si firma representando a una empresa, el documento es de la empresa. */
+  cuentaRepresentadaId?: string | null;
+}
+
+/**
+ * Pone el documento en el repositorio al que pertenece.
+ *
+ * ⚠ NO siempre es el de la persona. Quien firma en representación de una
+ * empresa firma un documento que es de la empresa: va a la bandeja de esa
+ * cuenta y no a la suya. Es la consecuencia práctica del carácter de la firma
+ * (`propiedad-y-otorgamientos.md` §7.2) y la razón por la que hay que elegirlo
+ * antes de despachar: acá ya no se puede deducir.
+ */
+export async function ubicarEnBandeja(destinos: DestinoBandeja[]) {
   if (!destinos.length) return 0;
   return enSistema(async (trx) => {
     let n = 0;
     for (const d of destinos) {
-      const r = await sql<{ id: string }>`
-        insert into ubicacion (cuenta_id, carpeta_id, instancia_id)
-        select cu.id, ca.id, ${d.instanciaId}::uuid
-          from cuenta cu
-          join carpeta ca on ca.cuenta_id = cu.id and ca.sistema = 'entrada'
-         where cu.tipo = 'persona' and cu.identidad_titular_id = ${d.identidadId}::uuid
-        on conflict do nothing
-        returning id
-      `.execute(trx);
+      // Representación → la bandeja de la empresa representada. Personal → la
+      // cuenta persona de esa identidad, si la tiene.
+      const r = d.cuentaRepresentadaId
+        ? await sql<{ id: string }>`
+            insert into ubicacion (cuenta_id, carpeta_id, instancia_id)
+            select cu.id, ca.id, ${d.instanciaId}::uuid
+              from cuenta cu
+              join carpeta ca on ca.cuenta_id = cu.id and ca.sistema = 'entrada'
+             where cu.id = ${d.cuentaRepresentadaId}::uuid and cu.estado <> 'cerrada'
+            on conflict do nothing
+            returning id
+          `.execute(trx)
+        : await sql<{ id: string }>`
+            insert into ubicacion (cuenta_id, carpeta_id, instancia_id)
+            select cu.id, ca.id, ${d.instanciaId}::uuid
+              from cuenta cu
+              join carpeta ca on ca.cuenta_id = cu.id and ca.sistema = 'entrada'
+             where cu.tipo = 'persona' and cu.identidad_titular_id = ${d.identidadId}::uuid
+            on conflict do nothing
+            returning id
+          `.execute(trx);
       n += r.rows.length;
+
+      // ⚠ Cero filas NO es un error de SQL y por eso este aviso existe.
+      //
+      // El insert es un `select` con joins: si esa persona no tiene cuenta
+      // persona, o la cuenta no tiene carpeta de entrada, o una política le
+      // esconde la carpeta a este contexto, no encuentra destino y no escribe
+      // nada. Sin excepción, sin log, sin nada. Fue exactamente así como un
+      // documento firmado no apareció en la bandeja de su firmante durante
+      // días: la política `carpeta_select` no dejaba ver la carpeta al contexto
+      // de sistema (migración 044) y el llamador tiene un `catch` vacío.
+      //
+      // La ausencia de destino es normal —mucha gente firma sin tener cuenta—
+      // así que no se lanza. Pero queda escrito, porque un cero que se repite
+      // para TODOS los destinatarios ya no es normal y hay que poder verlo.
+      if (!r.rows.length) {
+        console.warn('[bandeja] sin ubicar: identidad', d.identidadId, 'instancia', d.instanciaId,
+                     '— no encontró bandeja (¿sin cuenta persona, o sin carpeta de entrada?)');
+      }
     }
     return n;
+  });
+}
+
+/**
+ * Cierra el otorgamiento de firma y abre el de conservación.
+ *
+ * Se llama DESPUÉS de firmar y fuera de la transacción de la firma. Lo que hace
+ * está explicado donde se lo llama (`firma.ts`); en dos líneas: el derecho a
+ * firmar se agotó, y nace el de conservar lo que se firmó, que dura distinto
+ * según el carácter.
+ *
+ * Idempotente: si el de firma ya no está vigente, no hace nada.
+ */
+export async function consolidarOtorgamiento(participacionId: string) {
+  return enSistema(async (trx) => {
+    const q = await sql<{
+      identidad_id: string; instancia_id: string; caracter: string | null;
+      cuenta_representada_id: string | null; cuenta_propietaria_id: string;
+    }>`
+      select identidad_id, instancia_id, caracter, cuenta_representada_id, cuenta_propietaria_id
+        from participacion where id = ${participacionId}::uuid
+    `.execute(trx);
+    const p = q.rows[0];
+    if (!p) return { ok: false };
+
+    const viejos = await sql<{ id: string }>`
+      update otorgamiento
+         set revocado_en = now(),
+             motivo_revocacion = 'firmó: el derecho a firmar se agota con el acto'
+       where instancia_id = ${p.instancia_id}::uuid
+         and identidad_id = ${p.identidad_id}::uuid
+         and revocado_en is null
+         and not irrevocable
+         and 'firmar' = any (alcances)
+      returning id
+    `.execute(trx);
+    if (!viejos.rows.length) return { ok: true, sinCambios: true };
+
+    const representa = p.caracter === 'representacion' && p.cuenta_representada_id;
+
+    // ⚠ Sin 'firmar'. Y las dos ramas se excluyen por el CHECK de la 008: un
+    // otorgamiento condicionado no puede ser irrevocable, así que no hay forma
+    // de emitir por error uno perpetuo para quien firmó representando.
+    await sql`
+      insert into otorgamiento
+        (identidad_id, instancia_id, alcances, origen, cuenta_otorgante_id,
+         irrevocable, condicionado_a_cuenta_id)
+      values (${p.identidad_id}::uuid, ${p.instancia_id}::uuid,
+              array['metadatos','leer','evidencia']::text[], 'legal',
+              ${p.cuenta_propietaria_id}::uuid,
+              ${!representa},
+              ${representa ? p.cuenta_representada_id : null})
+    `.execute(trx);
+
+    // Y el de la empresa representada pasa a perpetuo: el documento es suyo.
+    if (representa) {
+      const c = await sql<{ id: string }>`
+        update otorgamiento
+           set revocado_en = now(), motivo_revocacion = 'reemplazado por el perpetuo al firmarse'
+         where instancia_id = ${p.instancia_id}::uuid
+           and cuenta_id = ${p.cuenta_representada_id}::uuid
+           and revocado_en is null and not irrevocable
+        returning id
+      `.execute(trx);
+      if (c.rows.length) {
+        await sql`
+          insert into otorgamiento
+            (cuenta_id, instancia_id, alcances, origen, cuenta_otorgante_id, irrevocable)
+          values (${p.cuenta_representada_id}::uuid, ${p.instancia_id}::uuid,
+                  array['metadatos','leer','evidencia']::text[], 'representacion',
+                  ${p.cuenta_propietaria_id}::uuid, true)
+        `.execute(trx);
+      }
+    }
+
+    return { ok: true, perpetuo: !representa };
   });
 }
 

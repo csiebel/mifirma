@@ -3,7 +3,7 @@ import { abrirContextoPedido, fijarSesionDelPedido } from './auth/contexto_pedid
 import rateLimit from '@fastify/rate-limit';
 import cookie from '@fastify/cookie';
 import multipart from '@fastify/multipart';
-import { readFileSync } from 'node:fs';
+import { readFileSync, statSync} from 'node:fs';
 import { ZodError } from 'zod';
 import { autenticar, type Identidad } from './auth/identity';
 import { HttpError } from './http/errors';
@@ -130,7 +130,7 @@ export function construirServidor(): FastifyInstance {
   // La página es pública; las APIs validan el token de empresa adentro.
   app.get('/app', async (_req, reply) => {
     try {
-      const html = readFileSync(new URL('../public/index.html', import.meta.url), 'utf8');
+      const html = sellarEstaticos(readFileSync(new URL('../public/index.html', import.meta.url), 'utf8'));
       reply.header('Cache-Control', 'no-store').type('text/html').send(html);
     } catch {
       reply.type('text/html').send('<h1>Falta public/index.html</h1>');
@@ -141,7 +141,7 @@ export function construirServidor(): FastifyInstance {
   // La página es pública; las APIs /operador/* validan el token de operador adentro.
   app.get('/operador', async (_req, reply) => {
     try {
-      const html = readFileSync(new URL('../public/operador.html', import.meta.url), 'utf8');
+      const html = sellarEstaticos(readFileSync(new URL('../public/operador.html', import.meta.url), 'utf8'));
       reply.header('Cache-Control', 'no-store').type('text/html').send(html);
     } catch {
       reply.type('text/html').send('<h1>Falta public/operador.html</h1>');
@@ -156,7 +156,7 @@ export function construirServidor(): FastifyInstance {
   // cambia por una cookie acotada a /firmar en `POST /firmar/abrir`.
   app.get('/firmar', async (_req, reply) => {
     try {
-      const html = readFileSync(new URL('../public/firmar.html', import.meta.url), 'utf8');
+      const html = sellarEstaticos(readFileSync(new URL('../public/firmar.html', import.meta.url), 'utf8'));
       reply.header('Cache-Control', 'no-store').type('text/html').send(html);
     } catch {
       reply.type('text/html').send('<h1>Falta public/firmar.html</h1>');
@@ -167,20 +167,53 @@ export function construirServidor(): FastifyInstance {
   // Pública; sus llamadas (/auth/*) validan adentro.
   app.get('/entrar', async (_req, reply) => {
     try {
-      const html = readFileSync(new URL('../public/entrar.html', import.meta.url), 'utf8');
+      const html = sellarEstaticos(readFileSync(new URL('../public/entrar.html', import.meta.url), 'utf8'));
       reply.header('Cache-Control', 'no-store').type('text/html').send(html);
     } catch {
       reply.type('text/html').send('<h1>Falta public/entrar.html</h1>');
     }
   });
 
+  /**
+   * Le pega a cada <script src="/x.js"> la fecha de modificación del archivo.
+   *
+   * ⚠ Esto no es una optimización: es la única forma de que un cambio en el
+   * JavaScript llegue al navegador de alguien que ya tuvo la página abierta.
+   *
+   * `Cache-Control: no-cache` obliga a revalidar, pero como no mandábamos ni
+   * ETag ni Last-Modified no había contra qué revalidar, y Safari se quedaba
+   * con la copia vieja. El síntoma es el peor de todos para trabajar: el
+   * servidor tiene el arreglo, el archivo en disco tiene el arreglo, y la
+   * pantalla sigue haciendo lo de antes. Se perdieron dos vueltas de esta
+   * sesión buscando en el código un botón que sí estaba.
+   *
+   * La URL cambia sólo cuando cambia el archivo, así que el caché sigue
+   * sirviendo para lo que sirve.
+   */
+  function sellarEstaticos(html: string): string {
+    return html.replace(/(<script src="\/)([a-z0-9_.-]+\.js)(")/g, (_m, a, archivo, c) => {
+      try {
+        const st = statSync(new URL('../public/' + archivo, import.meta.url));
+        return a + archivo + '?v=' + Math.floor(st.mtimeMs) + c;
+      } catch {
+        return a + archivo + c;
+      }
+    });
+  }
+
   // JavaScript de las páginas públicas. Se sirve como archivo suelto, igual que
   // el HTML: para dos archivos no vale la pena montar un servidor de estáticos.
-  for (const js of ['sitio.js', 'entrar.js', 'consola.js', 'operador.js', 'firmar.js', 'marcas.js']) {
+  for (const js of ['sitio.js', 'entrar.js', 'consola.js', 'operador.js', 'firmar.js', 'marcas.js', 'rubrica.js', 'visor.js']) {
     app.get('/' + js, async (_req, reply) => {
       try {
-        const body = readFileSync(new URL('../public/' + js, import.meta.url), 'utf8');
-        reply.type('text/javascript').header('Cache-Control', 'no-cache').send(body);
+        const ruta = new URL('../public/' + js, import.meta.url);
+        const body = readFileSync(ruta, 'utf8');
+        // ETag además del no-cache: le da al navegador contra qué revalidar.
+        reply
+          .type('text/javascript')
+          .header('Cache-Control', 'no-cache')
+          .header('ETag', '"' + Math.floor(statSync(ruta).mtimeMs).toString(36) + '"')
+          .send(body);
       } catch {
         reply.code(404).send('archivo no encontrado');
       }
@@ -269,6 +302,8 @@ export function construirServidor(): FastifyInstance {
     '/operador.js',
     '/firmar.js',
     '/marcas.js',
+    '/rubrica.js',
+    '/visor.js',
     '/vendor/pdf.min.mjs',
     '/vendor/pdf.worker.min.mjs',
     // El firmante externo: su autorización es el otorgamiento que lleva el
@@ -281,8 +316,21 @@ export function construirServidor(): FastifyInstance {
     '/firmar/rechazar',
     '/firmar/marca',
     // La autorización la lleva la cookie de firma, igual que las de arriba.
+    '/firmar/campos',
+    '/firmar/campos/guardar',
     '/firmar/cuenta',
     '/firmar/cuenta/crear',
+    // La rúbrica del firmante sin cuenta: la carga él, en el acto de firmar.
+    // Sin parámetros en el camino — PUBLICAS compara la ruta exacta.
+    '/firmar/rubrica',
+    '/firmar/rubrica/cargar',
+    '/firmar/rubrica/imagen',
+    '/firmar/rubrica/quitar',
+    '/firmar/caracter',
+    '/firmar/caracter/declarar',
+    '/firmar/marcas',
+    '/firmar/marca/agregar',
+    '/firmar/marca/quitar',
     '/manifest.webmanifest',
     '/manifest-empleado.webmanifest',
     '/sw.js',

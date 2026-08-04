@@ -136,9 +136,68 @@
     return data;
   }
 
+  /**
+   * ⚠ El mensaje se trae a la vista, y no es un detalle de estilo.
+   *
+   * `msgModal` vive al PIE del modal, y el de preparación es largo: con tres
+   * firmantes cargados, el error de «Enviar a firmar» cae abajo del borde de la
+   * pantalla. Lo que ve la persona es que apretó Enviar y no pasó nada — el
+   * peor de los resultados posibles, porque no hay nada que leer ni nada que
+   * contar. Pasó de verdad, con este modal, hoy.
+   *
+   * `block:'nearest'` en vez de `center`: si el mensaje ya se ve, no se mueve
+   * nada. Un salto de scroll cada vez que algo sale bien es su propio problema.
+   */
   function msg(id, texto, clase) {
     var el = $(id);
-    if (el) el.innerHTML = texto ? '<div class="msg ' + clase + '">' + esc(texto) + '</div>' : '';
+    if (!el) return;
+    el.innerHTML = texto ? '<div class="msg ' + clase + '">' + esc(texto) + '</div>' : '';
+    if (texto) {
+      try { el.scrollIntoView({ block: 'nearest', behavior: 'smooth' }); } catch (e) {}
+    }
+  }
+
+  /**
+   * Baja un archivo y, si el servidor dice que no, lo DICE en la consola.
+   *
+   * ⚠ Con `window.open` el error del servidor se abre en una pestaña nueva como
+   * JSON crudo: la persona se queda mirando
+   * `{"error":"Este documento todavía no..."}` sobre fondo blanco, sin
+   * cabecera, sin botón de volver y sin idea de qué hacer. Pasó de verdad con
+   * el certificado. Un error es parte de la aplicación y se muestra adentro.
+   *
+   * El blob se descarga acá y se guarda con un ancla temporal: así el nombre
+   * del archivo es el que manda el servidor y no la última parte de la URL.
+   */
+  async function bajarArchivo(url, boton) {
+    var antes = boton ? boton.textContent : '';
+    if (boton) { boton.disabled = true; boton.textContent = 'Un momento…'; }
+    try {
+      var r = await fetch(url, { credentials: 'same-origin' });
+      if (!r.ok) {
+        var txt = await r.text();
+        var d;
+        try { d = JSON.parse(txt); } catch (e) { d = { error: txt }; }
+        throw new Error(d.error || ('HTTP ' + r.status));
+      }
+      var blob = await r.blob();
+      // El nombre sale del Content-Disposition; si no viene, uno razonable.
+      var cd = r.headers.get('Content-Disposition') || '';
+      var m = /filename\*?=(?:UTF-8'')?"?([^";]+)"?/i.exec(cd);
+      var nombre = m ? decodeURIComponent(m[1]) : 'documento.pdf';
+      var a = document.createElement('a');
+      a.href = URL.createObjectURL(blob);
+      a.download = nombre;
+      document.body.appendChild(a);
+      a.click();
+      a.remove();
+      setTimeout(function () { URL.revokeObjectURL(a.href); }, 30000);
+      msg('msgDocs', '', '');
+    } catch (e) {
+      msg('msgDocs', e.message, 'err');
+    } finally {
+      if (boton) { boton.disabled = false; boton.textContent = antes; }
+    }
   }
 
   function iniciales(nombre, email) {
@@ -399,7 +458,13 @@
               'display:inline-block">Expediente comprometido</span>'
             : '') + '</td>' +
           '<td>' + (d.firmas_total
-            ? d.firmas_hechas + ' de ' + d.firmas_total
+            ? d.firmas_hechas + ' de ' + d.firmas_total +
+              // A quién hay que llamar por teléfono. «1 de 3» dice cuánto
+              // falta; no dice quién falta, que es lo que se quiere saber.
+              (d.esperando && d.circuito_estado === 'enviado'
+                ? '<br><span style="font-size:12px;color:var(--mut)">esperando a ' +
+                  esc(d.esperando) + '</span>'
+                : '')
             : '<span style="color:var(--mut)">sin firmantes</span>') + '</td>' +
           '<td>' + esc(fecha(d.creado_en)) + '</td>' +
           '<td><div class="acc" style="justify-content:flex-end">' +
@@ -408,9 +473,19 @@
           // Se llamaba «Enviar a firmar» y mandaba a buscar en «Ver» lo que
           // estaba acá. Una etiqueta que promete el último paso y da el primero
           // esconde todo lo que hay en el medio.
-          (d.circuito_estado === 'borrador'
-            ? '<button class="btn btn-p chico" data-prep="' + esc(d.circuito_id) + '">Preparar</button>'
-            : '') +
+          // ⚠ El MISMO modal para las dos situaciones, con el nombre que
+          // corresponde a cada una. En borrador se prepara —agregar, ordenar,
+          // ubicar firmas—; despachado se mira quién firmó, cuándo, y se copia
+          // el enlace de quien dice que no le llegó.
+          //
+          // Hasta ahora ese botón sólo existía en borrador, así que después de
+          // enviar no había forma de abrir la lista de firmantes: el modal ya
+          // sabía dibujar el caso «enviado» —tiene su rama, con Copiar enlace—
+          // y era inalcanzable. Quien mandó un documento se quedaba con «1 de
+          // 3» y sin manera de saber cuál de los tres.
+          '<button class="btn ' + (d.circuito_estado === 'borrador' ? 'btn-p' : 'btn-s') +
+            ' chico" data-circ="' + esc(d.circuito_id) + '">' +
+            (d.circuito_estado === 'borrador' ? 'Preparar' : 'Firmantes') + '</button>' +
           (d.circuito_estado === 'enviado'
             ? '<button class="btn ' + (d.sin_avisar ? 'btn-p' : 'btn-s') + ' chico" data-reenv="' +
               esc(d.circuito_id) + '">Reenviar aviso</button>' +
@@ -518,8 +593,8 @@
     $('tDocumentos').querySelectorAll('[data-ver]').forEach(function (b) {
       b.addEventListener('click', function () { abrirVisor(b.dataset.ver, b.dataset.tit); });
     });
-    $('tDocumentos').querySelectorAll('[data-prep]').forEach(function (b) {
-      b.addEventListener('click', function () { abrirCircuito(b.dataset.prep); });
+    $('tDocumentos').querySelectorAll('[data-circ]').forEach(function (b) {
+      b.addEventListener('click', function () { abrirCircuito(b.dataset.circ); });
     });
     $('tDocumentos').querySelectorAll('[data-reenv]').forEach(function (b) {
       b.addEventListener('click', async function () {
@@ -541,7 +616,7 @@
     });
     $('tDocumentos').querySelectorAll('[data-cert]').forEach(function (b) {
       b.addEventListener('click', function () {
-        window.open('/documentos/' + b.dataset.cert + '/certificado', '_blank');
+        bajarArchivo('/documentos/' + b.dataset.cert + '/certificado', b);
       });
     });
 
@@ -771,7 +846,21 @@
     rechazada:  '<span class="pill no">Rechazó</span>',
     delegada:   '<span class="pill esp">Delegada</span>',
     vencida:    '<span class="pill no">Vencida</span>',
+    // Faltaban dos y caían al texto crudo de la base. `no_requerida` es el
+    // quórum ya alcanzado —no es un error, es que no hizo falta— y `cancelada`
+    // la agregó la migración 037.
+    no_requerida: '<span class="pill esp">No hizo falta</span>',
+    cancelada:  '<span class="pill no">Cancelada</span>',
   };
+
+  /** Fecha y hora cortas. Quién firmó sin cuándo no sirve para reclamar nada. */
+  function cuando(s) {
+    try {
+      return new Date(s).toLocaleString('es', {
+        day: '2-digit', month: 'short', hour: '2-digit', minute: '2-digit',
+      });
+    } catch (e) { return ''; }
+  }
 
   async function abrirCircuito(circuitoId) {
     try {
@@ -785,8 +874,28 @@
   function pintarCircuito(circuitoId, j) {
     var c = j.circuito;
     var parts = j.participaciones || [];
+    var representables = j.representables || [];
     var enviado = c.estado !== 'borrador';
     var serie = c.modo === 'serie';
+
+    // El turno lo tienen sólo los firmantes: una copia informativa se notifica
+    // al despachar y no hace esperar a nadie. Por eso las flechas se calculan
+    // sobre esta lista y no sobre `parts`.
+    var enFila = parts.filter(function (p) { return p.papel === 'firmante'; })
+                      .sort(function (a, b) { return a.orden - b.orden; });
+    var minOrden = enFila.length ? enFila[0].orden : 0;
+    var maxOrden = enFila.length ? enFila[enFila.length - 1].orden : 0;
+
+    // «Le toca ahora» = los abiertos del orden más bajo que sigue abierto. Es
+    // la misma regla que usa el despacho, avisarAlQueSigue y la lista: si acá
+    // se escribiera distinta, la pantalla diría una cosa y el correo saldría
+    // para otra.
+    var abiertos = enFila.filter(function (p) {
+      return ['firmada', 'no_requerida', 'delegada', 'rechazada'].indexOf(p.estado) < 0;
+    });
+    var turno = abiertos.length ? abiertos[0].orden : null;
+    var esperandoA = abiertos.filter(function (p) { return p.orden === turno; })
+                             .map(function (p) { return p.id; });
 
     var filas = parts.length
       ? parts.map(function (p) {
@@ -795,9 +904,72 @@
             (serie ? '<b style="color:var(--mut)">' + p.orden + '.</b> ' : '') +
             '<b>' + esc(p.nombre || p.email) + '</b>' +
             (p.nombre ? '<br><span style="font-size:12.5px;color:var(--mut)">' + esc(p.email) + '</span>' : '') +
+
+            // ═══ CON QUÉ CARÁCTER FIRMA ═══
+            //
+            // ⚠ Sólo se MUESTRA. No lo elige el emisor: es una afirmación sobre
+            // quién es esa persona —«firmo en nombre de tal empresa»— y nadie
+            // puede hacerla por otro. La declara ella en la pantalla de firma,
+            // y sólo si tiene alguna membresía activa; el resto firma a título
+            // personal sin que se le pregunte nada.
+            //
+            // Acá estuvo mal un rato: se le ofrecía al emisor «en representación
+            // de <su propia empresa>» para cualquier firmante, con el argumento
+            // de que el documento caía en su propio repositorio y por lo tanto
+            // no había daño. El argumento era sobre el daño y la regla es sobre
+            // la verdad.
+            (p.papel === 'firmante'
+              ? '<br><span style="font-size:12px;color:var(--mut)">' +
+                (p.caracter === 'representacion'
+                  ? 'Firma por <b>' + esc(p.representada || 'una empresa') + '</b>'
+                  : p.caracter === 'personal'
+                  ? 'A título personal'
+                  : 'Lo declara al firmar') + '</span>'
+              : '') +
             '</td><td style="padding:9px 0;border-bottom:1px solid var(--line)">' +
             (p.papel === 'firmante' ? '' : '<span class="pill no">' + esc(p.papel) + '</span> ') +
             (ESTADO_PART[p.estado] || esc(p.estado)) +
+            // La fecha de la firma. Es lo que se mira cuando hay que decir
+            // «esto se firmó el martes», y estaba en la respuesta sin usar.
+            (p.estado === 'firmada' && p.firmada_en
+              ? '<br><span style="font-size:12px;color:var(--mut)">' + esc(cuando(p.firmada_en)) + '</span>'
+              : '') +
+            (p.estado === 'rechazada' && p.motivo_rechazo
+              ? '<br><span style="font-size:12px;color:var(--danger)">' + esc(p.motivo_rechazo) + '</span>'
+              : '') +
+            // A quién le toca AHORA. Sin esto, tres filas en «Notificada» se
+            // ven iguales y no se sabe cuál está trabada.
+            (enviado && esperandoA.indexOf(p.id) >= 0
+              ? '<br><span class="pill esp" style="margin-top:4px;display:inline-block">Le toca ahora</span>'
+              : '') +
+
+            // ═══ EL AVISO: salió, falló, o todavía no le toca ═══
+            //
+            // Son tres situaciones y el estado 'pendiente' las mezclaba dos. La
+            // diferencia entre «esperá» y «llamalo por teléfono» es justamente
+            // ésta, y hasta ahora había que abrir el expediente para saberla.
+            (enviado
+              ? (p.aviso_error
+                  ? '<br><span class="pill no" style="background:#fef3f2;color:var(--danger);' +
+                    'margin-top:4px;display:inline-block">El aviso no salió</span>' +
+                    '<br><span style="font-size:11.5px;color:var(--danger)">' +
+                    esc(p.aviso_error) + '</span>'
+                  : p.aviso_en
+                  ? '<br><span style="font-size:12px;color:var(--mut)">Aviso enviado ' +
+                    esc(cuando(p.aviso_en)) + '</span>'
+                  : esperandoA.indexOf(p.id) >= 0
+                  // Le toca y nunca salió el aviso: no es que esté esperando,
+                  // es que nunca se enteró. Sin esto el emisor espera para
+                  // siempre la firma de alguien que no sabe que existe.
+                  ? '<br><span class="pill no" style="background:#fef3f2;color:var(--danger);' +
+                    'margin-top:4px;display:inline-block">Nunca se le avisó</span>'
+                  : '<br><span style="font-size:12px;color:var(--mut)">Le avisamos cuando le toque</span>')
+              : '') +
+
+            (p.abierto_en && p.estado !== 'firmada'
+              ? '<br><span style="font-size:12px;color:var(--mut)">Lo abrió ' +
+                esc(cuando(p.abierto_en)) + '</span>'
+              : '') +
             '</td><td style="padding:9px 0;border-bottom:1px solid var(--line);text-align:right">' +
             (enviado
               ? (p.estado === 'firmada' || p.estado === 'rechazada'
@@ -807,7 +979,16 @@
               // despacho no se mueve, porque el firmante ya vio dónde iba. Lo
               // decide `app.puede_definir_marcas`; acá sólo se oculta el botón.
               : (p.papel === 'firmante'
-                  ? '<button class="btn btn-s chico" data-marcas="' + esc(p.id) + '" ' +
+                  ? (serie
+                      // Subir y bajar en vez de arrastrar: funciona con el dedo,
+                      // con el teclado y con un lector de pantalla, y no hay
+                      // forma de soltar la fila en un lugar que no existe.
+                      ? '<button class="btn btn-s chico" data-subir="' + esc(p.id) + '" ' +
+                        'title="Que firme antes"' + (p.orden === minOrden ? ' disabled' : '') + '>↑</button> ' +
+                        '<button class="btn btn-s chico" data-bajar="' + esc(p.id) + '" ' +
+                        'title="Que firme después"' + (p.orden === maxOrden ? ' disabled' : '') + '>↓</button> '
+                      : '') +
+                    '<button class="btn btn-s chico" data-marcas="' + esc(p.id) + '" ' +
                     'data-inst="' + esc(p.instancia_id) + '" ' +
                     'data-quien="' + esc(p.nombre || p.email) + '">Ubicar firma</button> '
                   : '') +
@@ -822,9 +1003,23 @@
       '<h2>' + esc(c.titulo) + '</h2>' +
       '<p class="sub">' +
       (enviado
-        ? 'Ya se envió. El camino de firmas no se puede cambiar: la base lo congela después del despacho.'
+        ? (function () {
+            // El resumen de una línea: cuántos van y a quién se está esperando.
+            // Es lo primero que se busca al abrir esto, y tenerlo que contar
+            // fila por fila en un documento de doce firmantes no es leerlo.
+            var hechos = enFila.filter(function (x) { return x.estado === 'firmada'; }).length;
+            var faltan = enFila.filter(function (x) { return esperandoA.indexOf(x.id) >= 0; })
+                               .map(function (x) { return x.nombre || x.email; });
+            return '<b>' + hechos + ' firmaron de ' + enFila.length + '</b>' +
+              (faltan.length ? ' · esperando a ' + esc(faltan.join(', ')) : '') +
+              '<br>El camino de firmas no se puede cambiar: la base lo congela después del despacho.';
+          })()
         : 'Agregá a quién tiene que firmar y en qué orden. Ninguno necesita tener cuenta en MiFirma. ' +
-          'Si el que firma sos vos, agregate con tu correo.') +
+          'Si el que firma sos vos, agregate con tu correo.<br><br>' +
+          'Debajo de cada uno vas a ver <b>con qué carácter firma</b>. No lo elegís vos: lo ' +
+          'declara la persona al firmar, y sólo se le pregunta si pertenece a alguna empresa ' +
+          'del sistema. Es lo que decide si el documento queda en su repositorio o en el de ' +
+          'esa empresa.') +
       '</p>' +
       (enviado ? '' :
         '<p class="pista" style="margin:-10px 0 0">Con <b>Ubicar firma</b>, en la fila de cada uno, ' +
@@ -846,8 +1041,8 @@
               (String(c.dias_vigencia || '') === o[0] ? ' selected' : '') + '>' + o[1] + '</option>';
           }).join('') +
         '</select></div></div>' +
-        '<p class="pista">En serie, cada uno recibe el aviso cuando firma el anterior. ' +
-        'A la vez, les llega a todos junto.</p>') +
+        '<p class="pista">En serie, cada uno recibe el aviso <b>cuando firma el anterior</b>, no antes. ' +
+        'Con las flechas de cada fila cambiás el turno. A la vez, les llega a todos junto.</p>') +
 
       '<table style="width:100%;margin-top:18px"><tbody id="mParts">' + filas + '</tbody></table>' +
 
@@ -862,11 +1057,42 @@
       '<div id="msgModal"></div>' +
       '<div class="acc">' +
       '<button class="btn btn-s" id="mCancel">' + (enviado ? 'Cerrar' : 'Después') + '</button>' +
+      // Reenviar sin salir de la lista: es acá donde se descubre que a alguien
+      // no le llegó, y cerrar el modal para apretar el mismo botón afuera es
+      // hacerle perder de vista lo que acaba de leer.
+      //
+      // Reenvía SÓLO a quien le toca ahora —mismo criterio que el despacho— así
+      // que no adelanta el turno de nadie.
+      (enviado && c.estado === 'enviado'
+        ? '<button class="btn btn-s" id="mReenviar">Reenviar aviso</button>'
+        : '') +
       (enviado ? '' : '<button class="btn btn-p" id="mEnviar">Enviar a firmar</button>') +
       '</div>'
     );
 
     $('mCancel').addEventListener('click', function () { cerrarModal(); cargarDocumentos(); });
+
+    if ($('mReenviar')) {
+      $('mReenviar').addEventListener('click', async function () {
+        var b = $('mReenviar');
+        b.disabled = true; b.textContent = 'Enviando…';
+        try {
+          var r = await api('/circuitos/' + circuitoId + '/reenviar', 'POST');
+          if (r.fallidos && r.fallidos.length) {
+            msg('msgModal', 'Sigue sin salir a: ' +
+              r.fallidos.map(function (f) { return f.email; }).join(', '), 'err');
+            b.disabled = false; b.textContent = 'Reenviar aviso';
+          } else {
+            // Se recarga la lista: los carteles de aviso cambian y hay que
+            // verlos cambiar, no que lo diga un texto.
+            abrirCircuito(circuitoId);
+          }
+        } catch (e) {
+          msg('msgModal', e.message, 'err');
+          b.disabled = false; b.textContent = 'Reenviar aviso';
+        }
+      });
+    }
 
     // El enlace personal de firma. Se copia al portapapeles y se muestra, porque
     // en algunos navegadores el portapapeles falla en silencio y quedarse sin el
@@ -890,6 +1116,31 @@
           $('mCancel').addEventListener('click', function () { cerrarModal(); cargarDocumentos(); });
         } catch (e) { msg('msgModal', e.message, 'err'); b.disabled = false; }
       });
+    });
+
+    /**
+     * Mover a alguien un lugar en la fila.
+     *
+     * Se manda la lista ENTERA y no «subí a éste»: la posición depende de qué
+     * había cuando la pantalla se dibujó, y el servidor rechaza la lista si ya
+     * no coincide con lo que hay. Es lo que evita aplicar media reordenada.
+     */
+    async function mover(pid, paso) {
+      var ids = enFila.map(function (p) { return p.id; });
+      var i = ids.indexOf(pid);
+      var j = i + paso;
+      if (i < 0 || j < 0 || j >= ids.length) return;
+      var tmp = ids[i]; ids[i] = ids[j]; ids[j] = tmp;
+      try {
+        await api('/circuitos/' + circuitoId + '/orden', 'PUT', { participaciones: ids });
+        abrirCircuito(circuitoId);
+      } catch (e) { msg('msgModal', e.message, 'err'); }
+    }
+    $('modal').querySelectorAll('[data-subir]').forEach(function (b) {
+      b.addEventListener('click', function () { mover(b.dataset.subir, -1); });
+    });
+    $('modal').querySelectorAll('[data-bajar]').forEach(function (b) {
+      b.addEventListener('click', function () { mover(b.dataset.bajar, 1); });
     });
 
     $('modal').querySelectorAll('[data-quitar]').forEach(function (b) {

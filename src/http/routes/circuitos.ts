@@ -5,12 +5,14 @@ import {
   verCircuito,
   agregarFirmante,
   quitarFirmante,
+  reordenarFirmantes,
   configurarCircuito,
   despachar,
   cancelar,
   reenviarAvisos,
   enlaceDeFirma,
 } from '../../services/circuito';
+import { listarCampos, definirCampos } from '../../services/campos';
 
 /**
  * Preparación y despacho de un circuito de firma.
@@ -69,6 +71,22 @@ export function registrarRutasCircuitos(app: FastifyInstance) {
     });
   });
 
+  /**
+   * El orden de firma, entero y de una vez.
+   *
+   * Recibe la lista completa y no «subí éste»: la posición depende de qué había
+   * cuando la pantalla se dibujó, y entre eso y el clic pudo entrar otro
+   * firmante. Si lo que llega no coincide con lo que hay, se rechaza entero.
+   */
+  app.put('/circuitos/:id/orden', async (req) => {
+    const { id } = z.object({ id: z.string().uuid() }).parse(req.params);
+    const b = z
+      .object({ participaciones: z.array(z.string().uuid()).min(1).max(200) })
+      .parse(req.body);
+    const { cuentaId, identidadId } = req.identidad;
+    return reordenarFirmantes(cuentaId, identidadId, id, b.participaciones);
+  });
+
   app.delete('/circuitos/:id/firmantes/:pid', async (req) => {
     const p = z.object({ id: z.string().uuid(), pid: z.string().uuid() }).parse(req.params);
     const { cuentaId, identidadId } = req.identidad;
@@ -77,6 +95,38 @@ export function registrarRutasCircuitos(app: FastifyInstance) {
 
   // El acto. A partir de acá el circuito está congelado y hay gente afuera con
   // un enlace en la mano.
+  // ---- Campos del documento ----
+  //
+  // Se manda el juego COMPLETO, no altas y bajas: la pantalla envía lo que
+  // quedó después de arrastrar. Reconciliar fila por fila desde el navegador es
+  // la clase de sincronización que se desincroniza.
+  app.get('/circuitos/:id/campos', async (req) => {
+    const { id } = z.object({ id: z.string().uuid() }).parse(req.params);
+    const { cuentaId, identidadId } = req.identidad;
+    return listarCampos(cuentaId, identidadId, id);
+  });
+
+  app.put('/circuitos/:id/campos', async (req) => {
+    const { id } = z.object({ id: z.string().uuid() }).parse(req.params);
+    const b = z.object({
+      campos: z.array(z.object({
+        codigo: z.string().min(1).max(60),
+        etiqueta: z.string().min(1).max(120),
+        tipo: z.enum(['texto','parrafo','numero','fecha','moneda','casilla','opcion']),
+        opciones: z.array(z.string().max(120)).max(50).optional().nullable(),
+        completa_emisor: z.boolean().optional(),
+        orden_firmante: z.number().int().min(1).max(99).optional().nullable(),
+        obligatorio: z.boolean().optional(),
+        pagina: z.number().int().min(0).max(2000),
+        x: z.number(), y: z.number(),
+        ancho: z.number().positive(), alto: z.number().positive(),
+        orden: z.number().int().optional(),
+      })).max(200),
+    }).parse(req.body);
+    const { cuentaId, identidadId } = req.identidad;
+    return definirCampos(cuentaId, identidadId, id, b.campos as any);
+  });
+
   // Cancelar un documento en curso. Motivo obligatorio: va al expediente y es
   // lo que el firmante va a leer en el aviso.
   app.post('/circuitos/:id/cancelar', async (req) => {

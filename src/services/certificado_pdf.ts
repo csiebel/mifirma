@@ -105,6 +105,8 @@ const ETIQUETA: Record<string, string> = {
   'firma.sellada': 'Sello de tiempo',
   'sello.fallido': 'El sello NO se pudo obtener',
   'firma.representacion_visual': 'Marca autógrafa',
+  'firma.marca_agregada': 'Colocó su marca',
+  'firma.marca_quitada': 'Quitó una marca suya',
   'firma.marca_movida': 'Movió su marca',
   'firma.rechazada': 'Rechazó firmar',
   'circuito.completo': 'Circuito completo',

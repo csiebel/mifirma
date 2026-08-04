@@ -120,7 +120,8 @@
   /* ---------- modal ---------- */
   .fondo{position:fixed;inset:0;background:rgba(6,18,30,.55);display:grid;place-items:center;padding:24px;z-index:80;overflow:auto}
   .modal{background:var(--paper);border-radius:16px;padding:28px;width:100%;max-width:560px;
-         box-shadow:0 24px 60px rgba(0,0,0,.3);margin:auto}
+         box-shadow:0 24px 60px rgba(0,0,0,.3);margin:auto;
+         max-height:calc(100vh - 48px);max-height:calc(100dvh - 48px);overflow:auto}
   .modal h2{font-size:19px;margin:0 0 6px}
   .modal p.sub{color:var(--mut);font-size:14px;margin:0 0 18px}
   .modal .acc{margin-top:24px;justify-content:flex-end}

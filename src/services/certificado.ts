@@ -271,25 +271,72 @@ export async function emitirCertificado(instanciaId: string): Promise<{ archivoI
   });
 }
 
-/** El PDF del certificado, para descargarlo. */
+/**
+ * El PDF del certificado, para descargarlo.
+ *
+ * ═══ SI NO ESTÁ, SE EMITE ACÁ ═══
+ *
+ * `firmar()` lo emite al cerrarse el circuito, pero adentro de un `try` que se
+ * traga el error a propósito: perder el correo del documento firmado porque no
+ * se pudo dibujar un PDF de resumen sería el peor de los canjes. El comentario
+ * de ese `catch` decía «se emite a pedido cuando alguien lo descargue» —y esa
+ * segunda oportunidad no existía—. El resultado era un botón «Certificado» que
+ * aparecía sólo en los documentos completos y contestaba que el documento no
+ * estaba completo. Una promesa escrita en un comentario no es código.
+ *
+ * ⚠ Sólo se emite si el circuito está CERRADO. Un certificado de un documento a
+ * medio firmar sería un documento que afirma algo que no pasó, y como es
+ * inmutable quedaría afirmándolo para siempre.
+ */
 export async function bajarCertificado(cuentaId: string, identidadId: string, instanciaId: string) {
-  const datos = await withUsuario(cuentaId, identidadId, async (trx) => {
-    const r = await sql<{ clave: string; titulo: string }>`
-      select a.clave_almacenamiento as clave, c.titulo
-        from certificado_finalizacion cf
-        join archivo a on a.id = cf.archivo_id
-        join circuito c on c.id = cf.circuito_id
-       where cf.instancia_id = ${instanciaId}::uuid
-    `.execute(trx);
-    return r.rows[0] ?? null;
-  });
+  const buscar = () =>
+    withUsuario(cuentaId, identidadId, async (trx) => {
+      const r = await sql<{ clave: string; titulo: string }>`
+        select a.clave_almacenamiento as clave, c.titulo
+          from certificado_finalizacion cf
+          join archivo a on a.id = cf.archivo_id
+          join circuito c on c.id = cf.circuito_id
+         where cf.instancia_id = ${instanciaId}::uuid
+      `.execute(trx);
+      return r.rows[0] ?? null;
+    });
+
+  let datos = await buscar();
 
   if (!datos) {
-    throw new HttpError(
-      404,
-      'Este documento todavía no tiene certificado de finalización. Se emite cuando ' +
-        'termina de firmarlo la última persona.',
-    );
+    // ⚠ Se comprueba con la sesión del que pide —no como sistema— para no
+    // convertir esto en una forma de averiguar si existe una instancia ajena.
+    const estado = await withUsuario(cuentaId, identidadId, async (trx) => {
+      const r = await sql<{ instancia: string; circuito: string }>`
+        select i.estado as instancia, c.estado as circuito
+          from instancia i join circuito c on c.id = i.circuito_id
+         where i.id = ${instanciaId}::uuid
+      `.execute(trx);
+      return r.rows[0] ?? null;
+    });
+
+    if (!estado) throw new HttpError(404, 'Ese documento no existe o no lo podés ver.');
+
+    if (estado.instancia !== 'firmada') {
+      throw new HttpError(
+        409,
+        'Este documento todavía no tiene certificado de finalización. Se emite cuando ' +
+          'termina de firmarlo la última persona.',
+      );
+    }
+
+    // Está cerrado y no tiene certificado: es la emisión que falló en su
+    // momento. Se hace ahora, que es exactamente lo que prometía el comentario.
+    await emitirCertificado(instanciaId);
+    datos = await buscar();
+
+    if (!datos) {
+      throw new HttpError(
+        500,
+        'No pudimos emitir el certificado de este documento. Ya estamos avisados.',
+      );
+    }
   }
+
   return { contenido: await almacen().leer(datos.clave), nombre: `Certificado — ${datos.titulo}.pdf` };
 }

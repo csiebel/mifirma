@@ -75,6 +75,11 @@ const ROLES_BASE = [
       ['lote', 'despachar'],
       ['cuenta', 'administrar'],
       ['usuario', 'administrar'],
+      // ⚠ Sólo el administrador, y NO el emisor. Poder mandar documentos no
+      // dice nada sobre poder obligar a la empresa: son dos permisos y hasta la
+      // migración 048 venían juntos sin que nadie lo hubiera decidido. Quien
+      // abre la cuenta puede representarla, y él decide a quién más.
+      ['empresa', 'representar'],
       ['facturacion', 'leer'],
       ['bitacora', 'leer'],
     ],

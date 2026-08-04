@@ -69,6 +69,11 @@
       display:grid;place-items:center;font-size:12.5px;font-weight:700;flex:none}
   .pers b{display:block;font-weight:600;font-size:14.5px}
   .pers span{color:var(--mut);font-size:13px}
+  /* El selector de carácter de firma. Rojo mientras esté sin elegir: no es una
+     validación de formulario, es la decisión que no se puede corregir después. */
+  select.caracter{font:inherit;border:1.5px solid var(--line);border-radius:8px;background:#fff}
+  select.caracter:focus{outline:2px solid var(--brand-600);outline-offset:-1px}
+
   .pill{display:inline-block;font-size:12px;font-weight:600;padding:3px 10px;border-radius:999px;margin:2px 4px 2px 0}
   .pill.rol{background:var(--brand-50);color:var(--brand-600)}
   .pill.ok{background:var(--acc-50);color:var(--acc-700)}
@@ -143,12 +148,25 @@
 
   /* ---------- modal ---------- */
   .fondo{position:fixed;inset:0;background:rgba(11,30,44,.45);display:grid;place-items:center;padding:24px;z-index:80}
+  /* ⚠ `max-height` + `overflow` no son un detalle de estilo.
+     `.fondo` centra con `place-items:center`, y un hijo más alto que la
+     ventana se desborda POR ARRIBA Y POR ABAJO en partes iguales. Como el
+     fondo es `position:fixed`, esas partes no se pueden alcanzar con scroll:
+     quedan fuera de la pantalla y no hay forma de llegar a ellas.
+     Lo que se pierde es siempre el pie del modal, que es justo donde están los
+     botones — «Enviar a firmar» entre ellos. Pasó de verdad con el modal de
+     preparación apenas tuvo dos firmantes cargados.
+     dvh y no vh: en Safari de iPhone, `vh` cuenta la barra de direcciones que
+     no está, y el pie vuelve a quedar tapado. */
   .modal{background:var(--paper);border-radius:16px;padding:28px;width:100%;max-width:440px;
-         box-shadow:0 24px 60px rgba(11,43,74,.24)}
+         box-shadow:0 24px 60px rgba(11,43,74,.24);
+         max-height:calc(100vh - 48px);
+         max-height:calc(100dvh - 48px);
+         overflow:auto}
   /* El visor: casi toda la pantalla, porque lo que se mira es un A4 y una
      ventanita obliga a hacer zoom para leer lo que se está por firmar. */
   .modal.visor{max-width:min(1080px,94vw);padding:0;display:flex;flex-direction:column;
-               height:min(92vh,1000px)}
+               height:min(92vh,1000px);overflow:hidden}
   .modal.visor .cabVisor{display:flex;align-items:center;justify-content:space-between;
                          gap:14px;padding:14px 18px;border-bottom:1px solid var(--line)}
   .modal.visor iframe{flex:1;width:100%;border:0;background:var(--soft)}
