@@ -369,6 +369,7 @@ export async function listarDocumentos(
       bytes: string; paginas: number | null; creado_en: Date;
       instancias: string; firmas_total: string; firmas_hechas: string;
       esperando: string | null;
+      puedo_firmar: boolean;
       sin_avisar: string; cadena_rota: boolean; origen: string;
     }>`
       select c.id as circuito_id, c.titulo, u.carpeta_id,
@@ -438,7 +439,29 @@ export async function listarDocumentos(
                    select min(p2.orden) from participacion p2
                     where p2.circuito_id = c.id and p2.papel = 'firmante'
                       and p2.estado not in ('firmada','no_requerida','delegada','rechazada')
-                 )) as esperando
+                 )) as esperando,
+
+             -- ¿ESTE documento me está pidiendo la firma A MÍ, y ahora?
+             --
+             -- Sin esto, quien tiene cuenta ve el documento en Recibidos, lo
+             -- puede abrir y descargar, y para firmarlo tiene que ir a buscar
+             -- el correo. Un producto de firma en el que estar registrado no
+             -- te deja firmar.
+             --
+             -- Mismo criterio de turno que todo lo demás: el orden más bajo que
+             -- sigue abierto.
+             exists (
+               select 1 from participacion pm
+                where pm.instancia_id = iu.id
+                  and pm.identidad_id = any (app.identidades_del_actor())
+                  and pm.papel = 'firmante'
+                  and pm.estado in ('pendiente','notificada','vista')
+                  and c.estado = 'enviado'
+                  and pm.orden = (
+                    select min(p3.orden) from participacion p3
+                     where p3.instancia_id = pm.instancia_id and p3.papel = 'firmante'
+                       and p3.estado not in ('firmada','no_requerida','delegada','rechazada'))
+             ) as puedo_firmar
         from ubicacion u
         left join carpeta cu on cu.id = u.carpeta_id
         left join instancia iu on iu.id = u.instancia_id
@@ -459,6 +482,7 @@ export async function listarDocumentos(
       firmas_total: Number(f.firmas_total),
       firmas_hechas: Number(f.firmas_hechas),
       esperando: f.esperando,
+      puedo_firmar: f.puedo_firmar,
       sin_avisar: Number(f.sin_avisar),
     }));
   });

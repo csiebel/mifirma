@@ -11,6 +11,7 @@ import {
 } from '../../services/repositorio';
 import { expediente, verificarCadena } from '../../services/evidencia';
 import { bajarCertificado } from '../../services/certificado';
+import { miEnlaceDeFirma } from '../../services/circuito';
 import { listarBitacora } from '../../services/auditoria';
 import {
   guardarFirmaVisual,
@@ -195,6 +196,18 @@ export function registrarRutasRepositorio(app: FastifyInstance) {
   // una por empresa donde trabaja. Por eso estas rutas no reciben ni miran a
   // qué cuenta pertenece el que las llama más allá de lo que exige la sesión.
   // ==========================================================================
+
+  /**
+   * Mi enlace para firmar un documento que me llegó.
+   *
+   * Va en el repositorio y no en /circuitos porque no es una acción del emisor
+   * sobre su envío: es la de alguien sobre un documento de su bandeja.
+   */
+  app.post('/documentos/:id/firmar', async (req) => {
+    const { id } = z.object({ id: z.string().uuid() }).parse(req.params);
+    const { cuentaId, identidadId } = req.identidad;
+    return miEnlaceDeFirma(cuentaId, identidadId, id);
+  });
 
   app.get('/mi/firma-visual', async (req) => {
     const { cuentaId, identidadId } = req.identidad;

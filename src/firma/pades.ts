@@ -130,6 +130,51 @@ export async function normalizar(pdf: Buffer): Promise<Buffer> {
       );
     }
     acro.delete(PDFName.of('NeedAppearances'));
+
+    // ═══ ⚠ Y LOS CAMPOS DEL CLIENTE QUEDAN DE SÓLO LECTURA ═══
+    //
+    // Un PDF con AcroForm **sigue siendo editable después de firmado**. Los
+    // campos son anotaciones interactivas: quien reciba el documento firmado lo
+    // abre en cualquier lector, escribe en «Razón social» y lo guarda. La firma
+    // sigue verificando y el documento se ve distinto del que se firmó. Es el
+    // peor resultado que puede dar este producto: un documento que se ve
+    // distinto y verifica bien.
+    //
+    // Está escrito desde el 30 de julio en `campos-sobre-el-pdf.md` §4.3 como
+    // regla que no admite atajos, y hasta hoy no lo hacía nadie. Se vio al mirar
+    // el primer documento firmado con formulario de verdad: doce campos, todos
+    // vacíos y todos editables, abajo de los valores que sí habíamos dibujado.
+    //
+    // Acá es el único lugar donde se puede hacer. `normalizar` corre una sola
+    // vez, antes de que exista ninguna firma: bloquear no rompe ninguna, y el
+    // resultado queda adentro del ByteRange de la primera.
+    //
+    // ⚠ Los campos de FIRMA no se tocan. Un `/FT /Sig` es un hueco reservado
+    // para firmar, no un dato: bloquearlo sería impedir que alguien firme
+    // justo donde el documento pide que se firme.
+    //
+    // Esto no le quita nada al producto: los valores no se capturan en el
+    // formulario del PDF sino en la pantalla del firmante, y se escriben como
+    // widgets propios adentro del incremento de su firma. El formulario que
+    // viene en el archivo es el molde, no el cuaderno.
+    let bloqueados = 0;
+    try {
+      for (const campo of doc.getForm().getFields()) {
+        if ((campo.constructor?.name ?? '').includes('Signature')) continue;
+        campo.enableReadOnly();
+        bloqueados++;
+      }
+    } catch {
+      // Un formulario que no se deja bloquear no es motivo para rechazar el
+      // documento: se firma igual y queda como estaba. Perder la firma por esto
+      // sería peor que el riesgo que evita.
+    }
+    if (bloqueados) {
+      // Queda dicho: es un cambio sobre el archivo del cliente y tiene que
+      // poder explicarse si alguien pregunta por qué su formulario ya no se
+      // escribe.
+      console.info(`[pades] formulario del cliente: ${bloqueados} campo(s) a sólo lectura antes de firmar`);
+    }
   }
 
   try {

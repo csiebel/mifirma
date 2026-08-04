@@ -203,7 +203,7 @@ export function construirServidor(): FastifyInstance {
 
   // JavaScript de las páginas públicas. Se sirve como archivo suelto, igual que
   // el HTML: para dos archivos no vale la pena montar un servidor de estáticos.
-  for (const js of ['sitio.js', 'entrar.js', 'consola.js', 'operador.js', 'firmar.js', 'marcas.js', 'rubrica.js', 'visor.js']) {
+  for (const js of ['sitio.js', 'entrar.js', 'consola.js', 'operador.js', 'firmar.js', 'marcas.js', 'rubrica.js', 'visor.js', 'campos.js']) {
     app.get('/' + js, async (_req, reply) => {
       try {
         const ruta = new URL('../public/' + js, import.meta.url);
@@ -302,6 +302,7 @@ export function construirServidor(): FastifyInstance {
     '/operador.js',
     '/firmar.js',
     '/marcas.js',
+    '/campos.js',
     '/rubrica.js',
     '/visor.js',
     '/vendor/pdf.min.mjs',
@@ -330,6 +331,8 @@ export function construirServidor(): FastifyInstance {
     '/firmar/caracter/declarar',
     '/firmar/marcas',
     '/firmar/marca/agregar',
+    '/firmar/marca/todas',
+    '/firmar/marca/limpiar',
     '/firmar/marca/quitar',
     '/manifest.webmanifest',
     '/manifest-empleado.webmanifest',

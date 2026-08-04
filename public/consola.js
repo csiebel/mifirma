@@ -115,6 +115,56 @@
     return m ? decodeURIComponent(m[1]) : '';
   }
 
+  /* =========================================================================
+     «¿Se colgó, o está trabajando?»
+
+     Firmar tarda: hay que pedir un sello de tiempo a una autoridad externa,
+     armar el PKCS#7 y escribir el PDF. Despachar tarda: sale un correo por
+     firmante. Ocho segundos con la pantalla quieta y sin nada que se mueva son
+     indistinguibles de un botón roto, y lo que hace la persona es apretar de
+     nuevo — que en un despacho significa mandar el documento dos veces.
+
+     ⚠ Va acá adentro y no en cada botón. Por `api()` pasan todas las llamadas
+     de la consola, así que una sola cuenta cubre todas las pantallas, las de
+     hoy y las que se agreguen. Un indicador que hay que acordarse de poner en
+     cada botón nuevo es un indicador que en tres pantallas no va a estar.
+
+     ⚠ Y espera 180 ms antes de aparecer. La mayoría de las llamadas vuelven
+     antes; una barra que parpadea en cada tecleo es ruido que se aprende a
+     ignorar, y entonces tampoco se ve cuando importa.
+     ======================================================================== */
+  var enVuelo = 0;
+  var temporizador = null;
+
+  function barra() {
+    var b = document.getElementById('trabajando');
+    if (b) return b;
+    b = document.createElement('div');
+    b.id = 'trabajando';
+    b.className = 'trabajando';
+    b.setAttribute('role', 'status');
+    b.setAttribute('aria-label', 'Trabajando');
+    document.body.appendChild(b);
+    return b;
+  }
+
+  function empezoAlgo() {
+    enVuelo++;
+    if (temporizador || enVuelo > 1) return;
+    temporizador = setTimeout(function () {
+      temporizador = null;
+      if (enVuelo > 0) barra().classList.add('visible');
+    }, 180);
+  }
+
+  function terminoAlgo() {
+    enVuelo = Math.max(0, enVuelo - 1);
+    if (enVuelo > 0) return;
+    if (temporizador) { clearTimeout(temporizador); temporizador = null; }
+    var b = document.getElementById('trabajando');
+    if (b) b.classList.remove('visible');
+  }
+
   async function api(path, method, body) {
     var opt = { method: method || 'GET', credentials: 'same-origin', headers: {} };
     if (opt.method !== 'GET') {
@@ -125,7 +175,16 @@
       opt.headers['Content-Type'] = 'application/json';
       opt.body = JSON.stringify(body);
     }
-    var r = await fetch(path, opt);
+    empezoAlgo();
+    var r;
+    try {
+      r = await fetch(path, opt);
+    } finally {
+      // En el `finally`: si la red se cae, la barra tiene que irse igual. Una
+      // barra de progreso que queda girando para siempre miente peor que no
+      // tener ninguna.
+      terminoAlgo();
+    }
     // 401 es "no hay sesión", no un error de la pantalla: no tiene sentido
     // mostrar un cartel rojo en una consola a la que ya no se puede entrar.
     if (r.status === 401) { location.href = '/entrar'; throw new Error('Sesión vencida.'); }
@@ -134,6 +193,30 @@
     try { data = txt ? JSON.parse(txt) : {}; } catch (e) { data = { error: txt }; }
     if (!r.ok) throw new Error(data.error || data.message || ('HTTP ' + r.status));
     return data;
+  }
+
+  /**
+   * El botón que se apretó dice qué está haciendo, y no se deja apretar dos veces.
+   *
+   * La barra de arriba dice que la aplicación trabaja; esto dice CUÁL de los
+   * tres botones de la pantalla es el que está trabajando. Hacen falta las dos:
+   * con sólo la barra, quien apretó «Enviar» no sabe si le tomó el clic.
+   *
+   *   var listo = ocupar($('mEnviar'), 'Enviando…');
+   *   try { … } finally { listo(); }
+   */
+  function ocupar(btn, texto) {
+    if (!btn) return function () {};
+    var antes = btn.textContent;
+    var estaba = btn.disabled;
+    btn.disabled = true;
+    if (texto) btn.textContent = texto;
+    btn.classList.add('ocupado');
+    return function () {
+      btn.disabled = estaba;
+      btn.textContent = antes;
+      btn.classList.remove('ocupado');
+    };
   }
 
   /**
@@ -486,9 +569,17 @@
           '<button class="btn ' + (d.circuito_estado === 'borrador' ? 'btn-p' : 'btn-s') +
             ' chico" data-circ="' + esc(d.circuito_id) + '">' +
             (d.circuito_estado === 'borrador' ? 'Preparar' : 'Firmantes') + '</button>' +
+          // ⚠ Va PRIMERO y en primario: si el documento me está pidiendo la
+          // firma a mí, eso es lo que vine a hacer. Hasta ahora firmar existía
+          // sólo en el enlace del correo, así que quien tenía cuenta veía el
+          // documento en Recibidos y tenía que ir a buscar el mail.
+          (d.puedo_firmar
+            ? '<button class="btn btn-p chico" data-firmar="' + esc(d.instancia_id) + '">Firmar</button>'
+            : '') +
           (d.circuito_estado === 'enviado'
-            ? '<button class="btn ' + (d.sin_avisar ? 'btn-p' : 'btn-s') + ' chico" data-reenv="' +
-              esc(d.circuito_id) + '">Reenviar aviso</button>' +
+            ? (d.origen === 'recibido' ? '' :
+                '<button class="btn ' + (d.sin_avisar ? 'btn-p' : 'btn-s') + ' chico" data-reenv="' +
+                esc(d.circuito_id) + '">Reenviar aviso</button>') +
               // Cancelar es sólo del que emitió: al que lo recibió para firmar
               // no le corresponde cerrarle el documento a los demás.
               (d.origen !== 'recibido'
@@ -593,6 +684,25 @@
     $('tDocumentos').querySelectorAll('[data-ver]').forEach(function (b) {
       b.addEventListener('click', function () { abrirVisor(b.dataset.ver, b.dataset.tit); });
     });
+    $('tDocumentos').querySelectorAll('[data-firmar]').forEach(function (b) {
+      b.addEventListener('click', async function () {
+        b.disabled = true;
+        var antes = b.textContent;
+        b.textContent = 'Abriendo…';
+        try {
+          // El enlace se pide al servidor y no se arma acá: el token es un
+          // puntero a una fila de otorgamiento y sólo el servidor sabe cuál es
+          // la vigente. Se abre en la misma pestaña — firmar no es una consulta
+          // de paso, es a lo que vino la persona.
+          var r = await api('/documentos/' + b.dataset.firmar + '/firmar', 'POST');
+          location.href = r.url;
+        } catch (e) {
+          msg('msgDocs', e.message, 'err');
+          b.disabled = false; b.textContent = antes;
+        }
+      });
+    });
+
     $('tDocumentos').querySelectorAll('[data-circ]').forEach(function (b) {
       b.addEventListener('click', function () { abrirCircuito(b.dataset.circ); });
     });
@@ -1046,6 +1156,15 @@
 
       '<table style="width:100%;margin-top:18px"><tbody id="mParts">' + filas + '</tbody></table>' +
 
+      // Los campos son del DOCUMENTO, no de cada firmante, así que van una vez
+      // y no en cada fila. Se abre aparte porque el editor es largo y este
+      // modal ya lo es.
+      (enviado ? '' :
+        '<button class="btn btn-s" id="mCampos" style="margin-top:14px">' +
+        'Campos a completar</button>' +
+        '<p class="pista">Datos que hay que llenar antes de firmar: un número de documento, ' +
+        'una fecha, una casilla. Si el PDF ya es un formulario, los detectamos solos.</p>') +
+
       (enviado ? '' :
         '<div class="dos" style="margin-top:16px">' +
         '<div><label class="campo" for="mEmail">Correo de quien firma</label>' +
@@ -1071,6 +1190,18 @@
     );
 
     $('mCancel').addEventListener('click', function () { cerrarModal(); cargarDocumentos(); });
+
+    if ($('mCampos')) {
+      $('mCampos').addEventListener('click', function () {
+        // El editor vive en campos.js: trae su propia lógica y no tiene por qué
+        // cargarse en cada visita a la consola.
+        if (window.abrirCamposDelDocumento) {
+          window.abrirCamposDelDocumento(circuitoId, enFila.map(function (p) {
+            return { orden: p.orden, nombre: p.nombre, email: p.email };
+          }));
+        }
+      });
+    }
 
     if ($('mReenviar')) {
       $('mReenviar').addEventListener('click', async function () {
@@ -1199,11 +1330,76 @@
       } catch (e) { msg('msgModal', e.message, 'err'); $('mAgregar').disabled = false; }
     });
 
+    /**
+     * ⚠ Antes de despachar: ¿el PDF trae campos que nadie adoptó?
+     *
+     * Pasó de verdad, con el primer formulario que se probó. El documento traía
+     * doce campos, no se adoptó ninguno, y salió igual. Quien lo recibió vio los
+     * doce recuadros dibujados —los dibuja el PDF, no nosotros— e intentó
+     * escribir en ellos. No se podía, y nada en ninguna pantalla lo había dicho:
+     * ni al subir, ni al preparar, ni al enviar.
+     *
+     * Lo que lo vuelve grave es que **no tiene arreglo después**. Los campos se
+     * definen sólo en borrador, porque una vez despachado hay gente notificada.
+     * O se avisa acá, o el documento se manda de nuevo.
+     *
+     * ⚠ Avisa, no bloquea. Un PDF puede traer campos que a propósito no se
+     * quieren usar —un formulario que se firma tal como vino, o que se completó
+     * antes en otro lado— y eso lo decide el emisor. Lo que no puede pasar es
+     * que lo decida sin saber que lo está decidiendo.
+     *
+     * ⚠ Y sólo cuando no se adoptó NINGUNO. Si adoptó cinco de doce, miró la
+     * lista y dejó siete afuera a propósito: repetirle la pregunta ahí sería
+     * discutirle una decisión que ya tomó.
+     *
+     * Devuelve true si se puede seguir.
+     */
+    async function revisarCamposSinUsar() {
+      var d;
+      try { d = await api('/circuitos/' + circuitoId + '/campos/detectar'); }
+      catch (e) { return true; }   // no se pudo leer el PDF: no es motivo para frenar un envío
+
+      var todos = d.campos || [];
+      var sinAdoptar = todos.filter(function (c) { return !c.ya_adoptado; });
+      if (!sinAdoptar.length) return true;
+      if (todos.length !== sinAdoptar.length) return true;
+
+      return new Promise(function (resolver) {
+        msg('msgModal',
+          'Este documento trae ' + sinAdoptar.length + ' campo(s) de formulario y no estás ' +
+          'usando ninguno. Quien lo reciba va a ver los recuadros dibujados en la hoja y no ' +
+          'va a poder escribir en ellos. Después de enviar ya no se pueden agregar.',
+          'aviso');
+        var acc = document.createElement('div');
+        acc.style.cssText = 'display:flex;gap:8px;margin-top:10px;flex-wrap:wrap';
+        acc.innerHTML =
+          '<button type="button" class="btn btn-p chico" id="mVerCampos">Ver los campos</button>' +
+          '<button type="button" class="btn btn-s chico" id="mIgual">Enviar igual</button>';
+        $('msgModal').appendChild(acc);
+
+        $('mVerCampos').addEventListener('click', function () {
+          resolver(false);
+          if (window.abrirCamposDelDocumento) {
+            window.abrirCamposDelDocumento(circuitoId, enFila.map(function (p) {
+              return { orden: p.orden, nombre: p.nombre, email: p.email };
+            }));
+          }
+        });
+        $('mIgual').addEventListener('click', function () {
+          msg('msgModal', '', '');
+          resolver(true);
+        });
+      });
+    }
+
     $('mEnviar').addEventListener('click', async function () {
       if (!parts.length) return msg('msgModal', 'Agregá al menos un firmante.', 'err');
-      $('mEnviar').disabled = true;
       msg('msgModal', '', '');
+      // Antes del aviso de campos el botón sólo se deshabilitaba: no decía nada,
+      // y despachar tarda lo que tardan los correos.
+      var listo = ocupar($('mEnviar'), 'Enviando…');
       try {
+        if (!(await revisarCamposSinUsar())) { listo(); return; }
         await guardarConfig();
         var r = await api('/circuitos/' + circuitoId + '/despachar', 'POST');
         cerrarModal();
@@ -1223,7 +1419,10 @@
         } else {
           msg('msgDocs', 'Enviado. Le avisamos a ' + r.notificados + ' persona(s).', 'ok');
         }
-      } catch (e) { msg('msgModal', e.message, 'err'); $('mEnviar').disabled = false; }
+      } catch (e) {
+        msg('msgModal', e.message, 'err');
+        listo();
+      }
     });
   }
 

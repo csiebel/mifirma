@@ -469,3 +469,155 @@ export async function misMarcas(token: string) {
     };
   });
 }
+
+/**
+ * La misma marca en todas las hojas, de una vez.
+ *
+ * ═══ POR QUÉ EXISTE ═══
+ *
+ * Porque el caso que motivó todo esto es el contrato largo: cuarenta hojas que
+ * hay que inicialar una por una para probar que se vieron todas. Hacerlo a mano
+ * son cuarenta toques y una probabilidad muy alta de saltearse una — y una hoja
+ * sin inicial en un contrato inicialado es exactamente lo que después se
+ * discute.
+ *
+ * El emisor ya tenía este atajo desde la 031 («Rubricar todas las hojas»). El
+ * firmante no, y es quien más lo necesita: el emisor lo hace una vez por
+ * documento; el firmante, una vez por documento que recibe.
+ *
+ * ⚠ Las coordenadas las calcula el NAVEGADOR, hoja por hoja, y no es
+ * comodidad: cada página puede tener tamaño y rotación distintos, y sólo pdf.js
+ * —que ya midió todas para dibujarlas— sabe convertir «abajo a la derecha» en
+ * puntos PDF de ESA hoja. El servidor no abre el PDF acá. Es la misma división
+ * que ya usa `definirMarcas` para el emisor.
+ *
+ * ⚠ NO pisa lo que ya hay. Si el emisor reservó un lugar en la hoja 1, esa hoja
+ * queda como estaba: el índice único (participacion, tipo, pagina) lo resuelve
+ * y el `on conflict do nothing` lo vuelve silencioso. La persona pidió «en
+ * todas», no «reemplazá lo que ya está acordado».
+ */
+export async function marcasEnTodasLasHojas(
+  token: string,
+  tipo: 'firma' | 'rubrica',
+  hojas: { pagina: number; x: number; y: number; ancho: number; alto: number }[],
+  ctx: { ip?: string | null; userAgent?: string | null } = {},
+) {
+  const e = await verificarEnlaceFirma(token);
+
+  // El mismo tope que el emisor: un contrato de 500 hojas rubricado entero son
+  // 500 marcas, y más que eso es un error de quien llama, no un caso de uso.
+  if (!hojas.length) throw new HttpError(400, 'No llegó ninguna hoja.');
+  if (hojas.length > 1000) throw new HttpError(400, 'Demasiadas hojas para una sola marca.');
+
+  return withExterno(e.otorgamientoId, e.identidadId, async (trx) => {
+    const q = await sql<{
+      instancia_id: string; circuito_id: string; cuenta_propietaria_id: string;
+      paginas: number | null;
+    }>`
+      select p.instancia_id, p.circuito_id, p.cuenta_propietaria_id, a.paginas
+        from participacion p
+        join circuito c on c.id = p.circuito_id
+        join instancia i on i.id = p.instancia_id
+        join archivo a on a.id = coalesce(i.archivo_vigente_id, c.archivo_base_id)
+       where p.id = ${e.participacionId}::uuid
+    `.execute(trx);
+    const f = q.rows[0];
+    if (!f) throw new HttpError(403, 'Este enlace ya no está disponible.');
+
+    // Si la columna sabe cuántas hojas hay, manda ella. Si no lo sabe, NO se
+    // asume nada: se acepta lo que midió el navegador, que para eso abrió el
+    // documento. Lo que no se hace es inventar un número.
+    for (const h of hojas) {
+      if (h.pagina < 0 || (f.paginas != null && h.pagina >= f.paginas)) {
+        throw new HttpError(400, `El documento no tiene una hoja ${h.pagina + 1}.`);
+      }
+    }
+
+    let puestas = 0;
+    for (const h of hojas) {
+      const r = await sql<{ id: string }>`
+        insert into marca_firma
+          (id, participacion_id, instancia_id, circuito_id, cuenta_propietaria_id,
+           tipo, pagina, x, y, ancho, alto, x_propuesta, y_propuesta, creada_por)
+        values (${randomUUID()}::uuid, ${e.participacionId}::uuid, ${f.instancia_id}::uuid,
+                ${f.circuito_id}::uuid, ${f.cuenta_propietaria_id}::uuid,
+                ${tipo}, ${h.pagina}, ${h.x}, ${h.y}, ${h.ancho}, ${h.alto},
+                ${h.x}, ${h.y}, ${e.identidadId}::uuid)
+        on conflict (participacion_id, tipo, pagina) do nothing
+        returning id
+      `.execute(trx);
+      puestas += r.rows.length;
+    }
+
+    // UN evento, no doscientos. El expediente tiene que poder leerse: «puso su
+    // inicial en las 40 hojas» es un hecho; cuarenta renglones iguales son
+    // ruido que tapa los hechos de al lado.
+    await anotar(trx, {
+      instanciaId: f.instancia_id,
+      circuitoId: f.circuito_id,
+      cuentaPropietariaId: f.cuenta_propietaria_id,
+      identidadId: e.identidadId,
+      participacionId: e.participacionId,
+      actorTipo: 'firmante',
+      tipo: 'firma.marca_agregada',
+      datos: { tipo_marca: tipo, modo: 'todas_las_hojas', hojas: puestas, pedidas: hojas.length },
+      canal: 'web',
+      ip: ctx.ip,
+      userAgent: ctx.userAgent,
+    });
+
+    return { ok: true, puestas, salteadas: hojas.length - puestas };
+  });
+}
+
+/**
+ * Saca de un tirón todas las marcas que puso esta persona.
+ *
+ * ⚠ Sólo las suyas: `creada_por` la distingue de la que reservó el emisor, que
+ * se puede mover pero no sacar. La política `marca_delete` lo comprueba igual;
+ * el `where` de acá está para que el número que se devuelve sea el verdadero.
+ */
+export async function quitarMisMarcas(
+  token: string,
+  tipo: 'firma' | 'rubrica' | null,
+  ctx: { ip?: string | null; userAgent?: string | null } = {},
+) {
+  const e = await verificarEnlaceFirma(token);
+
+  return withExterno(e.otorgamientoId, e.identidadId, async (trx) => {
+    const q = await sql<{
+      instancia_id: string; circuito_id: string; cuenta_propietaria_id: string;
+    }>`
+      select instancia_id, circuito_id, cuenta_propietaria_id
+        from participacion where id = ${e.participacionId}::uuid
+    `.execute(trx);
+    const f = q.rows[0];
+    if (!f) throw new HttpError(403, 'Este enlace ya no está disponible.');
+
+    const r = await sql<{ id: string }>`
+      delete from marca_firma
+       where participacion_id = ${e.participacionId}::uuid
+         and creada_por = ${e.identidadId}::uuid
+         and (${tipo}::text is null or tipo = ${tipo})
+      returning id
+    `.execute(trx);
+
+    if (r.rows.length) {
+      await anotar(trx, {
+        instanciaId: f.instancia_id,
+        circuitoId: f.circuito_id,
+        cuentaPropietariaId: f.cuenta_propietaria_id,
+        identidadId: e.identidadId,
+        participacionId: e.participacionId,
+        actorTipo: 'firmante',
+        tipo: 'firma.marca_quitada',
+        datos: { tipo_marca: tipo ?? 'todas', modo: 'todas_las_hojas', hojas: r.rows.length },
+        canal: 'web',
+        ip: ctx.ip,
+        userAgent: ctx.userAgent,
+      });
+    }
+
+    return { ok: true, quitadas: r.rows.length };
+  });
+}

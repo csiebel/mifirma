@@ -28,6 +28,7 @@
   // El tipo de marca que se coloca con el próximo toque. Vive acá, en la
   // barra que lo muestra, y el visor lo pregunta. Una sola copia.
   var TIPO_MARCA = 'firma';
+  window.__camposListos = true;   // hasta que se sepa que hay campos obligatorios
 
   function $(id) { return document.getElementById(id); }
   function esc(s) {
@@ -39,13 +40,61 @@
     $('msg').innerHTML = t ? '<div class="msg ' + clase + '">' + esc(t) + '</div>' : '';
   }
 
+  /* =========================================================================
+     «¿Se colgó, o está trabajando?»
+
+     Firmar tarda ocho segundos largos: hay que pedirle el sello de tiempo a una
+     autoridad externa, armar el PKCS#7 y reescribir el PDF. Y quien está de este
+     lado no tiene cuenta, no eligió usar MiFirma y no nos conoce: una pantalla
+     quieta después de apretar Firmar es, para él, una pantalla rota. Lo que hace
+     es apretar de nuevo.
+
+     ⚠ Va adentro de `api()` y no en cada botón: por acá pasan todas las llamadas
+     de esta pantalla. Y espera 180 ms antes de aparecer — la mayoría vuelven
+     antes, y una barra que parpadea en cada tecla se aprende a ignorar.
+     ======================================================================== */
+  var enVuelo = 0;
+  var temporizador = null;
+
+  function marcarTrabajo(activo) {
+    var b = document.getElementById('trabajando');
+    if (!b) {
+      if (!activo) return;
+      b = document.createElement('div');
+      b.id = 'trabajando';
+      b.className = 'trabajando';
+      b.setAttribute('role', 'status');
+      b.setAttribute('aria-label', 'Trabajando');
+      document.body.appendChild(b);
+    }
+    b.classList.toggle('visible', activo);
+  }
+
   async function api(path, body) {
-    var r = await fetch(path, {
-      method: 'POST',
-      credentials: 'same-origin',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(body || {}),
-    });
+    enVuelo++;
+    if (!temporizador && enVuelo === 1) {
+      temporizador = setTimeout(function () {
+        temporizador = null;
+        if (enVuelo > 0) marcarTrabajo(true);
+      }, 180);
+    }
+    var r;
+    try {
+      r = await fetch(path, {
+        method: 'POST',
+        credentials: 'same-origin',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(body || {}),
+      });
+    } finally {
+      // En el `finally`: si la red se corta, la barra se va igual. Una barra que
+      // queda girando para siempre miente peor que no tener ninguna.
+      enVuelo = Math.max(0, enVuelo - 1);
+      if (enVuelo === 0) {
+        if (temporizador) { clearTimeout(temporizador); temporizador = null; }
+        marcarTrabajo(false);
+      }
+    }
     var txt = await r.text();
     var data;
     try { data = txt ? JSON.parse(txt) : {}; } catch (e) { data = { error: txt }; }
@@ -121,6 +170,7 @@
       '<p class="pista">Es la representación visual que se va a ver en el documento. ' +
       'El valor legal no lo da esto: lo da la firma electrónica.</p>' +
 
+      '<div id="cajaCampos"></div>' +
       '<div id="cajaCaracter"></div>' +
       '<div id="cajaRubrica"></div>' +
 
@@ -130,6 +180,7 @@
       'tenga el mismo valor que una firma manuscrita.</span></label>' +
 
       '<button class="btn btn-p" id="fFirmar" disabled>Firmar</button>' +
+      '<div id="faltaFirmar"></div>' +
       vence +
       '<button class="btn btn-s" id="fRechazar">No lo voy a firmar</button>' +
       '<div id="msg"></div>';
@@ -138,15 +189,70 @@
     // existe el carácter: si esta persona pertenece a alguna empresa, tiene que
     // decir en nombre de quién firma antes de poder firmar.
     window.__caracterListo = true;   // hasta que se sepa que hay algo que elegir
+
+    /**
+     * Enciende o apaga el botón de firmar — y DICE POR QUÉ.
+     *
+     * ⚠ Un botón deshabilitado sin explicación es indistinguible de uno roto.
+     * Pasó de verdad: la pregunta del carácter vive arriba del panel, alguien
+     * con el panel scrolleado no la ve, aprieta Firmar y no pasa nada. Desde
+     * afuera eso es un sistema que falla en silencio, y la persona no tiene
+     * ninguna forma de saber que le falta contestar algo que ni siquiera está
+     * en pantalla.
+     *
+     * Es la misma lección del error que quedaba abajo del borde: lo que impide
+     * avanzar tiene que estar escrito donde uno intenta avanzar, no donde el
+     * programa lo tiene guardado.
+     */
     function repasar() {
       var b = $('fFirmar');
-      if (b) b.disabled = !($('fConsent') && $('fConsent').checked) || !window.__caracterListo;
+      if (!b) return;
+      var sinConsentir = !($('fConsent') && $('fConsent').checked);
+      var sinCaracter = !window.__caracterListo;
+      var sinCampos = window.__camposListos === false;
+      b.disabled = sinConsentir || sinCaracter || sinCampos;
+
+      var av = $('faltaFirmar');
+      if (!av) return;
+      if (sinCampos) {
+        var falt = window.__camposFaltan || [];
+        var puedoLlevar = VISOR && falt.length && falt[0].id;
+        av.innerHTML =
+          '<div class="msg aviso">Falta completar sobre el documento: <b>' +
+          esc(falt.map(function (c) { return c.etiqueta || c; }).join(', ')) + '</b>.' +
+          (puedoLlevar
+            ? '<button type="button" class="btn btn-s" id="irCampo" ' +
+              'style="margin-top:10px">Ir a ese campo</button>'
+            : '') +
+          '</div>';
+        // Saber QUÉ falta sin saber DÓNDE es la mitad inútil del dato: en un
+        // documento de veinte hojas, el campo que falta puede estar en la
+        // catorce y no hay forma de encontrarlo mirando.
+        if (puedoLlevar) {
+          $('irCampo').addEventListener('click', function () { VISOR.irACampo(falt[0].id); });
+        }
+      } else if (sinCaracter) {
+        av.innerHTML =
+          '<div class="msg aviso">Falta que nos digas <b>en nombre de quién firmás</b>. ' +
+          '<button type="button" class="btn btn-s" id="irCaracter" ' +
+          'style="margin-top:10px">Ir a esa pregunta</button></div>';
+        $('irCaracter').addEventListener('click', function () {
+          var c = $('cajaCaracter');
+          if (!c) return;
+          c.scrollIntoView({ block: 'center', behavior: 'smooth' });
+          var sel = $('fCaracter');
+          if (sel) setTimeout(function () { sel.focus(); }, 350);
+        });
+      } else {
+        av.innerHTML = '';
+      }
     }
     window.__repasarFirmar = repasar;
     $('fConsent').addEventListener('change', repasar);
     $('fFirmar').addEventListener('click', firmarAhora);
     $('fRechazar').addEventListener('click', abrirRechazo);
 
+    montarCampos();
     montarCaracter();
 
     // La firma autógrafa la carga la persona que firma, acá, ahora. Si no
@@ -161,6 +267,159 @@
         if (VISOR) VISOR.avisarImagenes(est.tiene, est.version);
       });
     }
+  }
+
+  /**
+   * Los datos que hay que completar antes de firmar.
+   *
+   * ═══ DÓNDE SE COMPLETAN ═══
+   *
+   * Sobre el documento, en el lugar donde van. No acá.
+   *
+   * ⚠ Acá había una lista de inputs, y estaba mal. El primer PDF con formulario
+   * que se probó lo dijo entero: «no me deja editar ningún campo, cuando toco,
+   * el botón del mouse pone la firma». La persona hace lo que haría con
+   * cualquier formulario —tocar el renglón— y el sistema le estampaba una firma.
+   *
+   * Este panel pasa a decir CUÁNTOS son y a llevar hasta el que falta. Los
+   * inputs viven en el visor, encima de su rectángulo. Ver `pintarCampos` en
+   * visor.js.
+   *
+   * ⚠ Se guardan de a uno, apenas la persona sale del campo, y no al apretar
+   * Firmar. Dos motivos: el error de un campo no se lleva puestos los otros
+   * cuatro que estaban bien, y si el navegador se cierra a mitad de un
+   * formulario largo no se perdió nada.
+   *
+   * ⚠ Y lo que se guarda NO es definitivo. El valor se congela recién al
+   * firmar, con su hash, adentro de la misma transacción que la firma —
+   * `congelarCampos` en el servidor—. Hasta ese momento se puede corregir; a
+   * partir de ahí, no. Un campo editable sobre un documento firmado es un
+   * documento que dice cosas distintas según cuándo se lo mire.
+   */
+  var CAMPOS = null;
+
+  /**
+   * La lista, una sola vez y compartida.
+   *
+   * ⚠ El visor y este panel miran EL MISMO array de objetos. No hay dos copias
+   * del valor de un campo: el visor escribe `c.valor` y el panel lo lee de ahí.
+   * Duplicar estado entre el visor y la barra ya costó dos síntomas distintos
+   * con el tipo de marca; una promesa compartida cierra esa puerta.
+   */
+  function pedirCampos() {
+    if (!CAMPOS) {
+      CAMPOS = api('/firmar/campos', {})
+        .then(function (d) { return d.campos || []; })
+        .catch(function () { return []; });
+    }
+    return CAMPOS;
+  }
+
+  function faltantes(lista) {
+    return lista.filter(function (c) {
+      return c.mio && c.obligatorio && !c.congelado &&
+             (c.valor == null || String(c.valor).trim() === '');
+    }).map(function (c) { return { id: c.id, etiqueta: c.etiqueta }; });
+  }
+
+  function anotarFaltantes(falt) {
+    window.__camposListos = falt.length === 0;
+    window.__camposFaltan = falt;
+    if (window.__repasarFirmar) window.__repasarFirmar();
+  }
+
+  /** El índice: cuántos datos piden y dónde están. Los inputs los pone el visor. */
+  async function montarCampos() {
+    var caja = $('cajaCampos');
+    if (!caja) return;
+    var lista = await pedirCampos();
+    var mios = lista.filter(function (c) { return c.mio; });
+    if (!mios.length) return;
+
+    caja.innerHTML =
+      '<label>Datos que te piden</label>' +
+      '<p class="pista" style="margin-top:0">Este documento te pide <b>' + mios.length +
+      (mios.length === 1 ? ' dato' : ' datos') + '</b>. Están marcados sobre el documento, ' +
+      'en el lugar donde van: tocá el recuadro y escribí. Quedan fijos con tu firma y ' +
+      'después no se pueden cambiar.</p>' +
+      '<div id="campMsg"></div>';
+
+    // El estado arranca acá porque el visor tarda —descarga el worker y mide
+    // todas las hojas— y hasta que termine el botón de firmar no puede estar
+    // encendido si hay obligatorios sin contestar.
+    anotarFaltantes(faltantes(lista));
+  }
+
+  /**
+   * El respaldo: los campos en el panel, con inputs.
+   *
+   * ⚠ Sólo cuando pdf.js NO cargó y el documento se está viendo en un iframe.
+   * Ahí no hay hoja sobre la cual dibujar nada, y sin esto la persona no podría
+   * completar y por lo tanto no podría firmar. Son dos caminos excluyentes: o
+   * manda el visor, o manda esto. Nunca los dos.
+   */
+  async function camposEnElPanel() {
+    var caja = $('cajaCampos');
+    if (!caja) return;
+    var lista = await pedirCampos();
+    var mios = lista.filter(function (c) { return c.mio; });
+    if (!mios.length) return;
+
+    caja.innerHTML =
+      '<label>Datos que te piden</label>' +
+      '<p class="pista" style="margin-top:0">Se completan una sola vez y quedan fijos con tu ' +
+      'firma. Después no se pueden cambiar.</p>' +
+      mios.map(function (c, i) { return campoHtml(c, i); }).join('') +
+      '<div id="campMsg"></div>';
+
+    mios.forEach(function (c, i) {
+      var el = $('camp' + i);
+      if (!el) return;
+      if (c.congelado) { el.disabled = true; return; }
+      var evento = (c.tipo === 'casilla' || c.tipo === 'opcion') ? 'change' : 'blur';
+      el.addEventListener(evento, async function () {
+        var v = c.tipo === 'casilla' ? (el.checked ? 'sí' : '') : el.value;
+        try {
+          await api('/firmar/campos/guardar', { campo_id: c.id, valor: v === '' ? null : v });
+          c.valor = v === '' ? null : v;
+          el.style.borderColor = '';
+          $('campMsg').innerHTML = '';
+        } catch (e) {
+          el.style.borderColor = 'var(--danger)';
+          $('campMsg').innerHTML = '<div class="msg err">' + esc(e.message) + '</div>';
+        }
+        anotarFaltantes(faltantes(lista));
+      });
+    });
+
+    anotarFaltantes(faltantes(lista));
+  }
+
+  function campoHtml(c, i) {
+    var id = 'camp' + i;
+    var v = c.valor == null ? '' : String(c.valor);
+    var et = '<label for="' + id + '" style="margin-top:14px">' + esc(c.etiqueta) +
+      (c.obligatorio ? ' <span style="color:var(--danger)">*</span>' : '') + '</label>';
+
+    if (c.tipo === 'casilla') {
+      return '<label class="consent" for="' + id + '" style="margin-top:12px">' +
+        '<input type="checkbox" id="' + id + '"' + (v ? ' checked' : '') + ' />' +
+        '<span>' + esc(c.etiqueta) + (c.obligatorio ? ' *' : '') + '</span></label>';
+    }
+    if (c.tipo === 'opcion') {
+      var ops = Array.isArray(c.opciones) ? c.opciones : [];
+      return et + '<select id="' + id + '" class="campo-dato">' +
+        '<option value="">— elegí</option>' +
+        ops.map(function (o) {
+          return '<option value="' + esc(o) + '"' + (v === o ? ' selected' : '') + '>' + esc(o) + '</option>';
+        }).join('') + '</select>';
+    }
+    if (c.tipo === 'parrafo') {
+      return et + '<textarea id="' + id + '" maxlength="2000">' + esc(v) + '</textarea>';
+    }
+    var tipoHtml = c.tipo === 'fecha' ? 'date' : (c.tipo === 'numero' || c.tipo === 'moneda' ? 'text' : 'text');
+    return et + '<input id="' + id + '" type="' + tipoHtml + '" class="campo-dato" maxlength="500" value="' +
+      esc(v) + '" />';
   }
 
   /**
@@ -187,6 +446,9 @@
     window.__caracterListo = !!d.caracter;
     if (window.__repasarFirmar) window.__repasarFirmar();
 
+    // Sin contestar, el bloque se marca: si la persona llega scrolleada, tiene
+    // que reconocer de un vistazo qué es lo que le falta.
+    caja.className = d.caracter ? '' : 'pendiente';
     caja.innerHTML =
       '<label for="fCaracter">¿En nombre de quién firmás?</label>' +
       '<select id="fCaracter">' +
@@ -216,6 +478,7 @@
           ? { caracter: 'personal' }
           : { caracter: 'representacion', cuenta_representada_id: v.slice(4) });
         window.__caracterListo = true;
+        caja.className = '';
       } catch (e) {
         window.__caracterListo = false;
         $('fCarMsg').innerHTML = '<div class="msg err">' + esc(e.message) + '</div>';
@@ -385,6 +648,11 @@
       '  <button type="button" class="btn" id="vTFirma">Firma</button>' +
       '  <button type="button" class="btn" id="vTRubrica">Inicial</button>' +
       '</div>' +
+      // El atajo del contrato largo: cuarenta hojas inicialadas a mano son
+      // cuarenta toques y una probabilidad muy alta de saltearse una. Poner una
+      // por una sigue estando: esto no reemplaza nada, evita lo repetitivo.
+      '<button type="button" class="btn btn-s" id="vTodas">En todas las hojas</button>' +
+      '<button type="button" class="btn btn-s" id="vLimpiar">Quitar las mías</button>' +
       '<p class="pista" id="vPista"></p>' +
       '<div id="visMsg"></div>';
 
@@ -396,11 +664,30 @@
       $('vTFirma').className = 'btn ' + (t === 'firma' ? 'btn-p' : 'btn-s');
       $('vTRubrica').className = 'btn ' + (t === 'rubrica' ? 'btn-p' : 'btn-s');
       $('vPista').textContent = t === 'firma'
-        ? 'Tocá la hoja para poner tu firma. Arrastrala para acomodarla.'
-        : 'Tocá cada hoja para poner tu inicial. Arrastrala para acomodarla.';
+        ? 'Tocá la hoja para poner tu firma, o ponela en todas de una vez.'
+        : 'Tocá cada hoja para poner tu inicial, o ponela en todas de una vez.';
     }
     $('vTFirma').addEventListener('click', function () { elegir('firma'); });
     $('vTRubrica').addEventListener('click', function () { elegir('rubrica'); });
+
+    // Pone la marca del tipo elegido en todas las hojas. Que dependa del
+    // segmentado y no sea un botón por tipo es a propósito: el tipo ya está
+    // elegido arriba y repetirlo abajo es ofrecer dos verdades sobre lo mismo.
+    $('vTodas').addEventListener('click', async function () {
+      var b = $('vTodas');
+      b.disabled = true;
+      var antes = b.textContent;
+      b.textContent = 'Poniendo…';
+      if (VISOR) await VISOR.enTodasLasHojas(TIPO_MARCA);
+      b.disabled = false; b.textContent = antes;
+      if (window.rubricaMiFirma) window.rubricaMiFirma.revisarPedidos();
+    });
+
+    $('vLimpiar').addEventListener('click', async function () {
+      if (VISOR) await VISOR.limpiarMisMarcas();
+      if (window.rubricaMiFirma) window.rubricaMiFirma.revisarPedidos();
+    });
+
     elegir(TIPO_MARCA);
   }
 
@@ -446,15 +733,48 @@
         alCambiar: function () {
           if (window.rubricaMiFirma) window.rubricaMiFirma.revisarPedidos();
         },
+        // Los campos se completan sobre la hoja. El panel no guarda copia del
+        // valor: sólo se entera de qué falta.
+        campos: pedirCampos,
+        guardarCampo: function (id, valor) {
+          return api('/firmar/campos/guardar', { campo_id: id, valor: valor });
+        },
+        alCambiarCampos: anotarFaltantes,
       });
       // Las imágenes pueden haberse cargado mientras el PDF se estaba midiendo.
       if (VISOR && window.__firmaEstado) {
         VISOR.avisarImagenes(window.__firmaEstado.tiene, window.__firmaEstado.version);
       }
+      if (VISOR) {
+        avisarDeLosCampos(VISOR.cuantosCampos());
+      } else {
+        // pdf.js no cargó y el documento quedó en un iframe: no hay hoja sobre
+        // la cual escribir, así que los campos vuelven al panel.
+        camposEnElPanel();
+      }
     } else {
       $('visCaja').innerHTML =
         '<iframe title="Documento" src="/firmar/documento" class="vis-iframe"></iframe>';
+      camposEnElPanel();
     }
+  }
+
+  /**
+   * Que la barra diga que hay campos.
+   *
+   * ⚠ La barra explicaba cómo poner la firma y no decía una palabra de los
+   * datos, sobre un documento que no se puede firmar sin completarlos. Lo que
+   * bloquea tiene que estar escrito donde uno está mirando.
+   */
+  function avisarDeLosCampos(cuantos) {
+    var p = $('vPista');
+    if (!p || !cuantos) return;
+    var n = document.createElement('span');
+    n.className = 'vis-aviso-campos';
+    n.textContent = cuantos === 1
+      ? 'Este documento te pide 1 dato: está marcado en amarillo.'
+      : 'Este documento te pide ' + cuantos + ' datos: están marcados en amarillo.';
+    p.parentNode.insertBefore(n, p.nextSibling);
   }
 
   arrancar();

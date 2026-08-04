@@ -93,6 +93,7 @@
         // la firma completa: son dos trazos distintos y confundirlos en la
         // vista previa haría que la persona apruebe algo que no va a ver.
         tiene: { firma: false, rubrica: false }, version: 0,
+        campos: [],
       };
 
       caja.innerHTML = '<div class="vis-cargando">Abriendo el documento…</div>';
@@ -197,7 +198,11 @@
 
       function aviso(t, clase) {
         var e = document.getElementById('visMsg');
-        if (e) e.innerHTML = t ? '<div class="msg ' + (clase || 'err') + '">' + esc(t) + '</div>' : '';
+        if (!e) return;
+        e.innerHTML = t ? '<div class="msg ' + (clase || 'err') + '">' + esc(t) + '</div>' : '';
+        // Lo que sale bien se borra solo; lo que sale mal se queda hasta que
+        // alguien haga algo al respecto.
+        if (t && clase === 'ok') setTimeout(function () { e.innerHTML = ''; }, 6000);
       }
 
       // ---- las marcas que ya hay ----
@@ -324,10 +329,197 @@
         await traerMarcas();
       }
 
+      // =======================================================================
+      // Los campos del documento, SOBRE la hoja
+      //
+      // ⚠ Estaban en una lista en el panel de la derecha, y era el diseño
+      // equivocado. Lo dijo el primer documento con formulario que se probó:
+      // «no me deja editar ningún campo, cuando toco, el botón del mouse pone
+      // la firma».
+      //
+      // Dos cosas fallaban a la vez, y las dos son la misma:
+      //
+      //  · El gesto natural sobre un formulario es tocar el renglón donde hay
+      //    que escribir. Acá ese toque colocaba una firma. La pantalla castigaba
+      //    exactamente lo que cualquiera iba a hacer primero, y encima dejaba
+      //    una marca estampada que después había que ir a sacar.
+      //
+      //  · «Cargo» no significa nada solo. Significa algo abajo de «Nombre
+      //    completo», en la sección del representante. Sacar el campo de su
+      //    lugar le saca la mitad del sentido, y quien completa a ciegas
+      //    completa mal — sobre un documento que después firma.
+      //
+      // El PDF ya dice dónde va cada dato: trae el rectángulo de cada campo.
+      // Lo único que faltaba era creerle. Es el mismo motor de coordenadas que
+      // las marcas, así que no hay una segunda forma de convertir puntos.
+      //
+      // ⚠ El valor vive en UN solo lugar: este input y el servidor. El panel de
+      // la derecha no guarda una copia — sólo se entera de qué falta, por
+      // `op.alCambiarCampos`. Duplicar estado acá ya nos costó dos síntomas
+      // distintos con el tipo de marca; no se repite.
+      // =======================================================================
+      var CONTROLES = {
+        casilla: 'casilla', opcion: 'opcion', parrafo: 'parrafo',
+        fecha: 'fecha', texto: 'texto', numero: 'texto', moneda: 'texto',
+      };
+
+      async function traerCampos() {
+        if (!op.campos) return;
+        var lista;
+        try { lista = await op.campos(); } catch (e) { return; }
+        estado.campos = (lista || []).filter(function (c) {
+          return estado.viewports[c.pagina];
+        });
+        pintarCampos();
+        repasarCampos();
+      }
+
+      function pintarCampos() {
+        hojas.querySelectorAll('.vis-campo').forEach(function (n) { n.remove(); });
+        estado.campos.forEach(function (c) {
+          var hoja = hojas.querySelector('.vis-hoja[data-pagina="' + c.pagina + '"]');
+          if (!hoja) return;
+          var p = aPantalla(c.pagina, c);
+
+          var el = document.createElement('div');
+          el.className = 'vis-campo' + (c.mio ? ' mio' : ' ajeno');
+          el.dataset.campo = c.id;
+          el.style.left = p.x + 'px';
+          el.style.top = p.y + 'px';
+          el.style.width = p.ancho + 'px';
+          el.style.height = p.alto + 'px';
+          el.title = c.etiqueta + (c.obligatorio ? ' (obligatorio)' : '');
+
+          // El campo de otro se ve, con lo que haya escrito, y no se toca. Es
+          // la misma regla que la marca ajena: mostrar el documento como va a
+          // quedar, sin ofrecer tocar lo que no es de uno.
+          if (!c.mio || !estado.editable) {
+            var v = document.createElement('span');
+            v.className = 'vis-campo-fijo';
+            v.textContent = c.valor != null && c.valor !== ''
+              ? (c.tipo === 'casilla' ? '✓' : String(c.valor))
+              : '';
+            v.style.fontSize = tamanoLetra(p) + 'px';
+            el.appendChild(v);
+            hoja.appendChild(el);
+            return;
+          }
+
+          var ctrl = armarControl(c, p);
+          // Sin esto, escribir en un campo también colocaría una firma: el
+          // `pointerdown` sube hasta la hoja, que es la que la coloca.
+          ctrl.addEventListener('pointerdown', function (ev) { ev.stopPropagation(); });
+          ctrl.addEventListener('click', function (ev) { ev.stopPropagation(); });
+
+          if (c.congelado) {
+            ctrl.disabled = true;
+            el.classList.add('congelado');
+          } else {
+            var evento = (c.tipo === 'casilla' || c.tipo === 'opcion' || c.tipo === 'fecha')
+              ? 'change' : 'blur';
+            ctrl.addEventListener(evento, function () { guardar(c, ctrl, el); });
+          }
+
+          el.appendChild(ctrl);
+          if (c.obligatorio) {
+            var ast = document.createElement('span');
+            ast.className = 'vis-campo-obl';
+            ast.textContent = '*';
+            el.appendChild(ast);
+          }
+          hoja.appendChild(el);
+        });
+        marcarFaltantes();
+      }
+
+      function tamanoLetra(p) {
+        return Math.round(Math.max(9, Math.min(15, p.alto * 0.58)));
+      }
+
+      function armarControl(c, p) {
+        var clase = CONTROLES[c.tipo] || 'texto';
+        var v = c.valor == null ? '' : String(c.valor);
+        var el;
+
+        if (clase === 'casilla') {
+          el = document.createElement('input');
+          el.type = 'checkbox';
+          el.checked = !!v;
+          return el;
+        }
+        if (clase === 'opcion') {
+          el = document.createElement('select');
+          var vacia = document.createElement('option');
+          vacia.value = ''; vacia.textContent = '—';
+          el.appendChild(vacia);
+          (Array.isArray(c.opciones) ? c.opciones : []).forEach(function (o) {
+            var op2 = document.createElement('option');
+            op2.value = o; op2.textContent = o;
+            if (v === o) op2.selected = true;
+            el.appendChild(op2);
+          });
+        } else if (clase === 'parrafo') {
+          el = document.createElement('textarea');
+          el.value = v;
+          el.maxLength = 2000;
+        } else {
+          el = document.createElement('input');
+          el.type = clase === 'fecha' ? 'date' : 'text';
+          el.value = v;
+          el.maxLength = 500;
+        }
+        el.style.fontSize = tamanoLetra(p) + 'px';
+        return el;
+      }
+
+      function leerControl(c, ctrl) {
+        if (c.tipo === 'casilla') return ctrl.checked ? 'sí' : '';
+        return String(ctrl.value || '');
+      }
+
+      async function guardar(c, ctrl, el) {
+        var v = leerControl(c, ctrl);
+        if (v === (c.valor == null ? '' : String(c.valor))) return;   // no cambió
+        el.classList.remove('mal');
+        try {
+          await op.guardarCampo(c.id, v === '' ? null : v);
+          c.valor = v === '' ? null : v;
+          aviso('');
+          el.classList.add('guardado');
+          setTimeout(function () { el.classList.remove('guardado'); }, 1200);
+        } catch (e) {
+          el.classList.add('mal');
+          aviso(e.message);
+        }
+        repasarCampos();
+        marcarFaltantes();
+      }
+
+      /** Los obligatorios sin completar se ven en la hoja, no sólo en el panel. */
+      function marcarFaltantes() {
+        estado.campos.forEach(function (c) {
+          if (!c.mio || !c.obligatorio) return;
+          var el = hojas.querySelector('.vis-campo[data-campo="' + c.id + '"]');
+          if (!el) return;
+          var falta = c.valor == null || String(c.valor).trim() === '';
+          el.classList.toggle('falta', falta && !c.congelado);
+        });
+      }
+
+      function repasarCampos() {
+        if (!op.alCambiarCampos) return;
+        op.alCambiarCampos(estado.campos.filter(function (c) {
+          return c.mio && c.obligatorio && !c.congelado &&
+                 (c.valor == null || String(c.valor).trim() === '');
+        }).map(function (c) { return { id: c.id, etiqueta: c.etiqueta }; }));
+      }
+
       // ---- agregar ----
       async function clicEnHoja(ev) {
         if (!estado.editable) return;
         if (ev.target.closest('.vis-marca')) return;
+        // Un campo es un lugar donde se escribe, no donde se firma.
+        if (ev.target.closest('.vis-campo')) return;
         var hoja = ev.currentTarget;
         var pagina = Number(hoja.dataset.pagina);
         var vp = estado.viewports[pagina];
@@ -381,8 +573,78 @@
       }
 
       await traerMarcas();
+      await traerCampos();
+
+      /**
+       * La misma marca en todas las hojas, abajo a la derecha.
+       *
+       * ⚠ La esquina se calcula HOJA POR HOJA con `convertToPdfPoint`, no una
+       * vez y se repite. Un documento escaneado puede traer hojas de distinto
+       * tamaño y alguna rotada, y «abajo a la derecha» no es el mismo punto en
+       * todas. Es la misma convención que usa el editor del emisor desde la 031:
+       * treinta puntos de margen, que es donde se rubrica a mano.
+       */
+      async function enTodasLasHojas(tipo) {
+        var t = TAMANO[tipo] || TAMANO.rubrica;
+        var hojas = [];
+        for (var pg = 0; pg < estado.paginas; pg++) {
+          var vp = estado.viewports[pg];
+          if (!vp) continue;
+          var esq = vp.convertToPdfPoint(vp.width - (t.ancho + 30) * estado.escala,
+                                         vp.height - 30 * estado.escala);
+          hojas.push({ pagina: pg, x: esq[0], y: esq[1], ancho: t.ancho, alto: t.alto });
+        }
+        if (!hojas.length) return aviso('Todavía se está abriendo el documento.');
+
+        try {
+          var r = await post('/firmar/marca/todas', { tipo: tipo, hojas: hojas });
+          aviso(
+            r.puestas === 0
+              ? 'Ya estaba en todas las hojas.'
+              : (tipo === 'firma' ? 'Tu firma' : 'Tu inicial') + ' quedó en ' + r.puestas +
+                ' hoja(s).' + (r.salteadas ? ' En ' + r.salteadas + ' ya había una y no se tocó.' : ''),
+            'ok',
+          );
+        } catch (e) { aviso(e.message); }
+        await traerMarcas();
+      }
+
+      async function limpiarMisMarcas() {
+        try {
+          var r = await post('/firmar/marca/limpiar', {});
+          aviso(r.quitadas
+            ? 'Saqué ' + r.quitadas + ' marca(s) tuya(s). Las que reservó el emisor quedan.'
+            : 'No tenías ninguna marca puesta por vos.', 'ok');
+        } catch (e) { aviso(e.message); }
+        await traerMarcas();
+      }
 
       return {
+        enTodasLasHojas: enTodasLasHojas,
+        limpiarMisMarcas: limpiarMisMarcas,
+        paginas: function () { return estado.paginas; },
+        /** Cuántos campos tiene que completar quien mira. 0 = no le piden nada. */
+        cuantosCampos: function () {
+          return estado.campos.filter(function (c) { return c.mio; }).length;
+        },
+        /**
+         * Lleva la vista al campo y le da el foco.
+         *
+         * ⚠ Es lo que hace que el aviso «falta completar X» sirva de algo. Un
+         * documento de veinte hojas con el campo que falta en la catorce
+         * convierte «falta completar» en una adivinanza: la persona sabe qué
+         * falta y no dónde, que es la mitad inútil del dato.
+         */
+        irACampo: function (id) {
+          var el = hojas.querySelector('.vis-campo[data-campo="' + id + '"]');
+          if (!el) return false;
+          el.scrollIntoView({ block: 'center', behavior: 'smooth' });
+          el.classList.add('senalado');
+          setTimeout(function () { el.classList.remove('senalado'); }, 1600);
+          var c = el.querySelector('input,select,textarea');
+          if (c) setTimeout(function () { c.focus(); }, 400);
+          return true;
+        },
         /** El panel avisa qué imágenes hay, para dibujarlas adentro de las marcas. */
         avisarImagenes: function (tiene, version) {
           estado.tiene = tiene || { firma: false, rubrica: false };

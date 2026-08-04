@@ -50,8 +50,21 @@ export async function estadoDeCuenta(token: string) {
                where cu.tipo = 'persona' and cu.estado <> 'cerrada'
                  and cu.identidad_titular_id = i.id
                limit 1)                                    as cuenta_persona,
+             -- ⚠ cuenta_otorgante_id, no cuenta_id.
+             --
+             -- En otorgamiento, cuenta_id es el SUJETO cuando el
+             -- otorgamiento es a una empresa, y el CHECK
+             -- num_nonnulls(identidad_id, cuenta_id) = 1 garantiza que sea
+             -- null cuando el sujeto es una persona — que es siempre, acá.
+             -- Quien emitió el documento está en cuenta_otorgante_id.
+             --
+             -- El join contra la columna equivocada no fallaba: devolvía null y
+             -- el país sugerido caía al 'UY' del coalesce. Un brasileño que
+             -- firmaba un documento de una empresa brasileña veía Uruguay
+             -- preseleccionado, y el país decide qué ley y qué certificadores
+             -- aplican. Un error que se disfraza de valor por omisión.
              (select emi.pais from otorgamiento o
-                join cuenta emi on emi.id = o.cuenta_id
+                join cuenta emi on emi.id = o.cuenta_otorgante_id
                where o.id = ${e.otorgamientoId}::uuid)     as pais_emisor
         from identidad i
         left join credencial c on c.identidad_id = i.id

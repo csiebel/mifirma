@@ -302,6 +302,31 @@
           '  <button type="button" class="btn btn-s" id="rubQuitar-' + tipo + '">Quitarla</button>' +
           '</div>' +
           '<div id="rubMsg-' + tipo + '"></div>';
+
+        /**
+         * ⚠ Si la imagen no carga, NO se deja el ícono de roto del navegador.
+         *
+         * Pasó: el recuadro mostró un signo de interrogación y abajo decía
+         * «Cambiarla / Quitarla», o sea que el sistema afirmaba tener una imagen
+         * que no podía mostrar. Para quien está por firmar eso es peor que no
+         * tener ninguna: no sabe si su firma va a salir en el documento, no sabe
+         * si el problema es suyo, y no tiene nada que hacer al respecto.
+         *
+         * El estado real es «se registró tu imagen y no la podemos leer». Eso se
+         * dice, y se ofrece lo único que arregla: cargarla de nuevo.
+         */
+        var img = caja.querySelector('.rub-hecha img');
+        if (img) {
+          img.addEventListener('error', function () {
+            aviso(tipo, 'No pudimos cargar ' + e.titulo.toLowerCase() +
+              '. Cargala de nuevo, así se ve en el documento.');
+            var h = caja.querySelector('.rub-hecha');
+            if (h) h.remove();
+            var b = document.getElementById('rubCambiar-' + tipo);
+            if (b) b.textContent = 'Cargarla de nuevo';
+          });
+        }
+
         document.getElementById('rubCambiar-' + tipo).addEventListener('click', function () {
           tiene[tipo] = false; abierta[tipo] = true; pintarBloque(tipo);
         });

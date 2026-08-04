@@ -1,5 +1,8 @@
 import type { FastifyInstance, FastifyReply, FastifyRequest } from 'fastify';
-import { moverMarca, agregarMarca, quitarMarca, misMarcas } from '../../services/marcas';
+import {
+  moverMarca, agregarMarca, quitarMarca, misMarcas,
+  marcasEnTodasLasHojas, quitarMisMarcas,
+} from '../../services/marcas';
 import {
   firmasVisualesDelFirmante,
   guardarFirmaVisualDelFirmante,
@@ -260,6 +263,45 @@ export function registrarRutasFirma(app: FastifyInstance) {
       })
       .parse(req.body);
     return agregarMarca(tokenDe(req), b, {
+      ip: req.ip,
+      userAgent: req.headers['user-agent'] ?? null,
+    });
+  });
+
+  /**
+   * La misma marca en todas las hojas. Las coordenadas vienen del navegador
+   * porque cada página puede tener tamaño y rotación distintos, y quien las
+   * midió fue pdf.js al dibujarlas.
+   */
+  app.post('/firmar/marca/todas', async (req) => {
+    const b = z
+      .object({
+        tipo: z.enum(['firma', 'rubrica']),
+        hojas: z
+          .array(
+            z.object({
+              pagina: z.number().int().min(0).max(5000),
+              x: z.number().min(0).max(20000),
+              y: z.number().min(0).max(20000),
+              ancho: z.number().min(20).max(400),
+              alto: z.number().min(10).max(200),
+            }),
+          )
+          .min(1)
+          .max(1000),
+      })
+      .parse(req.body);
+    return marcasEnTodasLasHojas(tokenDe(req), b.tipo, b.hojas, {
+      ip: req.ip,
+      userAgent: req.headers['user-agent'] ?? null,
+    });
+  });
+
+  app.post('/firmar/marca/limpiar', async (req) => {
+    const b = z
+      .object({ tipo: z.enum(['firma', 'rubrica']).nullable().optional() })
+      .parse(req.body);
+    return quitarMisMarcas(tokenDe(req), b.tipo ?? null, {
       ip: req.ip,
       userAgent: req.headers['user-agent'] ?? null,
     });

@@ -12,7 +12,7 @@ import {
   reenviarAvisos,
   enlaceDeFirma,
 } from '../../services/circuito';
-import { listarCampos, definirCampos } from '../../services/campos';
+import { listarCampos, definirCampos, detectarCampos } from '../../services/campos';
 
 /**
  * Preparación y despacho de un circuito de firma.
@@ -104,6 +104,19 @@ export function registrarRutasCircuitos(app: FastifyInstance) {
     const { id } = z.object({ id: z.string().uuid() }).parse(req.params);
     const { cuentaId, identidadId } = req.identidad;
     return listarCampos(cuentaId, identidadId, id);
+  });
+
+  /**
+   * Los campos que el PDF YA TRAE, leídos de su AcroForm.
+   *
+   * Sólo lee y propone: adoptarlos es un PUT aparte. Un formulario con cuarenta
+   * campos internos no se convierte en cuarenta obligaciones para el firmante
+   * sin que alguien lo mire.
+   */
+  app.get('/circuitos/:id/campos/detectar', async (req) => {
+    const { id } = z.object({ id: z.string().uuid() }).parse(req.params);
+    const { cuentaId, identidadId } = req.identidad;
+    return detectarCampos(cuentaId, identidadId, id);
   });
 
   app.put('/circuitos/:id/campos', async (req) => {

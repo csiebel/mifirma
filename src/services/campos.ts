@@ -1,10 +1,12 @@
 import { createHash } from 'node:crypto';
+import { PDFDocument } from 'pdf-lib';
 import { sql } from 'kysely';
 import { db, withExterno } from '../db/pool';
 import { fijarContexto } from '../db/contexto';
 import { withUsuario, exigir } from '../auth/authz';
 import { verificarEnlaceFirma } from '../auth/enlace_firma';
 import { fueraDeWinAnsi, type Marca } from '../firma/apariencia';
+import { almacen } from '../almacenamiento/almacen';
 import { anotar } from './evidencia';
 import { HttpError } from '../http/errors';
 
@@ -275,6 +277,9 @@ export interface CamposListos {
  * Corre con el contexto que le pase quien llama —el del otorgamiento— para que
  * la RLS siga decidiendo qué ve.
  */
+/** Las formas de «marcada» que pueden llegar de verdad. Ver `prepararCampos`. */
+const CASILLA_MARCADA = new Set(['sí', 'si', 'true', '1', 'x', 'yes', 'on', 'sim']);
+
 export async function prepararCampos(
   trx: any,
   instanciaId: string,
@@ -304,7 +309,25 @@ export async function prepararCampos(
     if (f.congelado_en) continue;     // ya firmado en una vuelta anterior
 
     // Una casilla no se dibuja como texto: se dibuja como una marca.
-    const dibujo = f.tipo === 'casilla' ? (valor === 'true' ? 'X' : '') : valor;
+    //
+    // ⚠ Acá comparaba contra `'true'`, y NADIE guarda `'true'`. La pantalla del
+    // firmante guarda `'sí'` —siempre lo hizo— y `detectarCampos` lee `'sí'` del
+    // AcroForm. O sea que la rama estaba muerta desde el primer día: toda
+    // casilla marcada caía en el `continue` de abajo.
+    //
+    // Y no era sólo que no se dibujara. Al no entrar en `congelar`, el valor
+    // quedaba SIN congelar sobre un documento ya firmado — editable. Es
+    // exactamente lo que la regla dura prohíbe: «un campo editable sobre un
+    // documento firmado es un documento que dice cosas distintas según cuándo se
+    // lo mire». Una casilla que dice «Acepto las condiciones» es el peor lugar
+    // posible para que eso pase.
+    //
+    // Se aceptan las formas que pueden llegar de verdad —la nuestra, la del
+    // AcroForm y la de una planilla de envío masivo— en vez de una sola cadena
+    // exacta que ya falló una vez.
+    const dibujo = f.tipo === 'casilla'
+      ? (CASILLA_MARCADA.has(valor.toLowerCase()) ? 'X' : '')
+      : valor;
     if (!dibujo) continue;
 
     marcas.push({
@@ -312,7 +335,22 @@ export async function prepararCampos(
       rect: [Number(f.x), Number(f.y), Number(f.x) + Number(f.ancho), Number(f.y) + Number(f.alto)],
       texto: dibujo,
       modo: 'campo',
-      etiqueta: f.codigo,
+      // ⚠ El nombre del widget NO puede ser el código del campo.
+      //
+      // Cuando el campo se adoptó del propio AcroForm del PDF —que es el caso
+      // normal, para eso existe `detectarCampos`— el código ES el nombre del
+      // campo original: `razon_social`. Al escribir el nuestro con ese mismo
+      // `/T`, el documento firmado termina con dos campos llamados igual, y un
+      // nombre de campo tiene que ser único en un AcroForm.
+      //
+      // Medido sobre un documento firmado de verdad: el AcroForm quedó con
+      // `razon_social` dos veces —el original vacío y el nuestro con el valor— y
+      // el lector mostraba el original. La persona completaba, firmaba, y el
+      // documento salía en blanco.
+      //
+      // El sufijo por orden de firmante además evita que dos firmantes que
+      // completan el mismo código en vueltas distintas choquen entre sí.
+      etiqueta: `${f.codigo}__mf${orden}`,
     });
     congelar.push({
       id: f.id,
@@ -399,4 +437,161 @@ export async function congelarCampos(
       datos: { campos: lista.length },
     });
   }
+}
+
+// ---------------------------------------------------------------------------
+// Los campos que el PDF YA TRAE
+// ---------------------------------------------------------------------------
+
+/**
+ * Lee el AcroForm del documento y devuelve sus campos, listos para adoptar.
+ *
+ * ═══ POR QUÉ ESTO ANTES QUE UN EDITOR DE CAJAS ═══
+ *
+ * Porque los documentos que la gente manda a firmar **ya son formularios**: un
+ * certificado médico, un formulario de visa, una declaración de la DGI. Todos
+ * traen sus campos declarados, con su nombre y su rectángulo exacto. Hacer que
+ * el emisor dibuje cajas encima de eso es trabajo repetido y encima queda peor
+ * alineado que el original.
+ *
+ * ⚠ Esto NO escribe nada. Es una lectura del archivo que propone; adoptar o no
+ * cada campo lo decide el emisor y se guarda con `definirCampos`, que es el
+ * único camino de escritura. Un formulario con cuarenta campos internos no se
+ * convierte en cuarenta obligaciones para el firmante sin que alguien lo mire.
+ *
+ * ⚠ Se saltean los campos de FIRMA. Un `/FT /Sig` del PDF original no es un
+ * dato que alguien completa: es un hueco para una firma, y las firmas de este
+ * producto las coloca `apariencia.ts` con su propia lógica. Adoptarlo como
+ * campo de texto sería pisar el lugar donde después va la firma.
+ */
+export interface CampoDetectado {
+  codigo: string;
+  etiqueta: string;
+  tipo: DefinicionCampo['tipo'];
+  opciones: string[] | null;
+  pagina: number;
+  x: number; y: number; ancho: number; alto: number;
+  /** Lo que el PDF ya trae escrito ahí, si trae algo. */
+  valor_actual: string | null;
+  /** Si ese código ya está adoptado como campo del circuito. */
+  ya_adoptado: boolean;
+}
+
+export async function detectarCampos(
+  cuentaId: string,
+  identidadId: string,
+  circuitoId: string,
+): Promise<{ campos: CampoDetectado[]; sin_formulario: boolean }> {
+  const datos = await withUsuario(cuentaId, identidadId, async (trx: any) => {
+    const r = await sql<{ clave: string }>`
+      select a.clave_almacenamiento as clave
+        from circuito c
+        join archivo a on a.id = c.archivo_base_id
+       where c.id = ${circuitoId}::uuid
+    `.execute(trx);
+    if (!r.rows.length) throw new HttpError(404, 'Ese documento no existe o no lo podés ver.');
+
+    const ya = await sql<{ codigo: string }>`
+      select codigo from campo where circuito_id = ${circuitoId}::uuid
+    `.execute(trx);
+
+    return { clave: r.rows[0]!.clave, adoptados: new Set(ya.rows.map((x) => x.codigo)) };
+  });
+
+  const bytes = await almacen().leer(datos.clave);
+
+  let doc;
+  try {
+    doc = await PDFDocument.load(bytes, { ignoreEncryption: true, updateMetadata: false });
+  } catch {
+    throw new HttpError(400, 'No pudimos abrir el documento para buscarle campos.');
+  }
+
+  let campos: any[] = [];
+  try {
+    campos = doc.getForm().getFields();
+  } catch {
+    // Un PDF sin AcroForm no es un error: es la mitad de los casos.
+    return { campos: [], sin_formulario: true };
+  }
+  if (!campos.length) return { campos: [], sin_formulario: true };
+
+  const paginas = doc.getPages();
+  const salida: CampoDetectado[] = [];
+
+  for (const f of campos) {
+    const clase = f.constructor?.name ?? '';
+    // ⚠ Las firmas y los botones no son datos que alguien completa.
+    if (clase.includes('Signature') || clase.includes('Button')) continue;
+
+    const nombre = f.getName();
+    if (!nombre) continue;
+
+    let tipo: DefinicionCampo['tipo'] = 'texto';
+    let opciones: string[] | null = null;
+    let valor: string | null = null;
+
+    try {
+      if (clase.includes('CheckBox')) {
+        tipo = 'casilla';
+        valor = f.isChecked?.() ? 'sí' : null;
+      } else if (clase.includes('Dropdown') || clase.includes('OptionList')) {
+        tipo = 'opcion';
+        opciones = f.getOptions?.() ?? null;
+        valor = (f.getSelected?.() ?? [])[0] ?? null;
+      } else if (clase.includes('RadioGroup')) {
+        tipo = 'opcion';
+        opciones = f.getOptions?.() ?? null;
+        valor = f.getSelected?.() ?? null;
+      } else {
+        // Texto. `isMultiline` distingue un renglón de un párrafo, y eso
+        // cambia cómo se dibuja al estampar.
+        tipo = f.isMultiline?.() ? 'parrafo' : 'texto';
+        valor = f.getText?.() ?? null;
+      }
+    } catch {
+      // Un campo que no se deja interrogar se ofrece igual, como texto: el
+      // emisor decide, y perder el campo sería peor que perder su tipo.
+    }
+
+    // ⚠ El rectángulo sale del WIDGET, no del campo: un mismo campo puede tener
+    // varios widgets —el mismo dato repetido en tres hojas— y cada uno tiene su
+    // lugar. Se toma el primero; los demás se ven cuando el editor de cajas
+    // exista y se puedan mover de a uno.
+    let pagina = 0, x = 0, y = 0, ancho = 0, alto = 0;
+    try {
+      const w = f.acroField.getWidgets()[0];
+      if (w) {
+        const r = w.getRectangle();
+        x = r.x; y = r.y; ancho = r.width; alto = r.height;
+        const ref = w.P?.();
+        if (ref) {
+          const idx = paginas.findIndex((pg: any) => pg.ref === ref);
+          if (idx >= 0) pagina = idx;
+        }
+      }
+    } catch { /* sin rectángulo: queda en 0 y el editor lo acomoda */ }
+
+    salida.push({
+      // El código es el nombre del campo en el PDF: es lo que después permite
+      // reconocerlo si el archivo se reemplaza por una versión nueva.
+      // ⚠ 60, que es el tope de `codigo` en la ruta y en la tabla. Un nombre de
+      // campo más largo que eso existe —los formularios generados por
+      // herramientas de oficina los hacen— y cortarlo acá evita que el PUT lo
+      // rechace después con un error que no dice qué campo fue.
+      codigo: nombre.slice(0, 60),
+      etiqueta: nombre.slice(0, 120),
+      tipo,
+      opciones,
+      pagina,
+      x: Math.round(x * 100) / 100,
+      y: Math.round(y * 100) / 100,
+      ancho: Math.round(Math.max(20, ancho) * 100) / 100,
+      alto: Math.round(Math.max(10, alto) * 100) / 100,
+      valor_actual: valor && valor.trim() ? valor.trim().slice(0, 500) : null,
+      ya_adoptado: datos.adoptados.has(nombre.slice(0, 60)),
+    });
+  }
+
+  return { campos: salida, sin_formulario: salida.length === 0 };
 }

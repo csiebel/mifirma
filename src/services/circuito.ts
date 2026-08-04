@@ -1548,3 +1548,80 @@ export async function avisarAlQueSigue(circuitoId: string) {
   );
   return { notificados: r.filter((x) => x.ok).length };
 }
+
+/**
+ * Mi propio enlace para firmar un documento que me llegó.
+ *
+ * ═══ POR QUÉ HACE FALTA ═══
+ *
+ * Porque firmar existía en un solo lugar: el enlace del correo. Quien tiene
+ * cuenta en MiFirma ve el documento en Recibidos, lo puede abrir, ver el
+ * expediente y descargarlo — y para firmarlo tiene que ir a buscar el mail.
+ * Es un producto de firma en el que estar registrado no te deja firmar.
+ *
+ * ⚠ Esto NO otorga nada. El acceso ya lo tiene: es el otorgamiento que se le
+ * emitió al despachar, el mismo que viaja en el correo. Acá sólo se le entrega
+ * el puntero a esa fila, y sólo a la persona que ES el sujeto de esa fila —el
+ * `where` filtra por `identidad_id` y la RLS lo vuelve a comprobar—. No es un
+ * camino nuevo hacia el documento: es la misma puerta, sin tener que buscar la
+ * llave en el correo.
+ *
+ * ⚠ Distinto de `enlaceDeFirma`, que es el EMISOR copiando el enlace de otro y
+ * exige la capacidad de enviar. Éste es uno pidiendo el suyo y no exige
+ * ninguna: firmar lo que a uno le mandaron no es una capacidad de la cuenta.
+ */
+export async function miEnlaceDeFirma(
+  cuentaId: string,
+  identidadId: string,
+  instanciaId: string,
+) {
+  return withUsuario(cuentaId, identidadId, async (trx) => {
+    const r = await sql<{
+      id: string; instancia_id: string; estado: string; papel: string;
+      circuito_estado: string; titulo: string; me_toca: boolean;
+      otorgamiento_id: string | null;
+    }>`
+      select p.id, p.instancia_id, p.estado, p.papel,
+             c.estado as circuito_estado, c.titulo,
+             not exists (
+               select 1 from participacion p2
+                where p2.instancia_id = p.instancia_id and p2.papel = 'firmante'
+                  and p2.orden < p.orden
+                  and p2.estado not in ('firmada','no_requerida','delegada')
+             ) as me_toca,
+             (select o.id from otorgamiento o
+               where o.instancia_id = p.instancia_id
+                 and o.identidad_id = p.identidad_id
+                 and o.revocado_en is null
+                 and 'firmar' = any (o.alcances)
+               order by o.creado_en desc limit 1) as otorgamiento_id
+        from participacion p
+        join circuito c on c.id = p.circuito_id
+       where p.instancia_id = ${instanciaId}::uuid
+         and p.identidad_id = ${identidadId}::uuid
+         and p.papel = 'firmante'
+    `.execute(trx);
+
+    const p = r.rows[0];
+    if (!p) throw new HttpError(404, 'Este documento no te pide una firma.');
+    if (p.circuito_estado !== 'enviado') {
+      throw new HttpError(409, 'Este documento no está esperando firmas.');
+    }
+    if (p.estado === 'firmada') throw new HttpError(409, 'Ya firmaste este documento.');
+    if (p.estado === 'rechazada') throw new HttpError(409, 'Ya rechazaste este documento.');
+    if (!p.me_toca) {
+      throw new HttpError(409, 'Todavía no es tu turno: falta que firme alguien antes que vos.');
+    }
+    if (!p.otorgamiento_id) {
+      throw new HttpError(409, 'Tu acceso para firmar este documento ya no está vigente.');
+    }
+
+    const token = await emitirEnlaceFirma({
+      otorgamientoId: p.otorgamiento_id,
+      identidadId,
+      participacionId: p.id,
+    });
+
+    return { url: urlDeFirma(token), titulo: p.titulo };
+  });
+}
