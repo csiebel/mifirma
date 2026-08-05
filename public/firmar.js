@@ -70,14 +70,37 @@
     b.classList.toggle('visible', activo);
   }
 
-  async function api(path, body) {
+  function abrioUno() {
     enVuelo++;
-    if (!temporizador && enVuelo === 1) {
-      temporizador = setTimeout(function () {
-        temporizador = null;
-        if (enVuelo > 0) marcarTrabajo(true);
-      }, 180);
-    }
+    if (temporizador || enVuelo > 1) return;
+    temporizador = setTimeout(function () {
+      temporizador = null;
+      if (enVuelo > 0) marcarTrabajo(true);
+    }, 180);
+  }
+
+  function cerroUno() {
+    enVuelo = Math.max(0, enVuelo - 1);
+    if (enVuelo > 0) return;
+    if (temporizador) { clearTimeout(temporizador); temporizador = null; }
+    marcarTrabajo(false);
+  }
+
+  /**
+   * ⚠ La misma cuenta para los otros archivos de esta pantalla.
+   *
+   * El visor y el bloque de la rúbrica traen su propio `fetch` —son módulos
+   * aparte, cargados por separado— y son justo los que más tardan, porque suben
+   * y bajan imágenes. Sin esto, la barra sólo cubría la mitad de los clics de la
+   * pantalla, que es peor que no tenerla: aparece a veces y se deja de mirar.
+   *
+   * Una sola cuenta compartida. Si dos módulos tienen una petición en vuelo, la
+   * barra se va cuando vuelve la última, no cuando vuelve la primera.
+   */
+  window.trabajandoMiFirma = { abrio: abrioUno, cerro: cerroUno };
+
+  async function api(path, body) {
+    abrioUno();
     var r;
     try {
       r = await fetch(path, {
@@ -89,11 +112,7 @@
     } finally {
       // En el `finally`: si la red se corta, la barra se va igual. Una barra que
       // queda girando para siempre miente peor que no tener ninguna.
-      enVuelo = Math.max(0, enVuelo - 1);
-      if (enVuelo === 0) {
-        if (temporizador) { clearTimeout(temporizador); temporizador = null; }
-        marcarTrabajo(false);
-      }
+      cerroUno();
     }
     var txt = await r.text();
     var data;

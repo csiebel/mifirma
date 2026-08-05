@@ -1,33 +1,44 @@
 /* ===========================================================================
-   Los campos del documento: qué se completa, quién lo completa y cuándo.
+   Los campos del documento: qué se pide, quién lo escribe y DÓNDE va.
 
    ═══ QUÉ PROBLEMA RESUELVE ═══
 
    «Antes de firmar necesito que pongas tu número de documento acá.» Hasta hoy
-   eso no existía: el documento salía como estaba, y si faltaba un dato había
-   que rehacer el PDF y volver a mandarlo.
+   eso no existía: el documento salía como estaba, y si faltaba un dato había que
+   rehacer el PDF y volver a mandarlo.
 
-   ═══ POR QUÉ EMPIEZA LEYENDO EL PDF Y NO DIBUJANDO CAJAS ═══
+   ═══ UNA SOLA PANTALLA, Y ES LA LECCIÓN DE ESTE ARCHIVO ═══
 
-   Porque los documentos que la gente manda a firmar **ya son formularios**: un
-   certificado médico, un formulario de visa, una declaración de impuestos.
-   Traen sus campos declarados, con nombre y rectángulo exacto. Dibujar cajas
-   encima de eso es trabajo repetido y queda peor alineado que el original.
+   La primera versión eran dos: una lista para definir los campos y otro modal
+   para ubicarlos sobre la hoja. Se probó una vez y el veredicto fue exacto:
 
-   Así que primero se pregunta: ¿qué campos trae este archivo? Y de esos, ¿cuáles
-   nos interesan y quién llena cada uno.
+     «el campo no queda donde lo puse... y el editor está confuso, primero hay
+      que cargar los campos y luego ubicarlos, no supe mucho cómo usarlo»
 
-   ⚠ Detectar no es adoptar. El PDF puede traer cuarenta campos internos —los
-   generadores de formularios los hacen— y convertirlos en cuarenta obligaciones
-   para el firmante sin que nadie los mire sería peor que no tenerlos.
+   Las dos quejas son la misma cosa. Partir una tarea en dos pantallas que van y
+   vienen obliga a llevar en la cabeza en cuál estás y qué te falta; y además
+   escondía un defecto de verdad: al volver a la lista se releían los campos del
+   servidor, y eso pisaba las coordenadas recién dibujadas. Lo que se acababa de
+   hacer desaparecía sin decir nada.
+
+   Ahora hay **una** pantalla: la lista a la izquierda, la hoja a la derecha, y
+   un solo Guardar. Las dos columnas miran el MISMO array, así que no hay forma
+   de que una pise a la otra.
+
+   ═══ DETECTAR NO ES ADOPTAR ═══
+
+   Un PDF que ya es formulario trae sus campos con nombre y rectángulo exacto: se
+   ofrecen para agregar, no se agregan solos. Un generador de formularios puede
+   dejar cuarenta campos internos, y convertirlos en cuarenta obligaciones para
+   el firmante sin que nadie los mire sería peor que no tenerlos.
 
    ═══ LA REGLA QUE NO SE NEGOCIA ═══
 
    El valor se congela ANTES de firmar, con su hash, adentro de la misma
-   transacción que la firma. Después de firmar no se toca: un campo editable
-   sobre un documento firmado es un documento que dice cosas distintas según
-   cuándo se lo mire. Eso lo hace `congelarCampos` en el servidor; acá sólo se
-   decide qué campos hay.
+   transacción que la firma. Después no se toca: un campo editable sobre un
+   documento firmado es un documento que dice cosas distintas según cuándo se lo
+   mire. Eso lo hace `congelarCampos` en el servidor; acá sólo se decide qué
+   campos hay y dónde van.
    =========================================================================== */
 (function () {
   'use strict';
@@ -48,27 +59,48 @@
     ['opcion', 'Lista de opciones'],
   ];
 
-  /**
-   * Abre el editor de campos de un circuito.
-   *
-   * `firmantes` viene de la pantalla de preparación: son las personas entre las
-   * que se reparte quién completa cada campo.
-   */
-  window.abrirCamposDelDocumento = async function (circuitoId, firmantes) {
-    var estado = { campos: [], detectados: [], sinFormulario: false };
+  window.abrirCamposDelDocumento = async function (circuitoId, firmantes, instanciaId) {
+    var estado = { campos: [], detectados: [], sinFormulario: false, sel: -1 };
+    var HOJA = null;                 // el motor de cajas, cuando cargue
+    firmantes = firmantes || [];
 
     abrirModal(
       '<h2>Campos del documento</h2>' +
-      '<p class="sub">Datos que hay que completar antes de firmar. Cada uno lo llena ' +
-      'alguien: vos ahora, o un firmante cuando le toque.</p>' +
-      '<div id="cpCuerpo"><p style="color:var(--mut);font-size:14px">Leyendo el documento…</p></div>' +
+      '<p class="sub">Datos que hay que completar antes de firmar. De cada uno decidís ' +
+      'tres cosas: <b>qué se pide</b>, <b>quién lo escribe</b> y <b>dónde va</b> en la hoja.</p>' +
+      (!firmantes.length
+        ? '<div class="msg aviso" style="margin:0 0 12px">Este documento todavía no tiene ' +
+          'firmantes, así que por ahora los campos sólo los podés completar vos. Si querés ' +
+          'pedirle un dato a quien firma, agregá primero los firmantes.</div>'
+        : '') +
       '<div id="cpErr"></div>' +
+
+      '<div class="cp-dos">' +
+      '  <div class="cp-lista" id="cpCuerpo">' +
+      '    <p style="color:var(--mut);font-size:14px">Leyendo el documento…</p>' +
+      '  </div>' +
+      '  <div class="cp-hoja">' +
+      '    <div class="cp-hoja-cab">' +
+      '      <b>La hoja</b>' +
+      '      <span id="cpPista">Tocá donde va un dato. Arrastralo para acomodarlo y ' +
+      'tirá del cuadradito de la esquina para darle el ancho.</span>' +
+      '    </div>' +
+      '    <div class="cp-lienzo" id="cpLienzo">' +
+      (instanciaId
+        ? '<p style="color:var(--mut);font-size:13.5px;text-align:center;margin:28px 0">' +
+          'Abriendo el documento…</p>'
+        : '<p style="color:var(--mut);font-size:13.5px;text-align:center;margin:28px 0">' +
+          'No pude identificar el archivo de este documento.</p>') +
+      '    </div>' +
+      '  </div>' +
+      '</div>' +
+
       '<div class="acc">' +
-      '<button class="btn btn-s" id="cpVolver">Volver</button>' +
-      '<button class="btn btn-p" id="cpOk">Guardar</button></div>'
+      '<button class="btn btn-s" id="cpVolver">Cancelar</button>' +
+      '<button class="btn btn-p" id="cpOk">Guardar campos</button></div>'
     );
-    var caja = document.querySelector('#modal .modal');
-    if (caja) caja.classList.add('ancho');
+    var modal = document.querySelector('#modal .modal');
+    if (modal) modal.classList.add('ancho');
 
     function volver() {
       if (window.abrirCircuito) window.abrirCircuito(circuitoId);
@@ -89,7 +121,8 @@
           completa_emisor: c.completa_emisor,
           orden_firmante: c.orden_firmante,
           obligatorio: c.obligatorio,
-          pagina: c.pagina, x: c.x, y: c.y, ancho: c.ancho, alto: c.alto,
+          pagina: c.pagina, x: Number(c.x), y: Number(c.y),
+          ancho: Number(c.ancho), alto: Number(c.alto),
           usos: Number(c.usos || 0),
         };
       });
@@ -101,95 +134,85 @@
       estado.sinFormulario = !!det.sin_formulario;
     } catch (e) { estado.sinFormulario = true; }
 
-    pintar();
+    pintarLista();
 
-    function pintar() {
+    // ---- la hoja, al lado ----
+    if (instanciaId && window.cajasMiFirma) {
+      HOJA = await window.cajasMiFirma.montar($('cpLienzo'), {
+        instanciaId: instanciaId,
+        campos: estado.campos,
+        firmantes: firmantes,
+        quienNueva: function () { return $('cpQuienNueva') ? $('cpQuienNueva').value : 'emisor'; },
+        alTocar: function (i) { estado.sel = i; pintarLista(); },
+        alMover: function () { pintarLista(); },
+        alCrear: function (i) {
+          estado.sel = i;
+          pintarLista();
+          // El campo nuevo se abre para escribirle el nombre: acabás de decir
+          // DÓNDE va, y lo que falta es QUÉ pide.
+          var et = $('et' + i);
+          if (et) { et.focus(); et.select(); }
+        },
+      });
+    }
+
+    // =======================================================================
+    // La lista
+    // =======================================================================
+    function pintarLista() {
       var sinAdoptar = estado.detectados.filter(function (d) {
         return !estado.campos.some(function (c) { return c.codigo === d.codigo; });
       });
 
       var html = '';
 
-      // ── lo que el archivo trae y todavía no se adoptó ──
       if (sinAdoptar.length) {
         html +=
-          '<div class="msg ok" style="margin:0 0 14px">Este documento ya trae <b>' +
-          sinAdoptar.length + ' campo(s)</b> de formulario. Agregá los que quieras usar; ' +
-          'los demás quedan como están y nadie los completa.' +
-          // ⚠ Un formulario real trae doce campos y agregarlos de a uno son doce
-          // toques antes de empezar a trabajar. Adoptarlos todos por omisión
-          // sería peor —el PDF puede traer cuarenta internos— pero hacerlo en un
-          // toque cuando la persona ya los miró no tiene ninguna contra.
+          '<div class="msg ok" style="margin:0 0 12px">Este PDF ya trae <b>' +
+          sinAdoptar.length + ' campo(s)</b> de formulario, con su lugar exacto. ' +
+          'Agregá los que quieras usar.' +
           '<button class="btn btn-s chico" id="cpTodos" style="margin-top:10px">' +
           'Agregar los ' + sinAdoptar.length + '</button></div>' +
-          '<table style="width:100%;margin-bottom:20px"><tbody>' +
+          '<table style="width:100%;margin-bottom:16px"><tbody>' +
           sinAdoptar.map(function (d, i) {
-            return '<tr><td style="padding:7px 0;border-bottom:1px solid var(--line)">' +
-              '<b>' + esc(d.etiqueta) + '</b>' +
-              '<br><span style="font-size:12px;color:var(--mut)">' +
-              tipoNombre(d.tipo) + ' · hoja ' + (d.pagina + 1) +
-              (d.valor_actual ? ' · ya dice «' + esc(d.valor_actual) + '»' : '') +
-              '</span></td>' +
-              '<td style="padding:7px 0;border-bottom:1px solid var(--line);text-align:right">' +
+            return '<tr><td style="padding:6px 0;border-bottom:1px solid var(--line)">' +
+              '<b>' + esc(d.etiqueta) + '</b><br>' +
+              '<span style="font-size:12px;color:var(--mut)">' + tipoNombre(d.tipo) +
+              ' · hoja ' + (d.pagina + 1) +
+              (d.valor_actual ? ' · ya dice «' + esc(d.valor_actual) + '»' : '') + '</span></td>' +
+              '<td style="padding:6px 0;border-bottom:1px solid var(--line);text-align:right">' +
               '<button class="btn btn-s chico" data-adoptar="' + i + '">Agregar</button>' +
               '</td></tr>';
-          }).join('') +
-          '</tbody></table>';
-      } else if (estado.sinFormulario && !estado.campos.length) {
-        html +=
-          '<div class="msg aviso" style="margin:0 0 14px">Este PDF no trae campos de ' +
-          'formulario. Podés agregarlos igual con <b>Agregar campo</b>; se dibujan sobre ' +
-          'la hoja al firmar.</div>';
+          }).join('') + '</tbody></table>';
       }
 
-      // ── los campos del circuito ──
+      // ── de quién es el próximo campo que se dibuje ──
+      html +=
+        '<div class="cp-nueva">' +
+        '<label class="campo" style="margin:0">Al tocar la hoja, agrego un campo</label>' +
+        '<select id="cpQuienNueva">' +
+        '<option value="emisor">que escribo yo</option>' +
+        firmantes.map(function (p) {
+          return '<option value="f' + p.orden + '">que escribe ' +
+            esc(p.nombre || p.email) + '</option>';
+        }).join('') +
+        '</select></div>';
+
       if (!estado.campos.length) {
         html += '<p style="color:var(--mut);font-size:14px;margin:16px 0">' +
-          'Todavía no hay ningún campo. El documento se firma igual.</p>';
+          (instanciaId
+            ? 'Todavía no hay ningún campo. <b>Tocá la hoja de la derecha</b> donde tenga ' +
+              'que ir un dato y se agrega ahí. El documento se firma igual sin ninguno.'
+            : 'Todavía no hay ningún campo.') + '</p>';
       } else {
-        html += '<table style="width:100%"><tbody>' + estado.campos.map(filaCampo).join('') + '</tbody></table>';
+        html += estado.campos.map(filaCampo).join('');
       }
-
-      html += '<button class="btn btn-s" id="cpAgregar" style="margin-top:14px">Agregar campo</button>';
 
       $('cpCuerpo').innerHTML = html;
+      enganchar(sinAdoptar);
 
-      function adoptar(d) {
-        estado.campos.push({
-          codigo: d.codigo, etiqueta: d.etiqueta, tipo: d.tipo, opciones: d.opciones,
-          // ⚠ Por omisión lo completa el PRIMER firmante, no el emisor.
-          // Un campo de un formulario que se manda a firmar es, casi siempre,
-          // un dato que aporta quien firma. Si fuera del emisor, lo cambia.
-          completa_emisor: false, orden_firmante: 1, obligatorio: false,
-          pagina: d.pagina, x: d.x, y: d.y, ancho: d.ancho, alto: d.alto, usos: 0,
-        });
-      }
-
-      $('cpCuerpo').querySelectorAll('[data-adoptar]').forEach(function (b) {
-        b.addEventListener('click', function () {
-          adoptar(sinAdoptar[Number(b.dataset.adoptar)]);
-          pintar();
-        });
-      });
-
-      if ($('cpTodos')) {
-        $('cpTodos').addEventListener('click', function () {
-          sinAdoptar.forEach(adoptar);
-          pintar();
-        });
-      }
-
-      $('cpAgregar').addEventListener('click', function () {
-        var n = estado.campos.length + 1;
-        estado.campos.push({
-          codigo: 'campo_' + n, etiqueta: 'Campo ' + n, tipo: 'texto', opciones: null,
-          completa_emisor: false, orden_firmante: 1, obligatorio: false,
-          pagina: 0, x: 60, y: 60, ancho: 200, alto: 20, usos: 0,
-        });
-        pintar();
-      });
-
-      enganchar();
+      var s = $('cpSel');
+      if (s) s.scrollIntoView({ block: 'nearest' });
     }
 
     function tipoNombre(t) {
@@ -197,50 +220,112 @@
       return f ? f[1] : t;
     }
 
-    function filaCampo(c, i) {
-      var quien = c.completa_emisor ? 'emisor' : 'f' + (c.orden_firmante || 1);
-      return '<tr><td colspan="2" style="padding:10px 0;border-bottom:1px solid var(--line)">' +
-        '<div class="dos">' +
-        '<div><label class="campo">Qué se pide</label>' +
-        '<input data-et="' + i + '" maxlength="120" value="' + esc(c.etiqueta) + '" /></div>' +
-        '<div><label class="campo">Tipo</label><select data-tipo="' + i + '">' +
-        TIPOS.map(function (t) {
-          return '<option value="' + t[0] + '"' + (c.tipo === t[0] ? ' selected' : '') + '>' + t[1] + '</option>';
-        }).join('') + '</select></div>' +
-        '</div>' +
-        '<div class="dos" style="margin-top:8px">' +
-        '<div><label class="campo">Quién lo completa</label><select data-quien="' + i + '">' +
-        '<option value="emisor"' + (quien === 'emisor' ? ' selected' : '') + '>Yo, antes de enviar</option>' +
-        (firmantes || []).map(function (p) {
-          var v = 'f' + p.orden;
-          return '<option value="' + v + '"' + (quien === v ? ' selected' : '') + '>' +
-            esc(p.nombre || p.email) + ', al firmar</option>';
-        }).join('') +
-        '</select></div>' +
-        '<div><label class="campo">&nbsp;</label>' +
-        '<label class="permisos" style="display:block;padding-top:10px">' +
-        '<input type="checkbox" data-obl="' + i + '"' + (c.obligatorio ? ' checked' : '') + ' /> ' +
-        'Obligatorio</label></div>' +
-        '</div>' +
-        (c.tipo === 'opcion'
-          ? '<label class="campo" style="margin-top:8px">Opciones, separadas por coma</label>' +
-            '<input data-ops="' + i + '" value="' + esc((c.opciones || []).join(', ')) + '" />'
-          : '') +
-        '<div style="margin-top:8px;display:flex;justify-content:space-between;align-items:center">' +
-        '<span style="font-size:12px;color:var(--mut)">' + esc(c.codigo) + ' · hoja ' + (c.pagina + 1) +
-        (c.usos ? ' · <b>ya completado ' + c.usos + ' vez/veces</b>' : '') + '</span>' +
-        '<button class="btn btn-d chico" data-borrar="' + i + '">Quitar</button>' +
-        '</div></td></tr>';
+    function quienDe(c) {
+      return c.completa_emisor ? 'emisor' : 'f' + (c.orden_firmante || 1);
     }
 
-    function enganchar() {
-      var c = $('cpCuerpo');
-      c.querySelectorAll('[data-et]').forEach(function (el) {
-        el.addEventListener('input', function () { estado.campos[+el.dataset.et].etiqueta = el.value; });
+    function filaCampo(c, i) {
+      var sel = i === estado.sel;
+      return '<div class="cp-campo' + (sel ? ' sel' : '') + '"' + (sel ? ' id="cpSel"' : '') +
+        ' data-fila="' + i + '">' +
+
+        '<div class="cp-campo-cab">' +
+        '<span class="cp-punto ' + (c.completa_emisor ? 'emisor' : 'firmante') + '"></span>' +
+        '<input class="cp-et" id="et' + i + '" data-et="' + i + '" maxlength="120" ' +
+        'placeholder="¿Qué se pide?" value="' + esc(c.etiqueta) + '" />' +
+        (c.usos
+          ? '<span class="cp-usos" title="Ya lo completó alguien: no se mueve ni se quita">' +
+            'completado</span>'
+          : '<button class="btn btn-d chico" data-borrar="' + i + '">Quitar</button>') +
+        '</div>' +
+
+        '<div class="cp-campo-fila">' +
+        '<select data-tipo="' + i + '">' +
+        TIPOS.map(function (t) {
+          return '<option value="' + t[0] + '"' + (c.tipo === t[0] ? ' selected' : '') + '>' +
+            t[1] + '</option>';
+        }).join('') + '</select>' +
+
+        '<select data-quien="' + i + '">' +
+        '<option value="emisor"' + (quienDe(c) === 'emisor' ? ' selected' : '') +
+        '>Lo escribo yo</option>' +
+        firmantes.map(function (p) {
+          var v = 'f' + p.orden;
+          return '<option value="' + v + '"' + (quienDe(c) === v ? ' selected' : '') + '>' +
+            'Se lo pido a ' + esc(p.nombre || p.email) + '</option>';
+        }).join('') + '</select>' +
+
+        '<label class="cp-obl"><input type="checkbox" data-obl="' + i + '"' +
+        (c.obligatorio ? ' checked' : '') + ' /> Obligatorio</label>' +
+        '</div>' +
+
+        (c.tipo === 'opcion'
+          ? '<input data-ops="' + i + '" class="cp-ops" placeholder="Opciones separadas por coma" ' +
+            'value="' + esc((c.opciones || []).join(', ')) + '" />'
+          : '') +
+
+        '<div class="cp-campo-pie">' +
+        '<span>hoja ' + (c.pagina + 1) + '</span>' +
+        (instanciaId
+          ? '<button class="btn btn-s chico" data-ir="' + i + '">Ver en la hoja</button>'
+          : '') +
+        '</div></div>';
+    }
+
+    function adoptar(d) {
+      estado.campos.push({
+        codigo: d.codigo, etiqueta: d.etiqueta, tipo: d.tipo, opciones: d.opciones,
+        // ⚠ Por omisión lo completa el PRIMER firmante, no el emisor: un campo de
+        // un formulario que se manda a firmar es, casi siempre, un dato que
+        // aporta quien firma. Si no hay firmantes todavía, queda del emisor,
+        // que es el único que puede.
+        completa_emisor: !firmantes.length,
+        orden_firmante: firmantes.length ? (firmantes[0].orden || 1) : null,
+        obligatorio: false,
+        pagina: d.pagina, x: d.x, y: d.y, ancho: d.ancho, alto: d.alto, usos: 0,
       });
+    }
+
+    function enganchar(sinAdoptar) {
+      var c = $('cpCuerpo');
+
+      c.querySelectorAll('[data-adoptar]').forEach(function (b) {
+        b.addEventListener('click', function () {
+          adoptar(sinAdoptar[Number(b.dataset.adoptar)]);
+          estado.sel = estado.campos.length - 1;
+          pintarLista();
+          if (HOJA) { HOJA.pintar(); HOJA.irA(estado.sel); }
+        });
+      });
+      if ($('cpTodos')) {
+        $('cpTodos').addEventListener('click', function () {
+          sinAdoptar.forEach(adoptar);
+          pintarLista();
+          if (HOJA) HOJA.pintar();
+        });
+      }
+
+      // ⚠ `input` y no `change` en la etiqueta: lo que se escribe se ve al
+      // instante en la caja de la hoja. Es lo que ata las dos columnas — sin
+      // eso, la lista y la hoja parecen dos cosas distintas.
+      c.querySelectorAll('[data-et]').forEach(function (el) {
+        el.addEventListener('input', function () {
+          estado.campos[+el.dataset.et].etiqueta = el.value;
+          if (HOJA) HOJA.pintar();
+        });
+        el.addEventListener('focus', function () {
+          estado.sel = +el.dataset.et;
+          if (HOJA) HOJA.irA(estado.sel);
+          marcarSeleccion();
+        });
+      });
+
       c.querySelectorAll('[data-tipo]').forEach(function (el) {
         el.addEventListener('change', function () {
-          estado.campos[+el.dataset.tipo].tipo = el.value; pintar();
+          estado.campos[+el.dataset.tipo].tipo = el.value;
+          estado.sel = +el.dataset.tipo;
+          pintarLista();
+          if (HOJA) HOJA.pintar();
         });
       });
       c.querySelectorAll('[data-quien]').forEach(function (el) {
@@ -248,15 +333,26 @@
           var campo = estado.campos[+el.dataset.quien];
           if (el.value === 'emisor') { campo.completa_emisor = true; campo.orden_firmante = null; }
           else { campo.completa_emisor = false; campo.orden_firmante = Number(el.value.slice(1)); }
+          pintarLista();
+          if (HOJA) HOJA.pintar();
         });
       });
       c.querySelectorAll('[data-obl]').forEach(function (el) {
-        el.addEventListener('change', function () { estado.campos[+el.dataset.obl].obligatorio = el.checked; });
+        el.addEventListener('change', function () {
+          estado.campos[+el.dataset.obl].obligatorio = el.checked;
+        });
       });
       c.querySelectorAll('[data-ops]').forEach(function (el) {
         el.addEventListener('input', function () {
           estado.campos[+el.dataset.ops].opciones =
             el.value.split(',').map(function (x) { return x.trim(); }).filter(Boolean);
+        });
+      });
+      c.querySelectorAll('[data-ir]').forEach(function (el) {
+        el.addEventListener('click', function () {
+          estado.sel = +el.dataset.ir;
+          if (HOJA) HOJA.irA(estado.sel);
+          marcarSeleccion();
         });
       });
       c.querySelectorAll('[data-borrar]').forEach(function (el) {
@@ -266,15 +362,42 @@
             return aviso('Ese campo ya lo completó alguien. Quitarlo borraría lo que escribió.');
           }
           estado.campos.splice(+el.dataset.borrar, 1);
+          estado.sel = -1;
           aviso('');
-          pintar();
+          pintarLista();
+          if (HOJA) HOJA.pintar();
+        });
+      });
+      c.querySelectorAll('[data-fila]').forEach(function (el) {
+        el.addEventListener('click', function (ev) {
+          if (ev.target.closest('button')) return;
+          estado.sel = +el.dataset.fila;
+          if (HOJA) HOJA.irA(estado.sel);
+          marcarSeleccion();
         });
       });
     }
 
+    /** Resalta sin repintar: repintar mientras se escribe se lleva el foco. */
+    function marcarSeleccion() {
+      $('cpCuerpo').querySelectorAll('[data-fila]').forEach(function (el) {
+        el.classList.toggle('sel', +el.dataset.fila === estado.sel);
+      });
+    }
+
+    // =======================================================================
+    // Guardar — uno solo, y guarda TODO: qué pide, quién lo escribe y dónde va
+    // =======================================================================
     $('cpOk').addEventListener('click', async function () {
+      var sinNombre = estado.campos.filter(function (c) { return !String(c.etiqueta || '').trim(); });
+      if (sinNombre.length) {
+        return aviso('Hay ' + sinNombre.length + ' campo(s) sin nombre. Escribí qué se pide en ' +
+          'cada uno: es lo que va a leer quien lo complete.');
+      }
+
       var b = $('cpOk');
-      b.disabled = true;
+      var antes = b.textContent;
+      b.disabled = true; b.textContent = 'Guardando…';
       try {
         await api('/circuitos/' + circuitoId + '/campos', 'PUT', {
           campos: estado.campos.map(function (c, i) {
@@ -284,13 +407,18 @@
               completa_emisor: !!c.completa_emisor,
               orden_firmante: c.completa_emisor ? null : (c.orden_firmante || 1),
               obligatorio: !!c.obligatorio,
-              pagina: c.pagina, x: c.x, y: c.y, ancho: c.ancho, alto: c.alto,
+              pagina: c.pagina,
+              x: +Number(c.x).toFixed(2), y: +Number(c.y).toFixed(2),
+              ancho: +Number(c.ancho).toFixed(2), alto: +Number(c.alto).toFixed(2),
               orden: i + 1,
             };
           }),
         });
         volver();
-      } catch (e) { b.disabled = false; aviso(e.message); }
+      } catch (e) {
+        b.disabled = false; b.textContent = antes;
+        aviso(e.message);
+      }
     });
   };
 })();

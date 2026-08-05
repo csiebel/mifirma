@@ -203,7 +203,7 @@ export function construirServidor(): FastifyInstance {
 
   // JavaScript de las páginas públicas. Se sirve como archivo suelto, igual que
   // el HTML: para dos archivos no vale la pena montar un servidor de estáticos.
-  for (const js of ['sitio.js', 'entrar.js', 'consola.js', 'operador.js', 'firmar.js', 'marcas.js', 'rubrica.js', 'visor.js', 'campos.js']) {
+  for (const js of ['sitio.js', 'entrar.js', 'consola.js', 'operador.js', 'firmar.js', 'marcas.js', 'rubrica.js', 'visor.js', 'campos.js', 'cajas.js']) {
     app.get('/' + js, async (_req, reply) => {
       try {
         const ruta = new URL('../public/' + js, import.meta.url);

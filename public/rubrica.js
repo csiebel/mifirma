@@ -198,7 +198,18 @@
     };
   }
 
+  /**
+   * ⚠ La cuenta compartida de «está trabajando», que pone firmar.js.
+   *
+   * Subir la firma es lo más lento de esta pantalla —se manda un PNG— y hasta
+   * ahora no mostraba nada. Con `||` vacío por si este módulo se usa suelto.
+   */
+  var trab = function () {
+    return window.trabajandoMiFirma || { abrio: function () {}, cerro: function () {} };
+  };
+
   function post(path, body) {
+    trab().abrio();
     return fetch(path, {
       method: 'POST', credentials: 'same-origin',
       headers: { 'Content-Type': 'application/json' },
@@ -209,7 +220,7 @@
       try { data = txt ? JSON.parse(txt) : {}; } catch (e) { data = { error: txt }; }
       if (!r.ok) throw new Error(data.error || ('HTTP ' + r.status));
       return data;
-    });
+    }).finally(function () { trab().cerro(); });
   }
 
   async function subir(canvas, tipo, origen) {
@@ -224,9 +235,15 @@
     fd.append('origen', origen);
     fd.append('archivo', blob, tipo + '.png');
 
-    var r = await fetch('/firmar/rubrica/cargar', {
-      method: 'POST', credentials: 'same-origin', body: fd,
-    });
+    trab().abrio();
+    var r;
+    try {
+      r = await fetch('/firmar/rubrica/cargar', {
+        method: 'POST', credentials: 'same-origin', body: fd,
+      });
+    } finally {
+      trab().cerro();
+    }
     var txt = await r.text();
     var data;
     try { data = txt ? JSON.parse(txt) : {}; } catch (e) { data = { error: txt }; }

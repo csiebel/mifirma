@@ -72,9 +72,21 @@
 
     abrirModal(
       '<h2>Dónde firma ' + esc(participacion.nombre || 'este firmante') + '</h2>' +
+      // ⚠ Lo que hay que explicar no es cómo se usa: es QUÉ ES.
+      //
+      // Se leía como «poné la firma de esta persona» —o sea, firmar por otro—,
+      // que contradice la regla del 3 de agosto: la imagen la aporta quien
+      // firma, siempre. Lo que se hace acá es reservarle el renglón. Un contrato
+      // con «Firma del solicitante» y «Firma por la empresa» en líneas distintas
+      // necesita que cada uno firme en la suya, y eso lo sabe el que manda el
+      // documento, no el que lo recibe.
+      '<p class="sub">Le reservás el renglón: la marca le aparece en la pantalla en este ' +
+      'lugar y ella pone ahí <b>su</b> firma. Puede acomodarla, no sacarla — correr una ' +
+      'firma que tapa un párrafo es acomodar; hacerla desaparecer sería firmar en otro ' +
+      'lado del que le pediste.</p>' +
       '<p class="sub">Elegí firma o rúbrica y hacé clic en la hoja. Arrastrá para acomodar y ' +
-      'usá la esquina para agrandar. Si no ponés nada, no se estampa nada: el documento ' +
-      'queda firmado igual.</p>' +
+      'usá la esquina para agrandar. Si no le reservás nada, firma donde quiera: el ' +
+      'documento queda firmado igual.</p>' +
       '<div class="acc" style="justify-content:flex-start;flex-wrap:wrap;gap:10px">' +
       '  <div class="acc" style="gap:4px">' +
       '    <button class="btn btn-p chico" id="tFirma">Firma</button>' +

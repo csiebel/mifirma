@@ -48,11 +48,26 @@ export async function verCircuito(cuentaId: string, identidadId: string, circuit
       id: string; titulo: string; estado: string; modo: string; nivel_firma: string;
       pais_marco: string; idioma: string; dias_vigencia: number | null;
       vence_en: Date | null; enviado_en: Date | null; politica_rechazo: string;
-      instancias: string;
+      instancias: string; instancia_id: string | null;
     }>`
       select c.id, c.titulo, c.estado, c.modo, c.nivel_firma, c.pais_marco, c.idioma,
              c.dias_vigencia, c.vence_en, c.enviado_en, c.politica_rechazo,
-             (select count(*) from instancia i where i.circuito_id = c.id)::text as instancias
+             (select count(*) from instancia i where i.circuito_id = c.id)::text as instancias,
+             -- ⚠ La primera instancia, para poder ABRIR EL PDF desde la pantalla de
+             -- preparación: el archivo se pide por instancia y el editor de cajas
+             -- necesita mostrar la hoja.
+             --
+             -- Antes esto salía de participaciones[0].instancia_id, que funciona
+             -- hasta que el documento todavía no tiene ningún firmante — que es
+             -- justo cuando uno abre la preparación por primera vez. Un dato que
+             -- existe desde que se sube el documento no puede depender de que ya
+             -- haya alguien a quien mandárselo.
+             --
+             -- En modo copias hay una instancia por destinatario; se toma la
+             -- primera porque todas comparten el mismo archivo base, que es lo
+             -- único que este uso necesita.
+             (select i.id from instancia i where i.circuito_id = c.id
+               order by i.numero limit 1) as instancia_id
         from circuito c where c.id = ${circuitoId}::uuid
     `.execute(trx);
     if (!c.rows.length) throw new HttpError(404, 'Ese documento no existe o no lo podés ver.');

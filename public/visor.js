@@ -59,7 +59,23 @@
     });
   }
 
+  /**
+   * ⚠ Avisa que hay trabajo en curso, si el panel puso la cuenta compartida.
+   *
+   * Colocar una marca escribe en la base y vuelve a leer todas; «en todas las
+   * hojas» sobre un contrato de cuarenta hace cuarenta inserciones. Eso se
+   * siente, y sin nada que se mueva se toca otra vez — que en este caso deja dos
+   * marcas encimadas.
+   *
+   * Con `||` vacío por si el visor se usa suelto: nunca puede romperse por no
+   * encontrar la barra.
+   */
+  var trab = function () {
+    return window.trabajandoMiFirma || { abrio: function () {}, cerro: function () {} };
+  };
+
   function post(path, body) {
+    trab().abrio();
     return fetch(path, {
       method: 'POST', credentials: 'same-origin',
       headers: { 'Content-Type': 'application/json' },
@@ -70,6 +86,10 @@
       try { data = txt ? JSON.parse(txt) : {}; } catch (e) { data = { error: txt }; }
       if (!r.ok) throw new Error(data.error || ('HTTP ' + r.status));
       return data;
+    }).finally(function () {
+      // `finally` y no al final del `then`: si la petición falla, la barra se
+      // va igual.
+      trab().cerro();
     });
   }
 
@@ -394,6 +414,11 @@
           // la misma regla que la marca ajena: mostrar el documento como va a
           // quedar, sin ofrecer tocar lo que no es de uno.
           if (!c.mio || !estado.editable) {
+            var rotA = document.createElement('span');
+            rotA.className = 'vis-campo-rot ajeno';
+            rotA.textContent = c.etiqueta;
+            el.appendChild(rotA);
+
             var v = document.createElement('span');
             v.className = 'vis-campo-fijo';
             v.textContent = c.valor != null && c.valor !== ''
@@ -404,6 +429,27 @@
             hoja.appendChild(el);
             return;
           }
+
+          // ⚠ El firmante tiene que poder LEER qué le piden.
+          //
+          // Hasta acá el recuadro amarillo salía vacío: la etiqueta estaba en el
+          // `title` —o sea en un tooltip que hay que descubrir con el mouse y que
+          // en un teléfono no existe— y en el índice del panel, lejos del campo.
+          // Sobre un formulario de banco, un renglón vacío arriba de otro renglón
+          // vacío no dice nada, y quien completa a ciegas completa mal.
+          //
+          // El rótulo va ARRIBA del recuadro y no adentro: adentro competiría
+          // con lo que la persona escribe, y en un campo de 20 puntos de alto no
+          // entran las dos cosas.
+          var rot = document.createElement('span');
+          // Fijo donde no hay otra forma de saber qué se pide: una casilla y una
+          // lista no tienen placeholder. En los de escribir alcanza con que
+          // aparezca al pasar por encima o al enfocar — y el que falta lo
+          // muestra igual, porque ahí sí hay que poder leerlo sin buscarlo.
+          rot.className = 'vis-campo-rot' +
+            (c.tipo === 'casilla' || c.tipo === 'opcion' ? ' siempre' : '');
+          rot.textContent = c.etiqueta + (c.obligatorio ? ' *' : '');
+          el.appendChild(rot);
 
           var ctrl = armarControl(c, p);
           // Sin esto, escribir en un campo también colocaría una firma: el
@@ -467,6 +513,10 @@
           el.type = clase === 'fecha' ? 'date' : 'text';
           el.value = v;
           el.maxLength = 500;
+          // El mismo texto adentro, tenue, mientras esté vacío: es la segunda
+          // oportunidad de leerlo si el rótulo de arriba quedó tapado por el
+          // renglón de encima en un formulario apretado.
+          if (clase !== 'fecha') el.placeholder = c.etiqueta;
         }
         el.style.fontSize = tamanoLetra(p) + 'px';
         return el;
@@ -515,8 +565,46 @@
       }
 
       // ---- agregar ----
+      /**
+       * ⚠ Un solo clic a la vez, y la marca aparece ANTES de que el servidor
+       * conteste.
+       *
+       * Colocar una marca son dos viajes —`/marca/agregar` y después
+       * `/marcas` para releer— y entre los dos pasan casi dos segundos. Hasta
+       * ahora, en ese rato la hoja no mostraba nada: el clic no producía ningún
+       * efecto visible. Quien nunca usó el sistema toca de nuevo, y como la
+       * comprobación de «ya tenés tu firma en esta hoja» mira `estado.marcas`
+       * —que todavía no se releyó— el segundo clic pasa el control y quedan dos
+       * firmas encimadas.
+       *
+       * Se arregla en los dos frentes, y hacen falta los dos:
+       *
+       *  · `colocando` cierra la puerta mientras hay una en vuelo. Es la red que
+       *    garantiza que no queden dos, pase lo que pase con la pantalla.
+       *  · Un recuadro fantasma se dibuja en el acto, donde se tocó. Es lo que
+       *    hace que el primer clic se sienta. Sin esto la puerta cerrada sería
+       *    otro clic que no hace nada — el mismo problema con otra cara.
+       */
+      var colocando = false;
+
+      function fantasma(hoja, xPx, yPx, anchoPx, altoPx) {
+        var el = document.createElement('div');
+        el.className = 'vis-marca mia fantasma';
+        el.style.left = xPx + 'px';
+        el.style.top = yPx + 'px';
+        el.style.width = anchoPx + 'px';
+        el.style.height = altoPx + 'px';
+        var t = document.createElement('span');
+        t.className = 'vis-et';
+        t.textContent = '…';
+        el.appendChild(t);
+        hoja.appendChild(el);
+        return el;
+      }
+
       async function clicEnHoja(ev) {
         if (!estado.editable) return;
+        if (colocando) return;
         if (ev.target.closest('.vis-marca')) return;
         // Un campo es un lugar donde se escribe, no donde se firma.
         if (ev.target.closest('.vis-campo')) return;
@@ -554,13 +642,23 @@
         var yPx = Math.max(0, Math.min(vp.height - altoPx, ev.clientY - r.top - altoPx / 2));
         var p = aPdf(pagina, xPx, yPx, anchoPx, altoPx);
 
+        // El recuadro aparece YA, donde se tocó. Lo reemplaza la marca de verdad
+        // cuando `traerMarcas()` repinta; si la escritura falla, se va y no
+        // queda nada — que es la verdad de lo que pasó.
+        colocando = true;
+        var provisoria = fantasma(hoja, xPx, yPx, anchoPx, altoPx);
         try {
           await post('/firmar/marca/agregar', {
             tipo: tipo, pagina: pagina,
             x: p.x, y: p.y, ancho: p.ancho, alto: p.alto,
           });
           aviso('');
-        } catch (e) { aviso(e.message); }
+        } catch (e) {
+          aviso(e.message);
+        } finally {
+          provisoria.remove();
+          colocando = false;
+        }
         await traerMarcas();
       }
 

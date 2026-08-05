@@ -182,6 +182,55 @@
   /* El editor de marcas: una hoja A4 a escala legible no entra en 440px. */
   .modal.ancho{max-width:min(980px,94vw)}
 
+  /* ── El editor de campos: la lista y la hoja, lado a lado ─────────────────
+     Eran dos pantallas que iban y venían, y no funcionó: «no queda donde lo
+     puse... no supe mucho cómo usarlo». Definir un campo y ubicarlo son la
+     misma tarea; separarlas obliga a llevar en la cabeza en cuál estás.
+
+     En pantalla angosta se apilan, con la hoja primero: ahí es donde se toca
+     para agregar, y es lo que hay que ver antes que nada. */
+  .cp-dos{display:grid;gap:16px;grid-template-columns:1fr;margin-top:4px}
+  @media(min-width:860px){.cp-dos{grid-template-columns:minmax(0,1fr) minmax(0,1.05fr);align-items:start}}
+  .cp-lista{max-height:58vh;overflow:auto;padding-right:4px;order:2}
+  .cp-hoja{order:1;display:flex;flex-direction:column;min-width:0}
+  @media(min-width:860px){.cp-lista{order:1}.cp-hoja{order:2}}
+  .cp-hoja-cab{display:flex;align-items:baseline;gap:10px;flex-wrap:wrap;margin-bottom:8px}
+  .cp-hoja-cab span{font-size:12.5px;color:var(--mut)}
+  .cp-lienzo{max-height:56vh;overflow:auto;background:#eef2f7;border-radius:10px;padding:12px;
+             min-height:180px}
+
+  /* De quién es el campo que se cree con el próximo toque. Va arriba de la
+     lista y no adentro de cada campo: es una decisión sobre lo que viene. */
+  .cp-nueva{display:flex;gap:10px;align-items:center;flex-wrap:wrap;background:var(--soft);
+            border:1px solid var(--line);border-radius:10px;padding:10px 12px;margin-bottom:12px}
+  .cp-nueva select{font:inherit;font-size:13.5px;padding:7px 10px;border:1px solid var(--line);
+                   border-radius:8px;background:#fff;flex:1;min-width:150px}
+
+  .cp-campo{border:1px solid var(--line);border-radius:11px;padding:11px 12px;margin-bottom:10px;
+            background:#fff;cursor:pointer;transition:.12s}
+  .cp-campo:hover{border-color:#c9d7e6}
+  .cp-campo.sel{border-color:var(--brand-600);box-shadow:0 0 0 3px rgba(37,99,235,.14)}
+  .cp-campo-cab{display:flex;gap:8px;align-items:center}
+  /* El punto de color es el mismo que el borde de la caja en la hoja: es lo que
+     deja ver de un vistazo cuál fila es cuál caja. */
+  .cp-punto{width:10px;height:10px;border-radius:3px;flex:none}
+  .cp-punto.emisor{background:#0e7490}
+  .cp-punto.firmante{background:#d9a406}
+  .cp-et{flex:1;min-width:0;font:inherit;font-weight:600;font-size:14px;padding:6px 8px;
+         border:1px solid transparent;border-radius:7px;background:transparent}
+  .cp-et:hover{border-color:var(--line)}
+  .cp-et:focus{outline:0;border-color:var(--brand-600);background:#fff}
+  .cp-campo-fila{display:flex;gap:8px;flex-wrap:wrap;margin-top:8px}
+  .cp-campo-fila select{font:inherit;font-size:13px;padding:6px 9px;border:1px solid var(--line);
+                        border-radius:8px;background:#fff;flex:1;min-width:120px}
+  .cp-obl{display:flex;align-items:center;gap:6px;font-size:13px;color:var(--mut);white-space:nowrap}
+  .cp-ops{width:100%;font:inherit;font-size:13px;padding:7px 9px;border:1px solid var(--line);
+          border-radius:8px;margin-top:8px}
+  .cp-campo-pie{display:flex;justify-content:space-between;align-items:center;margin-top:8px;
+                font-size:12px;color:var(--mut)}
+  .cp-usos{font-size:12px;color:var(--mut);background:var(--soft);border:1px solid var(--line);
+           border-radius:999px;padding:3px 9px;white-space:nowrap}
+
   .modal h2{font-size:19px;margin:0 0 6px}
   .modal p.sub{color:var(--mut);font-size:14px;margin:0 0 18px}
   label.campo{display:block;font-size:13px;font-weight:600;margin:14px 0 6px}
@@ -482,5 +531,6 @@
 <!-- El editor visual de marcas. Va después: usa `window.uiMiFirma`. -->
 <script src="/marcas.js"></script>
 <script src="/campos.js"></script>
+  <script src="/cajas.js"></script>
 </body>
 </html>

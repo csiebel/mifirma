@@ -165,6 +165,21 @@
     if (b) b.classList.remove('visible');
   }
 
+  /**
+   * Lleva la cuenta alrededor de una promesa, sin que se pueda desbalancear.
+   *
+   * ⚠ Existe porque tres llamadas de la consola NO pasan por `api()` —subir un
+   * PDF, subir la firma y bajar un archivo van como FormData o como descarga— y
+   * son justo las que más tardan. Poner `empezoAlgo()` suelto en cada una es
+   * pedirle a la próxima que se acuerde del `terminoAlgo()`: si alguna se olvida
+   * o sale por un `return` temprano, la barra queda girando para siempre, que
+   * miente peor que no tener ninguna.
+   */
+  function conBarra(promesa) {
+    empezoAlgo();
+    return promesa.finally(terminoAlgo);
+  }
+
   async function api(path, method, body) {
     var opt = { method: method || 'GET', credentials: 'same-origin', headers: {} };
     if (opt.method !== 'GET') {
@@ -256,7 +271,7 @@
     var antes = boton ? boton.textContent : '';
     if (boton) { boton.disabled = true; boton.textContent = 'Un momento…'; }
     try {
-      var r = await fetch(url, { credentials: 'same-origin' });
+      var r = await conBarra(fetch(url, { credentials: 'same-origin' }));
       if (!r.ok) {
         var txt = await r.text();
         var d;
@@ -782,7 +797,35 @@
     $('mCerrar').focus();
   }
 
-  function abrirSubir() {
+  /**
+   * Subir un documento.
+   *
+   * ⚠ La carpeta destino se ELIGE acá, no se saca de lo que estés mirando.
+   *
+   * Antes salía de `CARPETA`, la carpeta abierta en el árbol. Pero «Esperando
+   * firmas», «Firmados» y «Borradores» no son carpetas: son filtros sobre todo
+   * el repositorio, y ahí `CARPETA` es null. Subir un documento parado en
+   * «Firmados» —que es donde uno está la mitad del tiempo— reventaba con
+   * «null is not an object (evaluating 'CARPETA.id')», un mensaje que no le
+   * dice nada a nadie y que encima suena a que el archivo estaba mal.
+   *
+   * Poner un guard con «elegí una carpeta primero» habría tapado el error y
+   * dejado el problema: subir es una acción legítima desde cualquier pantalla,
+   * y mandar a la persona a buscar una carpeta para volver a empezar es hacerle
+   * dar una vuelta por una información que le podemos pedir acá.
+   *
+   * De paso se arregla algo que ya estaba flojo: la pista decía «va a la carpeta
+   * que tenés elegida» sin decir CUÁL. Ahora se ve y se puede cambiar.
+   */
+  async function abrirSubir() {
+    if (!ARBOL.length) {
+      try { ARBOL = (await api('/carpetas')).carpetas || []; } catch (e) {}
+    }
+    var lista = aplanar(ARBOL, [], 0);
+    // La que estés mirando si estás en una; si no, la primera del árbol, que es
+    // «Documentos», la del sistema.
+    var elegida = (CARPETA && CARPETA.id) || (lista[0] && lista[0].id) || '';
+
     abrirModal(
       '<h2>Subir documento</h2>' +
       '<p class="sub">Por ahora, PDF. Queda en borrador: todavía no se le pide la firma a nadie.</p>' +
@@ -790,7 +833,15 @@
       '<input id="mArchivo" type="file" accept="application/pdf" />' +
       '<label class="campo" for="mTitulo">Título <span style="font-weight:400;color:var(--mut)">(opcional)</span></label>' +
       '<input id="mTitulo" maxlength="200" placeholder="Se usa el nombre del archivo" />' +
-      '<p class="pista">Va a la carpeta que tenés elegida. Los permisos de esa carpeta deciden quién lo ve.</p>' +
+      (lista.length
+        ? '<label class="campo" for="mCarpetaSubir">Carpeta</label>' +
+          '<select id="mCarpetaSubir">' +
+          lista.map(function (c) {
+            return '<option value="' + esc(c.id) + '"' + (c.id === elegida ? ' selected' : '') +
+              '>' + esc(c.nombre) + '</option>';
+          }).join('') + '</select>' +
+          '<p class="pista">Los permisos de esa carpeta deciden quién lo ve.</p>'
+        : '<div class="msg err">No pudimos leer tus carpetas. Recargá la página.</div>') +
       '<div id="msgModal"></div>' +
       '<div class="acc"><button class="btn btn-s" id="mCancel">Cancelar</button>' +
       '<button class="btn btn-p" id="mOk">Subir</button></div>'
@@ -799,10 +850,12 @@
     $('mOk').addEventListener('click', async function () {
       var f = $('mArchivo').files[0];
       if (!f) return msg('msgModal', 'Elegí un archivo.', 'err');
-      $('mOk').disabled = true;
+      var destino = $('mCarpetaSubir') && $('mCarpetaSubir').value;
+      if (!destino) return msg('msgModal', 'No hay ninguna carpeta donde guardarlo. Recargá la página.', 'err');
+      var listoBtn = ocupar($('mOk'), 'Subiendo…');
       msg('msgModal', '', '');
       try {
-        var data = await subirUno(f, CARPETA.id, $('mTitulo').value.trim());
+        var data = await subirUno(f, destino, $('mTitulo').value.trim());
         cerrarModal();
         await cargarDocumentos();
         if (data.duplicado) {
@@ -810,7 +863,7 @@
         }
       } catch (e) {
         msg('msgModal', e.message, 'err');
-        $('mOk').disabled = false;
+        listoBtn();
       }
     });
   }
@@ -832,12 +885,14 @@
     fd.append('archivo', archivo, archivo.name);
 
     var c = csrf();
-    var r = await fetch('/documentos', {
+    // Subir un PDF es de lo más lento de la consola y no pasa por `api()`
+    // porque va como FormData. La cuenta se lleva igual.
+    var r = await conBarra(fetch('/documentos', {
       method: 'POST',
       credentials: 'same-origin',
       headers: c ? { 'X-CSRF-Token': c } : {},
       body: fd,   // sin Content-Type: lo pone el navegador con su boundary
-    });
+    }));
     var txt = await r.text();
     var data; try { data = txt ? JSON.parse(txt) : {}; } catch (e2) { data = { error: txt }; }
     if (!r.ok) throw new Error(data.error || ('HTTP ' + r.status));
@@ -924,8 +979,17 @@
       ev.preventDefault();
       dentro = 0;
       z.classList.remove('encima');
-      if (!CARPETA) return msg('msgDocs', 'Elegí una carpeta antes de subir.', 'err');
-      subirVarios(ev.dataTransfer.files, CARPETA.id);
+      // ⚠ Misma regla que el botón de subir: soltar un archivo parado en
+      // «Firmados» no es un error, es que todavía no dijimos dónde va. Si no hay
+      // carpeta abierta, va a la del sistema y se DICE cuál — decidir en
+      // silencio dónde queda el documento de alguien no.
+      var destino = (CARPETA && CARPETA.id) || (aplanar(ARBOL, [], 0)[0] || {}).id;
+      if (!destino) return msg('msgDocs', 'No pudimos leer tus carpetas. Recargá la página.', 'err');
+      if (!CARPETA) {
+        msg('msgDocs', 'No tenías ninguna carpeta abierta: va a «' +
+          (aplanar(ARBOL, [], 0)[0] || {}).nombre + '».', 'ok');
+      }
+      subirVarios(ev.dataTransfer.files, destino);
     });
 
     // Fuera de la zona, soltar un PDF hace que el navegador lo abra y se pierda
@@ -1098,9 +1162,22 @@
                         '<button class="btn btn-s chico" data-bajar="' + esc(p.id) + '" ' +
                         'title="Que firme después"' + (p.orden === maxOrden ? ' disabled' : '') + '>↓</button> '
                       : '') +
+                    // ⚠ «Ubicar firma» se leía como «poné tu firma», y esto es
+                    // lo contrario: el emisor no firma nada, RESERVA el renglón
+                    // donde tiene que firmar esta persona. En un contrato con
+                    // «Firma del solicitante» y «Firma por la empresa» en
+                    // renglones distintos, sin esto cada uno firma donde se le
+                    // ocurre y las dos firmas terminan en el mismo lugar.
+                    //
+                    // El botón está en la fila de cada firmante, así que «Dónde
+                    // firma» se lee «dónde firma ÉSTE» — y es el mismo título
+                    // que ya tenía el editor adentro. Eran dos nombres para la
+                    // misma cosa, y con dos nombres no hay forma de darse cuenta
+                    // de que lo son.
                     '<button class="btn btn-s chico" data-marcas="' + esc(p.id) + '" ' +
                     'data-inst="' + esc(p.instancia_id) + '" ' +
-                    'data-quien="' + esc(p.nombre || p.email) + '">Ubicar firma</button> '
+                    'title="Reservar el renglón donde firma ' + esc(p.nombre || p.email) + '" ' +
+                    'data-quien="' + esc(p.nombre || p.email) + '">Dónde firma</button> '
                   : '') +
                 '<button class="btn btn-d chico" data-quitar="' + esc(p.id) + '">Quitar</button>') +
             '</td></tr>'
@@ -1132,9 +1209,14 @@
           'esa empresa.') +
       '</p>' +
       (enviado ? '' :
-        '<p class="pista" style="margin:-10px 0 0">Con <b>Ubicar firma</b>, en la fila de cada uno, ' +
-        'elegís en qué hoja y en qué lugar se estampa su firma y su rúbrica. Es opcional: si no ' +
-        'ubicás nada, el documento se firma igual y sale sin ningún trazo dibujado.</p>') +
+        // ⚠ Decía «elegís dónde se estampa su firma», que es lo que hacía dudar
+        // de para qué sirve: sonaba a firmar por otro. Reservar el renglón es
+        // otra cosa, y es lo que hace falta en cualquier contrato con más de una
+        // línea de firma.
+        '<p class="pista" style="margin:-10px 0 0">Con <b>Dónde firma</b>, en la fila de cada uno, ' +
+        'le reservás el renglón donde tiene que firmar: la marca le aparece ahí y ella pone su ' +
+        'propia firma encima. Es opcional, pero si no reservás nada cada uno firma donde quiera, ' +
+        'y un documento con dos líneas de firma puede terminar con las dos en el mismo lugar.</p>') +
 
       (enviado ? '' :
         '<div class="dos">' +
@@ -1198,7 +1280,7 @@
         if (window.abrirCamposDelDocumento) {
           window.abrirCamposDelDocumento(circuitoId, enFila.map(function (p) {
             return { orden: p.orden, nombre: p.nombre, email: p.email };
-          }));
+          }), c.instancia_id);
         }
       });
     }
@@ -1382,7 +1464,7 @@
           if (window.abrirCamposDelDocumento) {
             window.abrirCamposDelDocumento(circuitoId, enFila.map(function (p) {
               return { orden: p.orden, nombre: p.nombre, email: p.email };
-            }));
+            }), c.instancia_id);
           }
         });
         $('mIgual').addEventListener('click', function () {
@@ -1759,12 +1841,12 @@
     fd.append('origen', origen);
     fd.append('archivo', blob, tipo + '.png');
     var t = csrf();
-    var r = await fetch('/mi/firma-visual/' + tipo, {
+    var r = await conBarra(fetch('/mi/firma-visual/' + tipo, {
       method: 'POST',
       credentials: 'same-origin',
       headers: t ? { 'X-CSRF-Token': t } : {},
       body: fd,
-    });
+    }));
     var txt = await r.text();
     var data; try { data = txt ? JSON.parse(txt) : {}; } catch (e) { data = { error: txt }; }
     if (!r.ok) throw new Error(data.error || ('HTTP ' + r.status));
