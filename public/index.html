@@ -230,6 +230,16 @@
                 font-size:12px;color:var(--mut)}
   .cp-usos{font-size:12px;color:var(--mut);background:var(--soft);border:1px solid var(--line);
            border-radius:999px;padding:3px 9px;white-space:nowrap}
+  /* Lo que el emisor escribe en su propio campo. Va destacado dentro de la
+     fila: no es una opción más del campo, es el contenido que va a salir
+     impreso en el documento. */
+  .cp-valor{margin-top:9px;padding:9px 10px;background:#e6f6f8;border:1px solid #b8e2e7;
+            border-radius:9px}
+  .cp-valor .campo{color:#0e7490;margin-bottom:5px}
+  /* Un texto fijo no pregunta quién lo completa: se dice, y ocupa el lugar de
+     los dos desplegables que no aplican. */
+  .cp-fijo{flex:1;min-width:150px;font-size:13px;color:var(--mut);align-self:center;
+           padding:6px 0}
 
   .modal h2{font-size:19px;margin:0 0 6px}
   .modal p.sub{color:var(--mut);font-size:14px;margin:0 0 18px}

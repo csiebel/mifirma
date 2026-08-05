@@ -32,8 +32,12 @@
   var NUEVA_CASILLA = { ancho: 16, alto: 16 };
 
   var COLOR = {
-    emisor:   { borde: '#0e7490', fondo: 'rgba(14,116,144,.16)' },
-    firmante: { borde: '#d9a406', fondo: 'rgba(253,224,71,.38)' },
+    emisor:     { borde: '#0e7490', fondo: 'rgba(14,116,144,.16)' },
+    firmante:   { borde: '#d9a406', fondo: 'rgba(253,224,71,.38)' },
+    // El que llena cualquiera: verde, para que se distinga de un vistazo del
+    // que tiene dueño. No es un detalle: mirando la hoja hay que poder decir
+    // «éste lo pone Claudio» y «éste lo pone el que llegue».
+    cualquiera: { borde: '#0f766e', fondo: 'rgba(20,184,166,.24)' },
   };
 
   var pdfjs = null;
@@ -201,8 +205,11 @@
           etiqueta: 'Campo ' + (campos.length + 1),
           tipo: 'texto',
           opciones: null,
+          quien_completa: quien === 'emisor' ? 'emisor'
+            : (quien === 'cualquiera' ? 'cualquiera' : 'firmante'),
           completa_emisor: quien === 'emisor',
-          orden_firmante: quien === 'emisor' ? null : Number(String(quien).slice(1)),
+          orden_firmante: (quien === 'emisor' || quien === 'cualquiera')
+            ? null : Number(String(quien).slice(1)),
           obligatorio: false,
           pagina: pagina, x: p.x, y: p.y, ancho: p.ancho, alto: p.alto,
           usos: 0,
@@ -212,10 +219,15 @@
         if (op.alCrear) op.alCrear(estado.sel);
       }
 
-      function deQuien(c) { return c.completa_emisor ? 'emisor' : 'firmante'; }
+      function deQuien(c) {
+        if (c.quien_completa) return c.quien_completa === 'emisor' ? 'emisor'
+          : (c.quien_completa === 'cualquiera' ? 'cualquiera' : 'firmante');
+        return c.completa_emisor ? 'emisor' : 'firmante';
+      }
 
       function nombreDe(c) {
-        if (c.completa_emisor) return 'lo completás vos';
+        if (c.quien_completa === 'cualquiera') return 'lo llena cualquiera de los firmantes';
+        if (c.completa_emisor) return 'texto fijo, no lo completa nadie';
         var p = (op.firmantes || []).filter(function (x) { return x.orden === c.orden_firmante; })[0];
         return p ? (p.nombre || p.email) : 'firmante ' + (c.orden_firmante || '?');
       }
@@ -245,7 +257,12 @@
           var et = document.createElement('span');
           et.style.cssText = 'padding:0 3px;pointer-events:none;white-space:nowrap;' +
             'overflow:hidden;text-overflow:ellipsis;max-width:100%';
-          et.textContent = c.etiqueta;
+          // ⚠ Si el emisor ya escribió el valor, se muestra EL VALOR y no la
+          // etiqueta: es lo que va a salir impreso, y hay que poder verlo en su
+          // lugar para saber si entra en el ancho que le diste.
+          var suyo = c.completa_emisor && String(c.valor || '').trim();
+          et.textContent = suyo ? String(c.valor).trim() : c.etiqueta;
+          if (suyo) { et.style.fontWeight = '400'; et.style.color = '#0f1e2c'; }
           el.appendChild(et);
 
           // ⚠ Un campo que alguien YA completó no se mueve ni se saca: sus

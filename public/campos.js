@@ -57,12 +57,39 @@
     ['moneda', 'Importe'],
     ['casilla', 'Sí / No'],
     ['opcion', 'Lista de opciones'],
+    // ⚠ No lo completa nadie: es texto que escribís vos y se estampa en la hoja.
+    // Sirve para decir QUÉ se está aceptando al lado de una casilla, que sobre
+    // un PDF sin formulario se estampaba como una X sola sin nada que la
+    // explique — un documento firmado con una marca que no prueba nada.
+    ['etiqueta', 'Texto fijo (no lo completa nadie)'],
   ];
 
   window.abrirCamposDelDocumento = async function (circuitoId, firmantes, instanciaId) {
-    var estado = { campos: [], detectados: [], sinFormulario: false, sel: -1 };
+    var estado = {
+      campos: [], detectados: [], sinFormulario: false, sel: -1,
+      // ⚠ De quién es el PRÓXIMO campo que se dibuje. Vive acá y no en el
+      // <select>, porque la lista se repinta cada vez que se agrega uno y el
+      // desplegable se reconstruye con él.
+      //
+      // Ese era el defecto: elegías «que escribe Claudio», tocabas la hoja —el
+      // primer campo salía bien—, la lista se repintaba, el desplegable volvía
+      // solo a «que escribo yo», y el SEGUNDO campo quedaba del emisor. En la
+      // pantalla de firma salía gris en vez de amarillo y no había forma de
+      // completarlo. Reportado así: «al segundo no lo ponía en amarillo, quedaba
+      // en gris, por lo que no pude terminar y firmar».
+      //
+      // Es la misma familia que el tipo de marca del 3 de agosto: un estado que
+      // vive en el DOM y se pierde cuando el DOM se rehace.
+      quienNueva: null,
+    };
     var HOJA = null;                 // el motor de cajas, cuando cargue
+    var estado_quienInicial = 'emisor';
     firmantes = firmantes || [];
+    // ⚠ Por omisión, el PRIMER FIRMANTE y no el emisor. Un campo que se agrega a
+    // un documento que se manda a firmar es, casi siempre, un dato que aporta
+    // quien firma; es la misma regla que ya gobierna adoptar un campo del
+    // formulario. Si no hay firmantes todavía, el emisor es el único que puede.
+    estado_quienInicial = firmantes.length ? 'f' + (firmantes[0].orden || 1) : 'emisor';
 
     abrirModal(
       '<h2>Campos del documento</h2>' +
@@ -119,11 +146,15 @@
           codigo: c.codigo, etiqueta: c.etiqueta, tipo: c.tipo,
           opciones: c.opciones || null,
           completa_emisor: c.completa_emisor,
+          quien_completa: c.quien_completa ||
+            (c.completa_emisor ? 'emisor' : (c.orden_firmante != null ? 'firmante' : 'cualquiera')),
           orden_firmante: c.orden_firmante,
           obligatorio: c.obligatorio,
           pagina: c.pagina, x: Number(c.x), y: Number(c.y),
           ancho: Number(c.ancho), alto: Number(c.alto),
           usos: Number(c.usos || 0),
+          id: c.id || null,
+          valor: c.valor_emisor == null ? '' : String(c.valor_emisor),
         };
       });
     } catch (e) { aviso(e.message); }
@@ -142,7 +173,7 @@
         instanciaId: instanciaId,
         campos: estado.campos,
         firmantes: firmantes,
-        quienNueva: function () { return $('cpQuienNueva') ? $('cpQuienNueva').value : 'emisor'; },
+        quienNueva: quienNueva,
         alTocar: function (i) { estado.sel = i; pintarLista(); },
         alMover: function () { pintarLista(); },
         alCrear: function (i) {
@@ -191,11 +222,22 @@
         '<div class="cp-nueva">' +
         '<label class="campo" style="margin:0">Al tocar la hoja, agrego un campo</label>' +
         '<select id="cpQuienNueva">' +
-        '<option value="emisor">que escribo yo</option>' +
+        // ⚠ Ya no está «que escribo yo». Un dato que pone el emisor y el
+        // firmante sólo lee ES un texto fijo: son lo mismo visto desde el
+        // documento, y tener las dos formas dejaba un estado intermedio —el
+        // campo propio vacío que nadie completa— que trababa documentos.
         firmantes.map(function (p) {
-          return '<option value="f' + p.orden + '">que escribe ' +
-            esc(p.nombre || p.email) + '</option>';
+          var v = 'f' + p.orden;
+          return '<option value="' + v + '"' + (quienNueva() === v ? ' selected' : '') +
+            '>que escribe ' + esc(p.nombre || p.email) + '</option>';
         }).join('') +
+        (firmantes.length > 1
+          ? '<option value="cualquiera"' + (quienNueva() === 'cualquiera' ? ' selected' : '') +
+            '>que llena cualquiera de ellos</option>'
+          : '') +
+        (!firmantes.length
+          ? '<option value="emisor" selected>de texto fijo</option>'
+          : '') +
         '</select></div>';
 
       if (!estado.campos.length) {
@@ -215,13 +257,35 @@
       if (s) s.scrollIntoView({ block: 'nearest' });
     }
 
+    /** De quién es el próximo campo. Una sola copia, en `estado`. */
+    function quienNueva() {
+      if (estado.quienNueva == null) estado.quienNueva = estado_quienInicial;
+      return estado.quienNueva;
+    }
+
     function tipoNombre(t) {
       var f = TIPOS.filter(function (x) { return x[0] === t; })[0];
       return f ? f[1] : t;
     }
 
     function quienDe(c) {
-      return c.completa_emisor ? 'emisor' : 'f' + (c.orden_firmante || 1);
+      if (c.quien_completa === 'emisor') return 'emisor';
+      if (c.quien_completa === 'cualquiera') return 'cualquiera';
+      return 'f' + (c.orden_firmante || 1);
+    }
+
+    /** Traduce lo que se elige en el desplegable al modo que guarda la base. */
+    function aplicarQuien(campo, valor) {
+      if (valor === 'emisor') {
+        campo.quien_completa = 'emisor';
+        campo.completa_emisor = true; campo.orden_firmante = null;
+      } else if (valor === 'cualquiera') {
+        campo.quien_completa = 'cualquiera';
+        campo.completa_emisor = false; campo.orden_firmante = null;
+      } else {
+        campo.quien_completa = 'firmante';
+        campo.completa_emisor = false; campo.orden_firmante = Number(String(valor).slice(1));
+      }
     }
 
     function filaCampo(c, i) {
@@ -246,17 +310,27 @@
             t[1] + '</option>';
         }).join('') + '</select>' +
 
-        '<select data-quien="' + i + '">' +
-        '<option value="emisor"' + (quienDe(c) === 'emisor' ? ' selected' : '') +
-        '>Lo escribo yo</option>' +
+        // Un texto fijo no pregunta quién lo completa ni si es obligatorio:
+        // las dos preguntas no tienen sentido y ofrecerlas confunde.
+        (c.tipo === 'etiqueta'
+          ? '<span class="cp-fijo">Se estampa tal cual, nadie lo completa</span>'
+          : '<select data-quien="' + i + '">' +
         firmantes.map(function (p) {
           var v = 'f' + p.orden;
           return '<option value="' + v + '"' + (quienDe(c) === v ? ' selected' : '') + '>' +
             'Se lo pido a ' + esc(p.nombre || p.email) + '</option>';
-        }).join('') + '</select>' +
+        }).join('') +
+        // ⚠ «Lo llena cualquiera» y no «lo llenan todos»: el dato entra UNA vez.
+        // Dos personas no pueden escribir en el mismo renglón del papel, y el
+        // primero que lo complete lo deja fijo para los demás.
+        (firmantes.length > 1
+          ? '<option value="cualquiera"' + (quienDe(c) === 'cualquiera' ? ' selected' : '') +
+            '>Lo llena cualquiera de ellos</option>'
+          : '') +
+        '</select>' +
 
         '<label class="cp-obl"><input type="checkbox" data-obl="' + i + '"' +
-        (c.obligatorio ? ' checked' : '') + ' /> Obligatorio</label>' +
+        (c.obligatorio ? ' checked' : '') + ' /> Obligatorio</label>') +
         '</div>' +
 
         (c.tipo === 'opcion'
@@ -264,12 +338,64 @@
             'value="' + esc((c.opciones || []).join(', ')) + '" />'
           : '') +
 
+        // ⚠ Si el campo lo completás vos, el lugar donde escribirlo es ACÁ.
+        //
+        // «Lo escribo yo» existía desde el primer día del módulo y no llevaba a
+        // ninguna parte: el campo quedaba definido, vacío, y el documento salía
+        // así. Si además era obligatorio, el firmante veía un recuadro gris que
+        // no podía completar y no había forma de terminar de firmar.
+        //
+        // Va en la misma fila y no en otra pantalla: definir el campo y decir
+        // qué dice son la misma decisión, y separarlas fue el error que ya
+        // costó rehacer el editor entero.
+        (c.completa_emisor
+          ? '<div class="cp-valor">' +
+            '<label class="campo" style="margin:0">' +
+            (c.tipo === 'etiqueta' ? 'El texto que se estampa' : 'Lo que va a decir') +
+            '</label>' +
+            valorHtml(c, i) +
+            '</div>'
+          : '') +
+
         '<div class="cp-campo-pie">' +
         '<span>hoja ' + (c.pagina + 1) + '</span>' +
+        // ⚠ «Uno para cada firmante» no es un modo de campo: es una forma de
+        // crearlos. Dos personas no pueden escribir en el mismo renglón del
+        // papel, así que si son tres cédulas hacen falta tres recuadros. Lo que
+        // se ahorra es dibujarlos de a uno y renombrarlos.
+        (c.quien_completa === 'firmante' && firmantes.length > 1 && !c.usos
+          ? '<button class="btn btn-s chico" data-cada="' + i + '" ' +
+            'title="Crear uno igual para cada firmante, apilados">Uno para cada firmante</button>'
+          : '') +
         (instanciaId
           ? '<button class="btn btn-s chico" data-ir="' + i + '">Ver en la hoja</button>'
           : '') +
         '</div></div>';
+    }
+
+    /** El control con el que el emisor escribe SU valor, según el tipo. */
+    function valorHtml(c, i) {
+      var v = c.valor == null ? '' : String(c.valor);
+      if (c.tipo === 'casilla') {
+        return '<label class="cp-obl" style="padding-top:4px">' +
+          '<input type="checkbox" data-val="' + i + '"' + (v ? ' checked' : '') + ' /> ' +
+          'Sí, marcada</label>';
+      }
+      if (c.tipo === 'opcion') {
+        return '<select data-val="' + i + '" class="cp-ops">' +
+          '<option value="">— elegí</option>' +
+          (c.opciones || []).map(function (o) {
+            return '<option value="' + esc(o) + '"' + (v === o ? ' selected' : '') + '>' +
+              esc(o) + '</option>';
+          }).join('') + '</select>';
+      }
+      if (c.tipo === 'parrafo') {
+        return '<textarea data-val="' + i + '" class="cp-ops" rows="2" ' +
+          'placeholder="Lo que va a salir impreso">' + esc(v) + '</textarea>';
+      }
+      return '<input data-val="' + i + '" class="cp-ops" maxlength="500" ' +
+        'type="' + (c.tipo === 'fecha' ? 'date' : 'text') + '" ' +
+        'placeholder="Lo que va a salir impreso" value="' + esc(v) + '" />';
     }
 
     function adoptar(d) {
@@ -308,6 +434,12 @@
       // ⚠ `input` y no `change` en la etiqueta: lo que se escribe se ve al
       // instante en la caja de la hoja. Es lo que ata las dos columnas — sin
       // eso, la lista y la hoja parecen dos cosas distintas.
+      if ($('cpQuienNueva')) {
+        $('cpQuienNueva').addEventListener('change', function () {
+          estado.quienNueva = $('cpQuienNueva').value;
+        });
+      }
+
       c.querySelectorAll('[data-et]').forEach(function (el) {
         el.addEventListener('input', function () {
           estado.campos[+el.dataset.et].etiqueta = el.value;
@@ -320,9 +452,34 @@
         });
       });
 
+      // El valor se ve en la caja de la hoja mientras se escribe: es lo que va
+      // a salir impreso, así que hay que poder mirarlo en su lugar.
+      c.querySelectorAll('[data-val]').forEach(function (el) {
+        var campo = estado.campos[+el.dataset.val];
+        var evento = (campo.tipo === 'casilla' || campo.tipo === 'opcion' ||
+                      campo.tipo === 'fecha') ? 'change' : 'input';
+        el.addEventListener(evento, function () {
+          campo.valor = campo.tipo === 'casilla' ? (el.checked ? 'sí' : '') : el.value;
+          if (HOJA) HOJA.pintar();
+        });
+      });
+
       c.querySelectorAll('[data-tipo]').forEach(function (el) {
         el.addEventListener('change', function () {
-          estado.campos[+el.dataset.tipo].tipo = el.value;
+          var campo = estado.campos[+el.dataset.tipo];
+          campo.tipo = el.value;
+          // Un texto fijo es tuyo y no es obligatorio: no hay a quién pedírselo.
+          // Se ajusta acá y no se le pregunta, porque no hay nada que elegir.
+          if (el.value === 'etiqueta') {
+            // ⚠ Los TRES, no dos. Faltaba `quien_completa` y el campo se
+            // guardaba como del primer firmante: el modo viejo se quedaba
+            // pegado y ganaba en el payload, así que un texto fijo salía a
+            // nombre de alguien. Se descubrió porque la prueba lo miró.
+            campo.quien_completa = 'emisor';
+            campo.completa_emisor = true;
+            campo.orden_firmante = null;
+            campo.obligatorio = false;
+          }
           estado.sel = +el.dataset.tipo;
           pintarLista();
           if (HOJA) HOJA.pintar();
@@ -330,9 +487,7 @@
       });
       c.querySelectorAll('[data-quien]').forEach(function (el) {
         el.addEventListener('change', function () {
-          var campo = estado.campos[+el.dataset.quien];
-          if (el.value === 'emisor') { campo.completa_emisor = true; campo.orden_firmante = null; }
-          else { campo.completa_emisor = false; campo.orden_firmante = Number(el.value.slice(1)); }
+          aplicarQuien(estado.campos[+el.dataset.quien], el.value);
           pintarLista();
           if (HOJA) HOJA.pintar();
         });
@@ -348,6 +503,37 @@
             el.value.split(',').map(function (x) { return x.trim(); }).filter(Boolean);
         });
       });
+      c.querySelectorAll('[data-cada]').forEach(function (el) {
+        el.addEventListener('click', function (ev) {
+          ev.stopPropagation();
+          var base = estado.campos[+el.dataset.cada];
+          var faltan = firmantes.filter(function (p) { return p.orden !== base.orden_firmante; });
+          var alto = Number(base.alto) || 20;
+
+          faltan.forEach(function (p, k) {
+            var copia = {};
+            for (var q in base) copia[q] = base[q];
+            copia.codigo = base.codigo + '_f' + p.orden;
+            copia.quien_completa = 'firmante';
+            copia.completa_emisor = false;
+            copia.orden_firmante = p.orden;
+            copia.usos = 0;
+            copia.valor = '';
+            // ⚠ Apilados hacia ABAJO, separados por su propio alto más un
+            // respiro. En puntos PDF, bajar es restar. Quedan uno debajo del
+            // otro y se acomodan arrastrando: adivinar dónde va el renglón de
+            // cada uno en el documento del cliente no lo puede hacer nadie.
+            copia.y = Number(base.y) - (k + 1) * (alto + 6);
+            estado.campos.push(copia);
+          });
+
+          aviso('Listo: uno para cada firmante, apilados debajo del primero. ' +
+            'Arrastralos al renglón que le toca a cada uno.', 'ok');
+          pintarLista();
+          if (HOJA) HOJA.pintar();
+        });
+      });
+
       c.querySelectorAll('[data-ir]').forEach(function (el) {
         el.addEventListener('click', function () {
           estado.sel = +el.dataset.ir;
@@ -399,13 +585,27 @@
       var antes = b.textContent;
       b.disabled = true; b.textContent = 'Guardando…';
       try {
+        // ⚠ Dos pasos, y en este orden. Un campo recién dibujado todavía no
+        // existe en la base, así que su valor no se puede guardar antes que él.
+        // Por eso la definición va primero y los valores después, releyendo los
+        // ids que quedaron.
         await api('/circuitos/' + circuitoId + '/campos', 'PUT', {
           campos: estado.campos.map(function (c, i) {
             return {
               codigo: c.codigo, etiqueta: c.etiqueta, tipo: c.tipo,
               opciones: c.tipo === 'opcion' ? (c.opciones || []) : null,
-              completa_emisor: !!c.completa_emisor,
-              orden_firmante: c.completa_emisor ? null : (c.orden_firmante || 1),
+              // ⚠ El MODO manda, y las otras dos se derivan de él.
+              //
+              // Acá quedó la lógica vieja de dos estados un rato: mandaba
+              // `orden_firmante: 1` para un campo de «cualquiera» —porque el
+              // `|| 1` tapaba el null— y el modo se perdía en el camino. El
+              // campo se guardaba como del primer firmante sin que nada fallara.
+              quien_completa: c.quien_completa ||
+                (c.completa_emisor ? 'emisor' : 'firmante'),
+              completa_emisor: c.quien_completa === 'emisor' || !!c.completa_emisor,
+              orden_firmante: c.quien_completa === 'firmante'
+                ? (c.orden_firmante || 1)
+                : (c.quien_completa ? null : (c.completa_emisor ? null : (c.orden_firmante || 1))),
               obligatorio: !!c.obligatorio,
               pagina: c.pagina,
               x: +Number(c.x).toFixed(2), y: +Number(c.y).toFixed(2),
@@ -414,6 +614,26 @@
             };
           }),
         });
+
+        var mios = estado.campos.filter(function (c) {
+          return c.completa_emisor && String(c.valor || '').trim();
+        });
+        if (mios.length) {
+          b.textContent = 'Guardando tus datos…';
+          var frescos = (await api('/circuitos/' + circuitoId + '/campos')).campos || [];
+          var porCodigo = {};
+          frescos.forEach(function (f) { porCodigo[f.codigo] = f.id; });
+
+          for (var k = 0; k < mios.length; k++) {
+            var id = porCodigo[mios[k].codigo];
+            if (!id) continue;
+            await api('/circuitos/' + circuitoId + '/campos/valor', 'POST', {
+              campo_id: id,
+              valor: String(mios[k].valor).trim() || null,
+            });
+          }
+        }
+
         volver();
       } catch (e) {
         b.disabled = false; b.textContent = antes;

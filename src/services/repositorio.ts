@@ -466,7 +466,11 @@ export async function listarDocumentos(
         left join carpeta cu on cu.id = u.carpeta_id
         left join instancia iu on iu.id = u.instancia_id
         join circuito c on c.id = coalesce(u.circuito_id, iu.circuito_id)
-        left join archivo a on a.id = coalesce(iu.archivo_firmado_id, c.archivo_base_id)
+        -- ⚠ Los TRES, en orden. Ver el comentario de bajarDocumento: un
+        -- documento firmado por algunos y no por todos vive en
+        -- archivo_vigente_id, y sin él la lista muestra el tamaño del original.
+        left join archivo a on a.id = coalesce(iu.archivo_firmado_id, iu.archivo_vigente_id,
+                                               c.archivo_base_id)
        where u.cuenta_id = ${cuentaId}::uuid
          and ${alcance}
          and not u.archivada
@@ -551,9 +555,26 @@ export async function bajarDocumento(
              (i.archivo_firmado_id is not null) as firmado
         from instancia i
         join circuito c on c.id = i.circuito_id
-        -- El firmado si existe; si no, el base. Quien pide "el documento"
-        -- quiere el que vale, y una vez firmado el que vale es el firmado.
-        join archivo a on a.id = coalesce(i.archivo_firmado_id, c.archivo_base_id)
+        -- ⚠ LOS TRES, EN ESTE ORDEN. Faltaba el del medio y el efecto era feo:
+        -- se firmaba un documento, se abría, y salía el ORIGINAL sin firmas y
+        -- sin los datos completados. Reportado así: «firmé un documento y cuando
+        -- lo veo luego de firmado no veo ni las firmas ni el texto incluido».
+        --
+        -- Son tres estados distintos del mismo documento y hay que conocerlos:
+        --
+        --   · archivo_firmado_id  — el circuito se COMPLETÓ: firmaron todos.
+        --   · archivo_vigente_id  — firmaron algunos. Es el estado en que vive un
+        --                           documento entre la primera firma y la última,
+        --                           y con un solo firmante también existe si el
+        --                           cierre del circuito no llegó a marcarse.
+        --   · archivo_base_id     — el original, sin ninguna firma.
+        --
+        -- Saltarse el del medio significa mostrar el original a alguien que
+        -- acaba de firmar. Es la misma familia que la migración 039: el
+        -- archivo_vigente_id se olvida porque el caso feliz —todos firmaron—
+        -- funciona igual sin él.
+        join archivo a on a.id = coalesce(i.archivo_firmado_id, i.archivo_vigente_id,
+                                          c.archivo_base_id)
        where i.id = ${instanciaId}::uuid
     `.execute(trx);
 

@@ -12,7 +12,7 @@ import {
   reenviarAvisos,
   enlaceDeFirma,
 } from '../../services/circuito';
-import { listarCampos, definirCampos, detectarCampos } from '../../services/campos';
+import { listarCampos, definirCampos, detectarCampos, guardarValorDelEmisor } from '../../services/campos';
 
 /**
  * Preparación y despacho de un circuito de firma.
@@ -125,9 +125,10 @@ export function registrarRutasCircuitos(app: FastifyInstance) {
       campos: z.array(z.object({
         codigo: z.string().min(1).max(60),
         etiqueta: z.string().min(1).max(120),
-        tipo: z.enum(['texto','parrafo','numero','fecha','moneda','casilla','opcion']),
+        tipo: z.enum(['texto','parrafo','numero','fecha','moneda','casilla','opcion','etiqueta']),
         opciones: z.array(z.string().max(120)).max(50).optional().nullable(),
         completa_emisor: z.boolean().optional(),
+        quien_completa: z.enum(['emisor','firmante','cualquiera']).optional(),
         orden_firmante: z.number().int().min(1).max(99).optional().nullable(),
         obligatorio: z.boolean().optional(),
         pagina: z.number().int().min(0).max(2000),
@@ -138,6 +139,26 @@ export function registrarRutasCircuitos(app: FastifyInstance) {
     }).parse(req.body);
     const { cuentaId, identidadId } = req.identidad;
     return definirCampos(cuentaId, identidadId, id, b.campos as any);
+  });
+
+  /**
+   * Lo que el emisor escribe en SUS campos, antes de mandar.
+   *
+   * ⚠ De a uno, como el firmante: el error de un campo no se lleva puestos los
+   * otros cuatro que estaban bien, y si el navegador se cierra a mitad de un
+   * formulario largo no se perdió nada.
+   *
+   * Quién puede y hasta cuándo lo decide `app.puede_completar_campo` en la base,
+   * no esta ruta.
+   */
+  app.post('/circuitos/:id/campos/valor', async (req) => {
+    const { id } = z.object({ id: z.string().uuid() }).parse(req.params);
+    const b = z.object({
+      campo_id: z.string().uuid(),
+      valor: z.string().max(2000).nullable(),
+    }).parse(req.body);
+    const { cuentaId, identidadId } = req.identidad;
+    return guardarValorDelEmisor(cuentaId, identidadId, id, b.campo_id, b.valor);
   });
 
   // Cancelar un documento en curso. Motivo obligatorio: va al expediente y es
