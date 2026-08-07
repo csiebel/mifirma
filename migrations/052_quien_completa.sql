@@ -57,9 +57,30 @@ begin;
 -- -----------------------------------------------------------------------------
 alter table campo add column if not exists quien_completa text;
 
+-- ⚠ EL RELLENO TIENE QUE APAGAR UN TRIGGER, Y ESO HAY QUE EXPLICARLO.
+--
+-- `campo_congelado` (038) prohíbe tocar un campo de un circuito ya despachado,
+-- y tiene toda la razón: mover un campo después del envío es cambiarle el
+-- formulario a alguien que ya lo tiene abierto.
+--
+-- Pero esto NO es tocar un campo. Es rellenar una columna nueva con lo que la
+-- fila ya decía por otras dos. El documento no cambia; cambia cómo lo
+-- guardamos. El trigger no puede distinguir las dos cosas —ve un UPDATE y
+-- nada más— así que se apaga durante el relleno y se prende enseguida.
+--
+-- Va DENTRO de la transacción a propósito: en PostgreSQL el DDL también hace
+-- rollback, así que si algo falla el trigger vuelve prendido solo. No hay
+-- forma de que quede apagado por un error.
+--
+-- Sin esto, la migración muere en la primera base que tenga UN documento ya
+-- enviado — que es cualquier base con la que se haya trabajado un día.
+alter table campo disable trigger campo_congelado;
+
 update campo
    set quien_completa = case when completa_emisor then 'emisor' else 'firmante' end
  where quien_completa is null;
+
+alter table campo enable trigger campo_congelado;
 
 alter table campo alter column quien_completa set default 'firmante';
 alter table campo alter column quien_completa set not null;
@@ -72,6 +93,29 @@ do $c$ begin
       check (quien_completa in ('emisor','firmante','cualquiera'));
   end if;
 end $c$;
+
+-- -----------------------------------------------------------------------------
+-- ⚠ LA RESTRICCIÓN VIEJA HACE IMPOSIBLE EL MODO NUEVO
+--
+-- `campo_tiene_dueno` (038) dice:
+--
+--   (completa_emisor y orden_firmante is null)
+--   o (no completa_emisor y orden_firmante is not null)
+--
+-- Es decir: **o es del emisor, o es de UN firmante nombrado**. Un campo de
+-- `cualquiera` es justamente el tercer caso —de ningún firmante en particular—
+-- y con esa restricción puesta no se puede guardar ni uno: el insert muere
+-- contra un CHECK que se escribió cuando el tercer modo no existía.
+--
+-- No se «relaja»: se REEMPLAZA por `campo_quien_coherente`, que dice lo mismo
+-- para los dos casos viejos y además contempla el nuevo. Dejar las dos sería
+-- tener dos definiciones de la misma regla, y la vieja gana en silencio.
+--
+-- Esto no se detectó antes porque el modo nuevo se probó contra un servidor de
+-- mentira, sin base. La lección es la de siempre acá: **una restricción que no
+-- se ejerció escribiendo no está probada.**
+-- -----------------------------------------------------------------------------
+alter table campo drop constraint if exists campo_tiene_dueno;
 
 -- Coherencia con las dos columnas que ya existían. No se sustituyen: se atan,
 -- porque el resto del código todavía las lee y dos fuentes que se contradicen
@@ -192,15 +236,68 @@ begin
     v_mal := v_mal || E'\n  falta campo_quien_coherente';
   end if;
 
+  -- La vieja tiene que estar SACADA: mientras esté, un campo de «cualquiera»
+  -- no entra, porque exige que todo campo sea del emisor o de un firmante
+  -- nombrado.
+  if exists (select 1 from pg_constraint
+              where conrelid = 'public.campo'::regclass and conname = 'campo_tiene_dueno') then
+    v_mal := v_mal || E'\n  campo_tiene_dueno sigue puesta: el modo cualquiera no se va a poder guardar';
+  end if;
+
+  -- Y el trigger tiene que haber quedado PRENDIDO. Se apagó unas líneas más
+  -- arriba para poder rellenar la columna; si quedara apagado, cualquiera
+  -- podría cambiarle los campos a un documento ya despachado y nadie se
+  -- enteraría hasta que un firmante viera otro formulario del que le mandaron.
+  if exists (select 1 from pg_trigger
+              where tgrelid = 'public.campo'::regclass
+                and tgname = 'campo_congelado'
+                and tgenabled = 'D') then
+    v_mal := v_mal || E'\n  ⚠ el trigger campo_congelado quedó APAGADO';
+  end if;
+
   -- La política tiene que conocer el modo nuevo.
   if position('cualquiera' in (select prosrc from pg_proc
                 where proname = 'puede_completar_campo' and pronamespace = 'app'::regnamespace)) = 0 then
     v_mal := v_mal || E'\n  app.puede_completar_campo no conoce el modo cualquiera';
   end if;
 
+  -- ═══ Y AHORA LA PRUEBA DE VERDAD: SE EJERCE ESCRIBIENDO ═══
+  --
+  -- Todo lo de arriba lee el catálogo, y el catálogo puede estar perfecto
+  -- mientras la combinación que importa igual no entra — es exactamente lo que
+  -- pasaba con `campo_tiene_dueno`: las tres restricciones nuevas existían y un
+  -- campo de «cualquiera» era imposible de guardar.
+  --
+  -- Así que se guarda uno de verdad, sobre un borrador real, y se borra. Si
+  -- algo lo frena, el mensaje de la base dice qué fue.
+  declare v_circ uuid; v_cuenta uuid;
+  begin
+    select c.id, c.cuenta_propietaria_id into v_circ, v_cuenta
+      from public.circuito c where c.estado = 'borrador' limit 1;
+
+    if v_circ is null then
+      raise notice 'Sin documentos en borrador: no se pudo EJERCER el modo cualquiera. Probalo en la pantalla.';
+    else
+      begin
+        insert into public.campo (circuito_id, cuenta_propietaria_id, codigo, etiqueta_i18n,
+                                  tipo, completa_emisor, quien_completa, orden_firmante,
+                                  pagina, x, y, ancho, alto)
+        values (v_circ, v_cuenta, '__prueba_cualquiera__', '{"es":"prueba"}'::jsonb,
+                'texto', false, 'cualquiera', null, 0, 1, 1, 10, 10);
+
+        delete from public.campo
+         where circuito_id = v_circ and codigo = '__prueba_cualquiera__';
+      exception when others then
+        -- El bloque tiene su propio savepoint: el insert se deshizo solo, no
+        -- queda nada colgado en el documento de nadie.
+        v_mal := v_mal || format(E'\n  un campo de modo «cualquiera» NO se puede guardar: %s', sqlerrm);
+      end;
+    end if;
+  end;
+
   if v_mal <> '' then
     raise exception E'El modo de completar quedó incompleto:%', v_mal;
   end if;
 
-  raise notice 'Quién completa: tres modos, y lo que ya existía quedó traducido.';
+  raise notice 'Quién completa: tres modos, el de «cualquiera» probado escribiendo, y lo que ya existía traducido.';
 end $control$;

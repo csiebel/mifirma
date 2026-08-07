@@ -171,6 +171,9 @@
     if (instanciaId && window.cajasMiFirma) {
       HOJA = await window.cajasMiFirma.montar($('cpLienzo'), {
         instanciaId: instanciaId,
+        // La barra de zoom va en el encabezado «La hoja», al lado del título:
+        // adentro del lienzo se iría con el scroll justo cuando hace falta.
+        zoomEn: document.querySelector('.cp-hoja-cab'),
         campos: estado.campos,
         firmantes: firmantes,
         quienNueva: quienNueva,
@@ -314,7 +317,22 @@
         // las dos preguntas no tienen sentido y ofrecerlas confunde.
         (c.tipo === 'etiqueta'
           ? '<span class="cp-fijo">Se estampa tal cual, nadie lo completa</span>'
-          : '<select data-quien="' + i + '">' +
+
+          // ⚠ SIN FIRMANTES NO SE DIBUJA UN DESPLEGABLE VACÍO.
+          //
+          // Hasta acá, si el documento todavía no tenía a quién mandárselo,
+          // este `select` salía con CERO opciones: un recuadro vacío, sin
+          // rótulo, al lado de una casilla sin rótulo. Reportado así: «¿qué es
+          // esa dropdown list que pusiste antes del checkbox, para qué es?».
+          //
+          // Es el mismo defecto del 4 de agosto —«no entiendo qué significa yo
+          // antes de enviar y no hay otra opción»— con otra cara: un control
+          // que ofrece una sola cosa, o ninguna, no es un control. Es una
+          // afirmación, y se escribe.
+          : !firmantes.length
+          ? '<span class="cp-fijo">Lo completás vos: este documento todavía no ' +
+            'tiene firmantes</span>'
+          : '<select data-quien="' + i + '" title="Quién escribe este dato">' +
         firmantes.map(function (p) {
           var v = 'f' + p.orden;
           return '<option value="' + v + '"' + (quienDe(c) === v ? ' selected' : '') + '>' +
@@ -327,10 +345,21 @@
           ? '<option value="cualquiera"' + (quienDe(c) === 'cualquiera' ? ' selected' : '') +
             '>Lo llena cualquiera de ellos</option>'
           : '') +
-        '</select>' +
+        '</select>') +
 
-        '<label class="cp-obl"><input type="checkbox" data-obl="' + i + '"' +
-        (c.obligatorio ? ' checked' : '') + ' /> Obligatorio</label>') +
+        // ⚠ LA CASILLA DICE LO QUE HACE, EN UNA ORACIÓN.
+        //
+        // Decía «Obligatorio», y Claudio pidió que «se diga en algún lado que
+        // ese checkbox es para que llenar ese campo sea obligatorio». Una
+        // palabra sola al lado de una casilla obliga a adivinar de qué es
+        // obligatorio: ¿el campo? ¿la firma? ¿mostrarlo?
+        //
+        // Va en su propio renglón y no apretada al final de la fila: ahí
+        // competía por el ancho con dos desplegables y quedaba cortada.
+        (c.tipo === 'etiqueta' ? '' :
+          '<label class="cp-obl"><input type="checkbox" data-obl="' + i + '"' +
+          (c.obligatorio ? ' checked' : '') + ' /> ' +
+          '<span>Hay que completarlo para poder firmar</span></label>') +
         '</div>' +
 
         (c.tipo === 'opcion'

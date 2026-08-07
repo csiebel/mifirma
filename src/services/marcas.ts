@@ -176,42 +176,97 @@ export async function definirMarcas(
 }
 
 /**
- * El firmante corre una marca dentro de su hoja.
+ * Tamaños que tienen sentido para una firma, en puntos PDF.
  *
- * ⚠ Va al expediente. Mover cambia lo que MUESTRA el documento, y sin registro
- * no habría forma de responder por qué la firma quedó en otro lugar del que
- * pidió el emisor. Se guarda de dónde a dónde.
+ * ⚠ El tamaño ahora llega del navegador, así que puede llegar cualquier cosa.
+ * Una firma de dos puntos no se ve y una de mil tapa la hoja entera, y las dos
+ * salen con la firma criptográfica puesta — que es lo que las vuelve difíciles
+ * de notar: el documento está firmado y no se lee.
  *
- * ⚠ No cambia de página ni de tamaño: eso sería rehacer la marca, no moverla, y
- * es decisión del emisor. Lo que se permite es acomodarla cuando tapa un
- * párrafo.
+ * 10 pt son unos 3,5 mm —el alto de una inicial chica, que es un tamaño
+ * legítimo— y 600 pt, poco más de 21 cm, el ancho de un A4.
+ */
+const MARCA_MINIMO = 10;
+const MARCA_MAXIMO = 600;
+
+/**
+ * El firmante acomoda su marca dentro de la hoja: la corre y le cambia el tamaño.
+ *
+ * ⚠ Va al expediente, y ésa es la única razón por la que se puede hacer. Mover
+ * o agrandar cambia lo que MUESTRA el documento, y sin registro no habría forma
+ * de responder por qué la firma quedó en otro lugar o de otro tamaño del que
+ * pidió el emisor. Se guarda de dónde a dónde, y de qué tamaño a qué tamaño.
+ *
+ * ═══ POR QUÉ EL TAMAÑO DEJÓ DE ESTAR PROHIBIDO ═══
+ *
+ * Acá decía: «no cambia de página ni de tamaño: eso sería rehacer la marca, no
+ * moverla, y es decisión del emisor».
+ *
+ * El argumento valía cuando el emisor reservaba el renglón. Pero **mover ya
+ * cambia lo que muestra el documento tanto como redimensionar**, y mover estuvo
+ * permitido desde el primer día: una firma corrida diez centímetros tapa lo
+ * mismo que una firma agrandada al doble. La línea estaba en el lugar
+ * equivocado. Lo que protege al emisor no es prohibir, es que quede escrito.
+ *
+ * ⚠ Lo que SIGUE prohibido es cambiar de página. Eso no es acomodar la firma:
+ * es firmar en otro lado del contrato, y ahí el emisor sí tiene algo que decir.
  */
 export async function moverMarca(
   token: string,
   marcaId: string,
   x: number,
   y: number,
+  tam: { ancho?: number | null; alto?: number | null } = {},
   ctx: { ip?: string | null; userAgent?: string | null } = {},
 ) {
   const e = await verificarEnlaceFirma(token);
 
   return withExterno(e.otorgamientoId, e.identidadId, async (trx) => {
     const antes = await sql<{
-      x: string; y: string; pagina: number; tipo: string;
+      x: string; y: string; ancho: string; alto: string; pagina: number; tipo: string;
       instancia_id: string; circuito_id: string; cuenta_propietaria_id: string;
       participacion_id: string;
     }>`
-      select x::text, y::text, pagina, tipo, instancia_id, circuito_id,
-             cuenta_propietaria_id, participacion_id
+      select x::text, y::text, ancho::text, alto::text, pagina, tipo,
+             instancia_id, circuito_id, cuenta_propietaria_id, participacion_id
         from marca_firma where id = ${marcaId}::uuid
     `.execute(trx);
 
     const m = antes.rows[0];
     if (!m) throw new HttpError(404, 'Esa marca no existe o no es tuya.');
 
+    const ancho = tam.ancho ?? Number(m.ancho);
+    const alto = tam.alto ?? Number(m.alto);
+    const cambioTamano =
+      Math.abs(ancho - Number(m.ancho)) > 0.01 || Math.abs(alto - Number(m.alto)) > 0.01;
+    const cambioLugar =
+      Math.abs(x - Number(m.x)) > 0.01 || Math.abs(y - Number(m.y)) > 0.01;
+
+    // ⚠ El tamaño se valida SÓLO si cambió, y no al entrar.
+    //
+    // La pantalla manda ancho y alto en cada arrastre —tiene que hacerlo, si no
+    // un arrastre después de un zoom guardaría el tamaño viejo— así que casi
+    // siempre llegan los que ya estaban. Y el emisor puede haber reservado un
+    // renglón más chico que nuestro mínimo: rechazarlo acá sería impedir MOVER
+    // una marca por un tamaño que esta persona no eligió y no puede arreglar.
+    //
+    // Lo que la regla protege es que nadie DEJE la firma en un tamaño que no se
+    // ve o que tapa la hoja. Eso es sobre el cambio, no sobre el estado previo.
+    if (cambioTamano) {
+      for (const [que, v] of [['ancho', ancho], ['alto', alto]] as const) {
+        if (!Number.isFinite(v) || v < MARCA_MINIMO || v > MARCA_MAXIMO) {
+          throw new HttpError(
+            400,
+            `Ese ${que} de firma no sirve: tiene que estar entre ${MARCA_MINIMO} y ${MARCA_MAXIMO} puntos.`,
+          );
+        }
+      }
+    }
+
     const upd = await sql<{ id: string }>`
       update marca_firma
-         set x = ${x}, y = ${y}, movida_en = now(), movida_por = ${e.identidadId}::uuid
+         set x = ${x}, y = ${y}, ancho = ${ancho}, alto = ${alto},
+             movida_en = now(), movida_por = ${e.identidadId}::uuid
        where id = ${marcaId}::uuid
       returning id
     `.execute(trx);
@@ -222,26 +277,56 @@ export async function moverMarca(
       throw new HttpError(409, 'Ya no podés mover esta marca: la firma está cerrada.');
     }
 
-    await anotar(trx, {
-      instanciaId: m.instancia_id,
-      circuitoId: m.circuito_id,
-      cuentaPropietariaId: m.cuenta_propietaria_id,
-      identidadId: e.identidadId,
-      participacionId: m.participacion_id,
-      actorTipo: 'firmante',
-      tipo: 'firma.marca_movida',
-      datos: {
-        tipo_marca: m.tipo,
-        pagina: m.pagina,
-        desde: { x: Number(m.x), y: Number(m.y) },
-        hasta: { x, y },
-      },
-      canal: 'web',
-      ip: ctx.ip,
-      userAgent: ctx.userAgent,
-    });
+    // ⚠ Dos eventos distintos y no uno con todo adentro. El expediente lo lee
+    // gente que no escribió el código, y un evento que se llama «movida» y
+    // además cuenta otra cosa es un evento en el que no se puede confiar.
+    //
+    // Y sólo se anota lo que efectivamente cambió: arrastrar una firma sin
+    // tocarle el tamaño no tiene por qué dejar una línea diciendo que se
+    // redimensionó de 170 a 170.
+    if (cambioLugar) {
+      await anotar(trx, {
+        instanciaId: m.instancia_id,
+        circuitoId: m.circuito_id,
+        cuentaPropietariaId: m.cuenta_propietaria_id,
+        identidadId: e.identidadId,
+        participacionId: m.participacion_id,
+        actorTipo: 'firmante',
+        tipo: 'firma.marca_movida',
+        datos: {
+          tipo_marca: m.tipo,
+          pagina: m.pagina,
+          desde: { x: Number(m.x), y: Number(m.y) },
+          hasta: { x, y },
+        },
+        canal: 'web',
+        ip: ctx.ip,
+        userAgent: ctx.userAgent,
+      });
+    }
 
-    return { ok: true };
+    if (cambioTamano) {
+      await anotar(trx, {
+        instanciaId: m.instancia_id,
+        circuitoId: m.circuito_id,
+        cuentaPropietariaId: m.cuenta_propietaria_id,
+        identidadId: e.identidadId,
+        participacionId: m.participacion_id,
+        actorTipo: 'firmante',
+        tipo: 'firma.marca_redimensionada',
+        datos: {
+          tipo_marca: m.tipo,
+          pagina: m.pagina,
+          desde: { ancho: Number(m.ancho), alto: Number(m.alto) },
+          hasta: { ancho, alto },
+        },
+        canal: 'web',
+        ip: ctx.ip,
+        userAgent: ctx.userAgent,
+      });
+    }
+
+    return { ok: true, ancho, alto };
   });
 }
 

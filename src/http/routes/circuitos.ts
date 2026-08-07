@@ -4,6 +4,7 @@ import { z } from 'zod';
 import {
   verCircuito,
   agregarFirmante,
+  agregarDestinatarios,
   quitarFirmante,
   reordenarFirmantes,
   configurarCircuito,
@@ -34,7 +35,7 @@ export function registrarRutasCircuitos(app: FastifyInstance) {
     const b = z
       .object({
         titulo: z.string().min(1).max(200).optional(),
-        modo: z.enum(['serie', 'paralelo']).optional(),
+        modo: z.enum(['serie', 'paralelo', 'copias']).optional(),
         nivel_firma: z.enum(['simple', 'avanzada']).optional(),
         dias_vigencia: z.coerce.number().int().min(1).max(365).nullable().optional(),
         politica_rechazo: z.enum(['bloqueante', 'continua']).optional(),
@@ -69,6 +70,25 @@ export function registrarRutasCircuitos(app: FastifyInstance) {
       orden: b.orden,
       nivelGarantiaMinimo: b.nivel_garantia_minimo,
     });
+  });
+
+  /**
+   * La lista entera de destinatarios, pegada de una planilla.
+   *
+   * Sólo en modo copias, y es lo que responde a «¿tengo que hacer el proceso
+   * diez veces?». Los campos del documento se definen UNA vez sobre el circuito
+   * y valen para las diez copias; lo único que se repite es a quién va cada una.
+   *
+   * ⚠ El texto llega crudo a propósito. Partirlo por comas, punto y coma o
+   * saltos de línea lo hace el servicio, porque lo que el emisor tiene en la
+   * mano es una columna de Excel o una lista de un correo, y pedirle que la
+   * formatee es pedirle el trabajo que tiene que hacer el programa.
+   */
+  app.post('/circuitos/:id/destinatarios', async (req) => {
+    const { id } = z.object({ id: z.string().uuid() }).parse(req.params);
+    const b = z.object({ lista: z.string().min(1).max(20000) }).parse(req.body);
+    const { cuentaId, identidadId } = req.identidad;
+    return agregarDestinatarios(cuentaId, identidadId, id, b.lista);
   });
 
   /**

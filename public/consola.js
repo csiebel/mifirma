@@ -1051,6 +1051,9 @@
     var representables = j.representables || [];
     var enviado = c.estado !== 'borrador';
     var serie = c.modo === 'serie';
+    // Un documento POR PERSONA. No es otra pantalla: es la misma lista, sólo
+    // que cada fila es un documento entero y no un renglón del mismo papel.
+    var copias = c.modo === 'copias';
 
     // El turno lo tienen sólo los firmantes: una copia informativa se notifica
     // al despachar y no hace esperar a nadie. Por eso las flechas se calculan
@@ -1146,7 +1149,22 @@
               : '') +
             '</td><td style="padding:9px 0;border-bottom:1px solid var(--line);text-align:right">' +
             (enviado
-              ? (p.estado === 'firmada' || p.estado === 'rechazada'
+              ? // ═══ BAJAR ESTA COPIA ═══
+                //
+                // ⚠ En copias el emisor no tenía forma de llegar a nueve de los
+                // diez documentos firmados. En la lista del repositorio el
+                // envío es UNA fila —la ubicación cuelga del circuito— y el
+                // botón de descargar baja la primera instancia: mandaba diez y
+                // podía guardar uno.
+                //
+                // Acá cada fila ya sabe cuál es su instancia, así que el enlace
+                // sale gratis. En serie y paralelo no va: las tres filas
+                // apuntan al mismo documento y serían tres botones iguales.
+                (copias && p.estado === 'firmada'
+                  ? '<button class="btn btn-s chico" data-copia="' + esc(p.instancia_id) + '" ' +
+                    'title="Bajar el documento firmado por ' + esc(p.nombre || p.email) + '">Bajar</button> '
+                  : '') +
+                (p.estado === 'firmada' || p.estado === 'rechazada'
                   ? ''
                   : '<button class="btn btn-s chico" data-enlace="' + esc(p.id) + '">Copiar enlace</button>')
               // Ubicar la firma es del EMISOR y sólo en borrador: después del
@@ -1174,17 +1192,32 @@
                     // que ya tenía el editor adentro. Eran dos nombres para la
                     // misma cosa, y con dos nombres no hay forma de darse cuenta
                     // de que lo son.
-                    '<button class="btn btn-s chico" data-marcas="' + esc(p.id) + '" ' +
-                    'data-inst="' + esc(p.instancia_id) + '" ' +
-                    'title="Reservar el renglón donde firma ' + esc(p.nombre || p.email) + '" ' +
-                    'data-quien="' + esc(p.nombre || p.email) + '">Dónde firma</button> '
+                    // ⚠ EN COPIAS NO VA, Y NO ES QUE FALTE: NO HACE FALTA.
+                    //
+                    // Reservar el renglón existe para que dos firmantes del
+                    // MISMO papel no terminen firmando uno encima del otro. En
+                    // un envío de copias hay una sola firma por documento, así
+                    // que no hay con quién chocar.
+                    //
+                    // (Lo que sí queda pendiente es «que todos firmen abajo a
+                    // la derecha»: hoy eso sería definir la misma marca diez
+                    // veces, que es justo lo que este envío vino a sacar. Se
+                    // resuelve cuando la marca se pueda definir sobre el
+                    // circuito y no sobre cada instancia.)
+                    (copias ? '' :
+                      '<button class="btn btn-s chico" data-marcas="' + esc(p.id) + '" ' +
+                      'data-inst="' + esc(p.instancia_id) + '" ' +
+                      'title="Reservar el renglón donde firma ' + esc(p.nombre || p.email) + '" ' +
+                      'data-quien="' + esc(p.nombre || p.email) + '">Dónde firma</button> ')
                   : '') +
                 '<button class="btn btn-d chico" data-quitar="' + esc(p.id) + '">Quitar</button>') +
             '</td></tr>'
           );
         }).join('')
       : '<tr><td colspan="3" style="padding:18px 0;color:var(--mut);font-size:14px">' +
-        'Todavía no agregaste a nadie.</td></tr>';
+        (copias
+          ? 'Todavía no agregaste destinatarios. Cada uno que agregues recibe su propia copia.'
+          : 'Todavía no agregaste a nadie.') + '</td></tr>';
 
     abrirModal(
       '<h2>' + esc(c.titulo) + '</h2>' +
@@ -1197,10 +1230,20 @@
             var hechos = enFila.filter(function (x) { return x.estado === 'firmada'; }).length;
             var faltan = enFila.filter(function (x) { return esperandoA.indexOf(x.id) >= 0; })
                                .map(function (x) { return x.nombre || x.email; });
-            return '<b>' + hechos + ' firmaron de ' + enFila.length + '</b>' +
-              (faltan.length ? ' · esperando a ' + esc(faltan.join(', ')) : '') +
+            return '<b>' + hechos + (copias ? ' firmaron su copia de ' : ' firmaron de ') +
+              enFila.length + '</b>' +
+              // En copias no se «espera a» nadie: no hay turno, cada uno va por
+              // su lado. Listar diez nombres como si trabaran algo sería leerlo
+              // al revés.
+              (faltan.length && !copias ? ' · esperando a ' + esc(faltan.join(', ')) : '') +
+              (copias && faltan.length ? ' · faltan ' + faltan.length : '') +
               '<br>El camino de firmas no se puede cambiar: la base lo congela después del despacho.';
           })()
+        : copias
+        ? 'Cada uno recibe <b>su propio documento</b>, con los mismos campos a completar. ' +
+          'Los campos se definen una sola vez, acá abajo, y valen para todas las copias: ' +
+          'cada persona llena la suya y firma sin ver lo que puso el resto.<br><br>' +
+          'Nadie necesita tener cuenta en MiFirma.'
         : 'Agregá a quién tiene que firmar y en qué orden. Ninguno necesita tener cuenta en MiFirma. ' +
           'Si el que firma sos vos, agregate con tu correo.<br><br>' +
           'Debajo de cada uno vas a ver <b>con qué carácter firma</b>. No lo elegís vos: lo ' +
@@ -1208,11 +1251,14 @@
           'del sistema. Es lo que decide si el documento queda en su repositorio o en el de ' +
           'esa empresa.') +
       '</p>' +
-      (enviado ? '' :
+      (enviado || copias ? '' :
         // ⚠ Decía «elegís dónde se estampa su firma», que es lo que hacía dudar
         // de para qué sirve: sonaba a firmar por otro. Reservar el renglón es
         // otra cosa, y es lo que hace falta en cualquier contrato con más de una
         // línea de firma.
+        //
+        // En copias no aparece: cada uno tiene el papel entero para él y no hay
+        // renglón que repartir.
         '<p class="pista" style="margin:-10px 0 0">Con <b>Dónde firma</b>, en la fila de cada uno, ' +
         'le reservás el renglón donde tiene que firmar: la marca le aparece ahí y ella pone su ' +
         'propia firma encima. Es opcional, pero si no reservás nada cada uno firma donde quiera, ' +
@@ -1220,10 +1266,14 @@
 
       (enviado ? '' :
         '<div class="dos">' +
-        '<div><label class="campo" for="mModo">Orden de firma</label>' +
+        '<div><label class="campo" for="mModo">Cómo se firma</label>' +
         '<select id="mModo">' +
         '<option value="serie"' + (serie ? ' selected' : '') + '>Uno después del otro</option>' +
-        '<option value="paralelo"' + (serie ? '' : ' selected') + '>Todos a la vez</option>' +
+        '<option value="paralelo"' + (!serie && !copias ? ' selected' : '') + '>Todos a la vez, el mismo documento</option>' +
+        // La tercera opción es la que faltaba, y el nombre importa: «copias» es
+        // como se llama adentro, pero afuera lo que hay que entender es que a
+        // cada uno le llega un documento suyo, no una copia de cortesía.
+        '<option value="copias"' + (copias ? ' selected' : '') + '>Una copia propia para cada uno</option>' +
         '</select></div>' +
         '<div><label class="campo" for="mDias">Vence en</label>' +
         '<select id="mDias">' +
@@ -1233,8 +1283,14 @@
               (String(c.dias_vigencia || '') === o[0] ? ' selected' : '') + '>' + o[1] + '</option>';
           }).join('') +
         '</select></div></div>' +
-        '<p class="pista">En serie, cada uno recibe el aviso <b>cuando firma el anterior</b>, no antes. ' +
-        'Con las flechas de cada fila cambiás el turno. A la vez, les llega a todos junto.</p>') +
+        (copias
+          ? '<p class="pista">Cada uno recibe <b>un documento suyo</b> y lo firma sin esperar a nadie. ' +
+            'Sirve para lo que se le manda igual a mucha gente: un reglamento, un consentimiento, ' +
+            'una carta de recepción.<br>' +
+            '⚠ Una vez que agregaste destinatarios ya no se puede volver a los otros dos modos: ' +
+            'cada copia tiene sus propios datos y juntarlas sería perder los de casi todos.</p>'
+          : '<p class="pista">En serie, cada uno recibe el aviso <b>cuando firma el anterior</b>, no antes. ' +
+            'Con las flechas de cada fila cambiás el turno. A la vez, les llega a todos junto.</p>')) +
 
       '<table style="width:100%;margin-top:18px"><tbody id="mParts">' + filas + '</tbody></table>' +
 
@@ -1249,11 +1305,41 @@
 
       (enviado ? '' :
         '<div class="dos" style="margin-top:16px">' +
-        '<div><label class="campo" for="mEmail">Correo de quien firma</label>' +
+        '<div><label class="campo" for="mEmail">' +
+        (copias ? 'Correo de un destinatario' : 'Correo de quien firma') + '</label>' +
         '<input id="mEmail" type="email" placeholder="persona@empresa.com" /></div>' +
         '<div><label class="campo" for="mNombre">Nombre <span style="font-weight:400;color:var(--mut)">(opcional)</span></label>' +
         '<input id="mNombre" maxlength="120" /></div></div>' +
         '<button class="btn btn-s" id="mAgregar" style="margin-top:10px">Agregar</button>') +
+
+      // ═══ LA LISTA PEGADA ═══
+      //
+      // Es la respuesta literal a «¿tengo que hacer el proceso diez veces?».
+      // Agregar de a uno diez veces sigue siendo hacerlo diez veces; lo que uno
+      // tiene en la mano es una columna de Excel, y eso es lo que tiene que
+      // poder pegar.
+      //
+      // ⚠ EN LOS TRES MODOS, y al principio sólo en copias. Fue un recorte mal
+      // hecho: pegar diez correos sirve igual cuando los diez firman el MISMO
+      // papel —un acta, un reglamento, una lista de asistencia— y esconderla
+      // según el modo hizo que se la buscara y no apareciera («sacaste la
+      // posibilidad de escribir varios mails en una caja»). Una función que
+      // aparece y desaparece según una opción de más arriba se lee como un
+      // error del programa, no como una regla.
+      (enviado ? '' :
+        '<div style="margin-top:18px;padding-top:16px;border-top:1px solid var(--line)">' +
+        '<label class="campo" for="mLista">…o pegá la lista entera</label>' +
+        '<textarea id="mLista" rows="5" placeholder="ana@empresa.com&#10;juan@empresa.com&#10;maria@otra.com"></textarea>' +
+        '<button class="btn btn-s" id="mPegar" style="margin-top:10px">Agregar todos</button>' +
+        '<p class="pista">Uno por línea, o separados por comas. Si alguno está mal escrito ' +
+        'no entra ninguno y te digo cuál es, para que lo corrijas sobre el mismo texto.<br>' +
+        (copias
+          ? 'Cada uno va a recibir <b>su propia copia</b> del documento.'
+          : serie
+          ? 'Van a firmar <b>en el orden en que los pegues</b>, uno detrás del otro.'
+          : 'Van a firmar <b>todos el mismo documento</b>, y les llega a todos junto.') +
+        '</p>' +
+        '</div>') +
 
       '<div id="msgModal"></div>' +
       '<div class="acc">' +
@@ -1267,20 +1353,43 @@
       (enviado && c.estado === 'enviado'
         ? '<button class="btn btn-s" id="mReenviar">Reenviar aviso</button>'
         : '') +
-      (enviado ? '' : '<button class="btn btn-p" id="mEnviar">Enviar a firmar</button>') +
+      (enviado ? '' : '<button class="btn btn-p" id="mEnviar">' +
+        (copias && enFila.length
+          ? 'Enviar ' + enFila.length + (enFila.length === 1 ? ' copia' : ' copias')
+          : 'Enviar a firmar') + '</button>') +
       '</div>'
     );
 
     $('mCancel').addEventListener('click', function () { cerrarModal(); cargarDocumentos(); });
+
+    /**
+     * A quién le puede pedir un dato el editor de campos.
+     *
+     * ⚠ EN COPIAS ES UNO SOLO, Y NO ES UN ATAJO.
+     *
+     * Los campos son del CIRCUITO y valen para las diez copias, pero dentro de
+     * cada copia hay una sola persona. Pasarle los diez nombres al editor le
+     * dejaría armar «este campo lo llena el firmante 7», que en un envío de
+     * copias no quiere decir nada: en la copia de Ana no existe ningún firmante
+     * 7, y ese campo no se lo pediría a nadie.
+     *
+     * Con uno solo, el editor esconde el selector por persona y el botón de
+     * «uno para cada uno» —que tampoco tienen sentido acá— y todo campo de
+     * firmante queda en orden 1, que es el que tiene cada copia.
+     */
+    function quienesParaCampos() {
+      if (copias) return [{ orden: 1, nombre: 'Quien recibe la copia', email: '' }];
+      return enFila.map(function (p) {
+        return { orden: p.orden, nombre: p.nombre, email: p.email };
+      });
+    }
 
     if ($('mCampos')) {
       $('mCampos').addEventListener('click', function () {
         // El editor vive en campos.js: trae su propia lógica y no tiene por qué
         // cargarse en cada visita a la consola.
         if (window.abrirCamposDelDocumento) {
-          window.abrirCamposDelDocumento(circuitoId, enFila.map(function (p) {
-            return { orden: p.orden, nombre: p.nombre, email: p.email };
-          }), c.instancia_id);
+          window.abrirCamposDelDocumento(circuitoId, quienesParaCampos(), c.instancia_id);
         }
       });
     }
@@ -1306,6 +1415,14 @@
         }
       });
     }
+
+    // Bajar la copia firmada de una persona. `bajarArchivo` ya trae la barra de
+    // espera y el nombre que manda el servidor.
+    $('modal').querySelectorAll('[data-copia]').forEach(function (b) {
+      b.addEventListener('click', function () {
+        bajarArchivo('/documentos/' + b.dataset.copia + '/archivo', b);
+      });
+    });
 
     // El enlace personal de firma. Se copia al portapapeles y se muestra, porque
     // en algunos navegadores el portapapeles falla en silencio y quedarse sin el
@@ -1412,6 +1529,30 @@
       } catch (e) { msg('msgModal', e.message, 'err'); $('mAgregar').disabled = false; }
     });
 
+    if ($('mPegar')) {
+      $('mPegar').addEventListener('click', async function () {
+        var texto = $('mLista').value.trim();
+        if (!texto) return msg('msgModal', 'Pegá la lista de correos primero.', 'err');
+        var b = $('mPegar');
+        b.disabled = true; b.textContent = 'Agregando…';
+        try {
+          var r = await api('/circuitos/' + circuitoId + '/destinatarios', 'POST', { lista: texto });
+          // Se vacía sólo si entró todo. Si falló, el texto sigue ahí para
+          // corregir el que está mal, que es lo único que hace falta cambiar.
+          $('mLista').value = '';
+          msg('msgModal',
+            copias
+              ? r.copias + (r.copias === 1 ? ' copia creada.' : ' copias creadas.')
+              : r.copias + (r.copias === 1 ? ' firmante agregado.' : ' firmantes agregados.'),
+            'ok');
+          setTimeout(function () { abrirCircuito(circuitoId); }, 700);
+        } catch (e) {
+          msg('msgModal', e.message, 'err');
+          b.disabled = false; b.textContent = 'Agregar todos';
+        }
+      });
+    }
+
     /**
      * ⚠ Antes de despachar: ¿el PDF trae campos que nadie adoptó?
      *
@@ -1462,9 +1603,7 @@
         $('mVerCampos').addEventListener('click', function () {
           resolver(false);
           if (window.abrirCamposDelDocumento) {
-            window.abrirCamposDelDocumento(circuitoId, enFila.map(function (p) {
-              return { orden: p.orden, nombre: p.nombre, email: p.email };
-            }), c.instancia_id);
+            window.abrirCamposDelDocumento(circuitoId, quienesParaCampos(), c.instancia_id);
           }
         });
         $('mIgual').addEventListener('click', function () {
@@ -1475,7 +1614,10 @@
     }
 
     $('mEnviar').addEventListener('click', async function () {
-      if (!parts.length) return msg('msgModal', 'Agregá al menos un firmante.', 'err');
+      if (!parts.length) {
+        return msg('msgModal',
+          copias ? 'Agregá al menos un destinatario.' : 'Agregá al menos un firmante.', 'err');
+      }
       msg('msgModal', '', '');
       // Antes del aviso de campos el botón sólo se deshabilitaba: no decía nada,
       // y despachar tarda lo que tardan los correos.

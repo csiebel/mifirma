@@ -194,10 +194,22 @@
   .cp-lista{max-height:58vh;overflow:auto;padding-right:4px;order:2}
   .cp-hoja{order:1;display:flex;flex-direction:column;min-width:0}
   @media(min-width:860px){.cp-lista{order:1}.cp-hoja{order:2}}
-  .cp-hoja-cab{display:flex;align-items:baseline;gap:10px;flex-wrap:wrap;margin-bottom:8px}
+  .cp-hoja-cab{display:flex;align-items:center;gap:10px;flex-wrap:wrap;margin-bottom:8px}
   .cp-hoja-cab span{font-size:12.5px;color:var(--mut)}
   .cp-lienzo{max-height:56vh;overflow:auto;background:#eef2f7;border-radius:10px;padding:12px;
              min-height:180px}
+
+  /* El zoom de la hoja. Va en el encabezado y no adentro del lienzo: adentro
+     se iría con el scroll justo cuando hace falta, que es mirando de cerca un
+     renglón del final de la hoja. `margin-left:auto` lo manda a la derecha sin
+     tocar el resto del encabezado. */
+  .cj-zoom{margin-left:auto;display:flex;gap:2px;background:#eef2f7;
+           border:1px solid var(--line);border-radius:9px;padding:3px;flex:0 0 auto}
+  .cj-zoom button{border:0;background:transparent;color:var(--tinta);cursor:pointer;
+                  font-size:14px;font-weight:600;line-height:1;padding:5px 9px;
+                  border-radius:6px;min-width:28px;margin:0;width:auto;box-shadow:none}
+  .cj-zoom button:hover{background:#fff}
+  .cj-zoom .cj-zoom-n{font-size:11.5px;min-width:48px;color:var(--mut)}
 
   /* De quién es el campo que se cree con el próximo toque. Va arriba de la
      lista y no adentro de cada campo: es una decisión sobre lo que viene. */
@@ -223,7 +235,13 @@
   .cp-campo-fila{display:flex;gap:8px;flex-wrap:wrap;margin-top:8px}
   .cp-campo-fila select{font:inherit;font-size:13px;padding:6px 9px;border:1px solid var(--line);
                         border-radius:8px;background:#fff;flex:1;min-width:120px}
-  .cp-obl{display:flex;align-items:center;gap:6px;font-size:13px;color:var(--mut);white-space:nowrap}
+  /* La casilla de «obligatorio», en su propio renglón y con la oración entera.
+     Apretada al final de la fila competía por el ancho con dos desplegables y
+     el texto quedaba cortado — que es lo mismo que no ponerlo. */
+  .cp-obl{display:flex;align-items:center;gap:7px;font-size:13px;color:var(--mut);
+          flex:1 0 100%;margin-top:2px;cursor:pointer}
+  .cp-obl input{flex:0 0 auto;margin:0}
+  .cp-obl:hover{color:var(--tinta)}
   .cp-ops{width:100%;font:inherit;font-size:13px;padding:7px 9px;border:1px solid var(--line);
           border-radius:8px;margin-top:8px}
   .cp-campo-pie{display:flex;justify-content:space-between;align-items:center;margin-top:8px;

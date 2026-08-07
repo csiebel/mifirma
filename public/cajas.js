@@ -26,8 +26,15 @@
   'use strict';
 
   var ANCHO_OBJETIVO = 560;      // px de pantalla que ocupa una hoja en la columna
-  var ESCALA_MAX = 1.4;
+  var ESCALA_MAX = 1.4;          // techo del ajuste automático al abrir
   var MINIMO = 14;               // lado mínimo de una caja, en px de pantalla
+
+  // Los escalones del zoom, relativos al ajuste automático. Fijos y no un
+  // factor: así el 100% —la hoja entera en pantalla— siempre existe y se vuelve
+  // a él sin buscarlo.
+  var ZOOM_MIN = 0.4;
+  var ZOOM_MAX = 4;
+  var ZOOM_PASOS = [0.4, 0.5, 0.67, 0.8, 1, 1.25, 1.5, 2, 2.5, 3, 4];
   var NUEVA = { ancho: 190, alto: 20 };          // puntos PDF: un renglón normal
   var NUEVA_CASILLA = { ancho: 16, alto: 16 };
 
@@ -84,6 +91,33 @@
       estado.paginas = doc.numPages;
       caja.innerHTML = '';
 
+      // Las páginas se guardan: hacer zoom es pedirle a pdf.js un viewport
+      // nuevo y volver a dibujar, y sin la página no se puede.
+      var paginasPdf = [];
+      var escalaAjuste = 1;
+
+      // ═══ LA BARRA DE ZOOM ═══
+      //
+      // El ajuste automático entra la hoja entera, que es lo correcto para
+      // leerla y no alcanza para ubicar un campo: en un formulario apretado un
+      // renglón mide seis píxeles, y el recuadro cae en el de arriba o en el de
+      // abajo. Pedido así: «que pueda existir la opción de zoom en las hojas
+      // así se sabe bien dónde colocar los campos».
+      //
+      // ⚠ El zoom NO toca ninguna coordenada guardada. Todo se guarda en puntos
+      // PDF y `aPdf`/`aPantalla` convierten con la escala vigente. Si algo se
+      // moviera al hacer zoom, la conversión está mal en otro lado.
+      var barra = document.createElement('div');
+      barra.className = 'cj-zoom';
+      barra.innerHTML =
+        '<button type="button" data-z="-" title="Achicar" aria-label="Achicar">−</button>' +
+        '<button type="button" data-z="fit" class="cj-zoom-n" title="Entrar la hoja en pantalla">100%</button>' +
+        '<button type="button" data-z="+" title="Agrandar" aria-label="Agrandar">+</button>';
+      // Dónde va la barra lo decide QUIEN LLAMA, no este archivo: el motor no
+      // tiene por qué conocer la maqueta del editor. Sin `op.zoomEn` cae al
+      // lado de la hoja, que funciona en cualquier lado.
+      (op.zoomEn || caja.parentElement || caja).appendChild(barra);
+
       // Se miden todas las hojas al abrir —hace falta para convertir coordenadas
       // en cualquiera— pero se dibuja sólo la que entra en pantalla. Un contrato
       // de 200 hojas dibujado entero son ~1,6 GB de píxeles.
@@ -101,9 +135,11 @@
 
       for (var n = 1; n <= doc.numPages; n++) {
         var pag = await doc.getPage(n);
+        paginasPdf[n - 1] = pag;
         if (n === 1) {
           var base = pag.getViewport({ scale: 1 });
-          estado.escala = Math.min(ESCALA_MAX, (caja.clientWidth - 28 || ANCHO_OBJETIVO) / base.width);
+          escalaAjuste = Math.min(ESCALA_MAX, (caja.clientWidth - 28 || ANCHO_OBJETIVO) / base.width);
+          estado.escala = escalaAjuste;
         }
         var vp = pag.getViewport({ scale: estado.escala });
         estado.viewports[n - 1] = vp;
@@ -139,6 +175,63 @@
 
         hoja.addEventListener('mousedown', clicEnHoja);
       }
+
+      // =====================================================================
+      // El zoom
+      //
+      // ⚠ Y REPINTAR LAS CAJAS. Se posicionan en píxeles a partir de puntos PDF
+      // con la escala vigente: sin repintar quedan donde estaban y el recuadro
+      // aparece lejísimos del renglón al que pertenece. Ése es el defecto que
+      // este bloque tiene que no tener.
+      // =====================================================================
+      function aplicarZoom(nueva) {
+        var e2 = Math.max(ZOOM_MIN, Math.min(ZOOM_MAX, nueva));
+        if (Math.abs(e2 - estado.escala) < 0.001) return;
+
+        var antes = caja.scrollTop / Math.max(1, caja.scrollHeight);
+        estado.escala = e2;
+
+        for (var i = 0; i < paginasPdf.length; i++) {
+          var vista = paginasPdf[i].getViewport({ scale: estado.escala });
+          estado.viewports[i] = vista;
+          var h = caja.querySelector('.cj-hoja[data-pagina="' + i + '"]');
+          if (!h) continue;
+          h.style.width = Math.round(vista.width) + 'px';
+          h.style.height = Math.round(vista.height) + 'px';
+          var viejo = h.querySelector('canvas');
+          if (viejo) viejo.remove();
+          pendientes.set(h, (function (pagina, v2, destino) {
+            return function () {
+              var lienzo = document.createElement('canvas');
+              lienzo.width = Math.round(v2.width);
+              lienzo.height = Math.round(v2.height);
+              lienzo.style.cssText = 'display:block;width:100%;height:100%';
+              destino.insertBefore(lienzo, destino.firstChild);
+              pagina.render({ canvasContext: lienzo.getContext('2d'), viewport: v2 });
+            };
+          })(paginasPdf[i], vista, h));
+          mirador.observe(h);
+        }
+
+        pintar();
+        caja.scrollTop = antes * caja.scrollHeight;
+        var et = barra.querySelector('.cj-zoom-n');
+        if (et) et.textContent = Math.round((estado.escala / escalaAjuste) * 100) + '%';
+      }
+
+      barra.addEventListener('click', function (ev) {
+        var b = ev.target.closest('[data-z]');
+        if (!b) return;
+        ev.preventDefault();
+        if (b.dataset.z === 'fit') return aplicarZoom(escalaAjuste);
+        // Escalones fijos en vez de multiplicar: así el 100% siempre existe y
+        // se vuelve a él sin tener que buscarlo con la rueda.
+        var rel = estado.escala / escalaAjuste;
+        var paso = b.dataset.z === '+'
+          ? ZOOM_PASOS.find(function (p) { return p > rel + 0.001; })
+          : ZOOM_PASOS.slice().reverse().find(function (p) { return p < rel - 0.001; });
+        if (paso) aplicarZoom(escalaAjuste * paso);
+      });
 
       // =====================================================================
       // Coordenadas — el mismo par de funciones que el visor del firmante y el

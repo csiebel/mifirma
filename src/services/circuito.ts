@@ -9,6 +9,7 @@ import { emitirEnlaceFirma, urlDeFirma } from '../auth/enlace_firma';
 import { enviarCorreo } from './correo';
 import { avisar } from './mensajes';
 import { almacen } from '../almacenamiento/almacen';
+import { partirLista } from './lista_de_correos';
 import { HttpError } from '../http/errors';
 
 /**
@@ -182,95 +183,329 @@ export async function agregarFirmante(
   circuitoId: string,
   input: FirmanteInput,
 ) {
+  return withUsuario(cuentaId, identidadId, async (trx, autz) => {
+    exigir(autz, 'circuito', 'crear', 'No tenés permiso para preparar circuitos de firma.');
+    const c = await exigirBorrador(trx, circuitoId, cuentaId);
+    return sumarFirmante(trx, cuentaId, identidadId, circuitoId, c, input);
+  });
+}
+
+/**
+ * Una persona más en el circuito, DENTRO de una transacción que abrió otro.
+ *
+ * ⚠ Separado de `agregarFirmante` a propósito: el envío a varios agrega diez de
+ * un saque y tiene que ser todo o nada. Si cada uno abriera su propia
+ * transacción, un correo mal escrito en el séptimo dejaría seis copias creadas
+ * y cuatro no — un estado a medias que después hay que adivinar mirando la
+ * pantalla. Con una sola transacción, o entran los diez o no entra ninguno.
+ */
+async function sumarFirmante(
+  trx: any,
+  cuentaId: string,
+  identidadId: string,
+  circuitoId: string,
+  c: { modo: string; titulo: string },
+  input: FirmanteInput,
+) {
   const email = (input.email || '').trim();
   if (!/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(email)) throw new HttpError(400, 'Ese correo no es válido.');
+
+  const cuantos = await sql<{ n: string }>`
+    select count(*)::text as n from participacion where circuito_id = ${circuitoId}::uuid
+  `.execute(trx);
+  if (Number(cuantos.rows[0]?.n ?? 0) >= MAX_FIRMANTES) {
+    throw new HttpError(400, `Un circuito no puede tener más de ${MAX_FIRMANTES} participantes.`);
+  }
+
+  // Identidad GLOBAL. Puede existir desde antes: alguien a quien otra empresa
+  // invitó a firmar hace un año ya tiene la suya, en estado 'latente'. No se
+  // duplica ni se migra nada.
+  const res = await sql<{ id: string }>`select app.resolver_identidad(${email}) as id`.execute(trx);
+  const destino = res.rows[0]?.id;
+  if (!destino) throw new HttpError(500, 'No se pudo resolver la identidad del firmante.');
+
+  if (input.nombre) {
+    // Sólo si todavía no tiene nombre: el emisor sugiere cómo se llama quien
+    // firma, pero no puede renombrar a una persona que ya existe en el
+    // sistema y que quizá se registró con otro nombre.
+    await sql`
+      update identidad set nombre_mostrado = ${input.nombre}
+       where id = ${destino}::uuid and nombre_mostrado is null
+    `.execute(trx);
+  }
+
+  const papel = input.papel ?? 'firmante';
+  const orden = input.orden ?? 1;
+
+  // ═══ DÓNDE VA ESTA PERSONA ═══
+  //
+  // En serie y paralelo hay UN documento y todos van sobre él: la
+  // participación se crea en cada instancia (que es una sola).
+  //
+  // En copias hay un documento POR PERSONA, así que cada firmante estrena su
+  // propia instancia. Es la misma tabla, el mismo insert y el mismo despacho:
+  // lo único que cambia es en qué fila cae.
+  //
+  // ⚠ En copias sólo firmantes. Un veedor sobre un envío de diez copias es
+  // otra pregunta —¿recibe diez avisos o uno?— y responderla mal es peor que
+  // no ofrecerlo: quedaría mirando algunas copias y no otras según el orden
+  // en que se lo agregó.
+  let instancias: { id: string }[];
+  if (c.modo === 'copias') {
+    if (papel !== 'firmante') {
+      throw new HttpError(
+        400,
+        'En un envío de copias separadas cada destinatario recibe su propio documento. ' +
+          'Los veedores y las copias informativas todavía no están: por ahora, agregá sólo a quien firma.',
+      );
+    }
+    // ⚠ El unique de participacion es (instancia, identidad, papel) y acá
+    // cada uno estrena instancia, así que NO frena al repetido: agregar dos
+    // veces el mismo correo crearía dos copias para la misma persona, que
+    // recibiría dos avisos idénticos y no sabría cuál firmar. Se comprueba
+    // contra el circuito entero, que es donde está la regla de verdad.
+    const repe = await sql<{ n: string }>`
+      select count(*)::text as n from participacion
+       where circuito_id = ${circuitoId}::uuid and identidad_id = ${destino}::uuid
+    `.execute(trx);
+    if (Number(repe.rows[0]?.n ?? 0) > 0) {
+      throw new HttpError(409, `${email} ya está en la lista: cada uno recibe una sola copia.`);
+    }
+    instancias = [{ id: await copiaParaUno(trx, circuitoId, cuentaId) }];
+  } else {
+    const r = await sql<{ id: string }>`
+      select id from instancia where circuito_id = ${circuitoId}::uuid order by numero
+    `.execute(trx);
+    instancias = r.rows;
+  }
+
+  // ⚠ Una copia informativa no firma, así que no tiene carácter que elegir:
+  // se marca 'personal' para que no frene el despacho. A un firmante NO se le
+  // pone nada: queda en null hasta que alguien decida, y ésa es la decisión.
+  const caracter = papel === 'firmante' ? (input.caracter ?? null) : 'personal';
+
+  if (caracter === 'representacion') {
+    if (!input.cuentaRepresentadaId) {
+      throw new HttpError(400, 'Decime a qué empresa representa.');
+    }
+    const ok = await sql<{ puede: boolean }>`
+      select app.puede_representar(${destino}::uuid, ${input.cuentaRepresentadaId}::uuid) as puede
+    `.execute(trx);
+    if (!ok.rows[0]?.puede) {
+      throw new HttpError(
+        403,
+        'No podés declarar que esa persona firma en representación de esa empresa. ' +
+          'Sólo vale tu propia cuenta, o una donde esa persona sea miembro activo.',
+      );
+    }
+  }
+
+  const creadas: string[] = [];
+
+  for (const inst of instancias) {
+    const id = randomUUID();
+    try {
+      await sql`
+        insert into participacion (id, instancia_id, circuito_id, cuenta_propietaria_id,
+                                   identidad_id, papel, orden, nivel_garantia_minimo,
+                                   caracter, cuenta_representada_id)
+        values (${id}::uuid, ${inst.id}::uuid, ${circuitoId}::uuid, ${cuentaId}::uuid,
+                ${destino}::uuid, ${papel}, ${orden}, ${input.nivelGarantiaMinimo ?? 'bajo'},
+                ${caracter}, ${caracter === 'representacion' ? input.cuentaRepresentadaId ?? null : null})
+      `.execute(trx);
+      creadas.push(id);
+    } catch (e: any) {
+      if (e?.code === '23505') {
+        throw new HttpError(409, 'Esa persona ya está en este circuito con ese papel.');
+      }
+      throw e;
+    }
+  }
+
+  // La copia es un hecho, y el expediente de esa copia tiene que empezar
+  // diciéndolo. Va acá y no dentro de `copiaParaUno` porque recién ahora se
+  // sabe para quién es.
+  if (c.modo === 'copias') {
+    await anotar(trx, {
+      instanciaId: instancias[0]!.id,
+      circuitoId,
+      cuentaPropietariaId: cuentaId,
+      tipo: 'documento.copiado',
+      actorTipo: 'emisor',
+      identidadId,
+      datos: { titulo: c.titulo, para: enmascarar(email) },
+      canal: 'web',
+    });
+  }
+
+  return { participacion_id: creadas[0], identidad_id: destino, email, papel, orden };
+}
+
+/**
+ * La copia de este documento que va a ser de UNA persona.
+ *
+ * ═══ QUÉ HACE, Y POR QUÉ NO ES SÓLO UN INSERT ═══
+ *
+ * Reusa una instancia libre si la hay —la nº 1 lo está siempre hasta que se
+ * agrega el primer destinatario, y las que quedaron vacías al quitar a alguien
+ * también— y si no, crea la siguiente.
+ *
+ * ⚠ Y COPIA LOS VALORES QUE YA PUSO EL EMISOR. Sin esto, el orden en que se
+ * usa la pantalla cambia el resultado: quien llena los campos primero y agrega
+ * la gente después manda nueve copias en blanco, sin ningún error a la vista.
+ * `guardarValorDelEmisor` escribe en todas las instancias QUE EXISTEN en ese
+ * momento, y las que nacen después se lo pierden.
+ *
+ * ⚠ Sólo los del emisor. Lo que escribió un firmante en su copia es SUYO: si
+ * se propagara, el séptimo abriría su documento con las respuestas del primero
+ * ya puestas. Lo mismo vale para los de modo `cualquiera` — en un envío de
+ * copias cada documento es su propia conversación y necesita su propia
+ * respuesta.
+ */
+async function copiaParaUno(trx: any, circuitoId: string, cuentaId: string): Promise<string> {
+  const libre = await sql<{ id: string }>`
+    select i.id
+      from instancia i
+     where i.circuito_id = ${circuitoId}::uuid
+       and i.estado = 'pendiente'
+       and not exists (select 1 from participacion p
+                        where p.instancia_id = i.id and p.papel = 'firmante')
+     order by i.numero
+     limit 1
+  `.execute(trx);
+  if (libre.rows.length) return libre.rows[0]!.id;
+
+  const cuantas = await sql<{ n: string }>`
+    select count(*)::text as n from instancia where circuito_id = ${circuitoId}::uuid
+  `.execute(trx);
+  if (Number(cuantas.rows[0]?.n ?? 0) >= MAX_FIRMANTES) {
+    throw new HttpError(400, `Un envío no puede tener más de ${MAX_FIRMANTES} copias.`);
+  }
+
+  const nueva = randomUUID();
+  try {
+    await sql`
+      insert into instancia (id, circuito_id, cuenta_propietaria_id, numero, estado, sha256_vigente)
+      select ${nueva}::uuid, ${circuitoId}::uuid, ${cuentaId}::uuid,
+             (select max(i2.numero) + 1 from instancia i2 where i2.circuito_id = ${circuitoId}::uuid),
+             'pendiente', i.sha256_vigente
+        from instancia i
+       where i.circuito_id = ${circuitoId}::uuid
+       order by i.numero
+       limit 1
+    `.execute(trx);
+  } catch (e: any) {
+    // El número de copia se calcula leyendo el máximo, así que dos pedidos a la
+    // vez sobre el mismo documento pueden elegir el mismo y chocar contra
+    // `unique (circuito_id, numero)`. Es raro —el botón se deshabilita al
+    // apretarlo— pero si pasa, que diga qué hacer en vez de un error de la base.
+    if (e?.code === '23505') {
+      throw new HttpError(409, 'Se estaban agregando destinatarios al mismo tiempo. Recargá y probá de nuevo.');
+    }
+    throw e;
+  }
+
+  await sql`
+    insert into valor_campo (campo_id, instancia_id, cuenta_propietaria_id,
+                             valor, valor_normalizado, completado_por, completado_en, origen)
+    select v.campo_id, ${nueva}::uuid, ${cuentaId}::uuid,
+           v.valor, v.valor_normalizado, v.completado_por, v.completado_en, v.origen
+      from valor_campo v
+      join campo c on c.id = v.campo_id
+      join instancia i on i.id = v.instancia_id
+     where i.circuito_id = ${circuitoId}::uuid
+       and c.quien_completa = 'emisor'
+       and i.numero = (select min(i2.numero) from instancia i2
+                        where i2.circuito_id = ${circuitoId}::uuid)
+    on conflict (campo_id, instancia_id) do nothing
+  `.execute(trx);
+
+  return nueva;
+}
+
+/**
+ * La lista entera de un saque: diez correos pegados, diez personas.
+ *
+ * ═══ POR QUÉ EXISTE, SI YA ESTÁ «Agregar» ═══
+ *
+ * Porque la pregunta que lo originó fue «¿tengo que hacer el proceso 10 veces?»
+ * y responder «no, sólo apretás Agregar 10 veces» es no haber entendido. La
+ * lista se pega de una planilla o de un correo y sale como está.
+ *
+ * ⚠ SIRVE EN LOS TRES MODOS, y al principio no: sólo en copias.
+ *
+ * Fue una decisión mal recortada. Pegar diez correos es útil igual cuando los
+ * diez firman el MISMO papel —un acta, un reglamento, una lista de asistencia—
+ * y esconder la caja según el modo hizo que Claudio la buscara y no la
+ * encontrara: «sacaste la posibilidad de escribir varios mails en una caja».
+ * Una función que aparece y desaparece según una opción de más arriba se lee
+ * como un error del programa, no como una regla.
+ *
+ * Lo único que cambia por modo es el ORDEN que le toca a cada uno:
+ *
+ *   · serie    → uno detrás del otro, en el orden en que están pegados
+ *   · paralelo → todos a la vez, todos en 1
+ *   · copias   → una copia propia cada uno, todos en 1
+ *
+ * ⚠ Va TODO o NADA. Una transacción: si el correo nº 7 está mal escrito, no
+ * quedan seis creados y cuatro sin crear —un estado que después hay que
+ * adivinar mirando la pantalla— sino la lista intacta y un mensaje que dice
+ * cuál está mal. El emisor lo corrige en el mismo texto que ya tiene escrito.
+ */
+export async function agregarDestinatarios(
+  cuentaId: string,
+  identidadId: string,
+  circuitoId: string,
+  crudo: string,
+) {
+  const { correos: limpios, malos, repetidos } = partirLista(crudo);
+
+  // ⚠ Se avisa ANTES de escribir nada, y con el texto todavía en la pantalla:
+  // el emisor corrige el renglón que está mal sobre lo que ya tiene escrito, en
+  // vez de descubrir a mitad de camino que entraron seis de diez.
+  if (malos.length) {
+    throw new HttpError(
+      400,
+      `Estos no parecen correos: ${malos.slice(0, 5).join(', ')}` +
+        (malos.length > 5 ? ` y ${malos.length - 5} más` : '') +
+        '. Corregilos y volvé a pegar la lista.',
+    );
+  }
+  if (repetidos.length) {
+    throw new HttpError(
+      400,
+      `${repetidos.join(', ')} está repetido en la lista. Cada persona entra una sola vez.`,
+    );
+  }
+  if (!limpios.length) throw new HttpError(400, 'Pegá la lista de correos, uno por línea.');
 
   return withUsuario(cuentaId, identidadId, async (trx, autz) => {
     exigir(autz, 'circuito', 'crear', 'No tenés permiso para preparar circuitos de firma.');
     const c = await exigirBorrador(trx, circuitoId, cuentaId);
 
-    if (c.modo === 'copias') {
-      throw new HttpError(
-        400,
-        'El envío masivo se prepara desde una planilla, no agregando firmantes de a uno.',
-      );
-    }
-
-    const cuantos = await sql<{ n: string }>`
-      select count(*)::text as n from participacion where circuito_id = ${circuitoId}::uuid
-    `.execute(trx);
-    if (Number(cuantos.rows[0]?.n ?? 0) >= MAX_FIRMANTES) {
-      throw new HttpError(400, `Un circuito no puede tener más de ${MAX_FIRMANTES} participantes.`);
-    }
-
-    // Identidad GLOBAL. Puede existir desde antes: alguien a quien otra empresa
-    // invitó a firmar hace un año ya tiene la suya, en estado 'latente'. No se
-    // duplica ni se migra nada.
-    const res = await sql<{ id: string }>`select app.resolver_identidad(${email}) as id`.execute(trx);
-    const destino = res.rows[0]?.id;
-    if (!destino) throw new HttpError(500, 'No se pudo resolver la identidad del firmante.');
-
-    if (input.nombre) {
-      // Sólo si todavía no tiene nombre: el emisor sugiere cómo se llama quien
-      // firma, pero no puede renombrar a una persona que ya existe en el
-      // sistema y que quizá se registró con otro nombre.
-      await sql`
-        update identidad set nombre_mostrado = ${input.nombre}
-         where id = ${destino}::uuid and nombre_mostrado is null
+    // En serie cada uno va detrás del anterior, y los que se peguen ahora
+    // arrancan después de los que ya estaban. En paralelo y en copias no hay
+    // turno: todos en 1.
+    let siguiente = 1;
+    if (c.modo === 'serie') {
+      const r = await sql<{ n: string }>`
+        select coalesce(max(p.orden), 0)::text as n
+          from participacion p
+         where p.circuito_id = ${circuitoId}::uuid and p.papel = 'firmante'
       `.execute(trx);
+      siguiente = Number(r.rows[0]?.n ?? 0) + 1;
     }
 
-    const instancias = await sql<{ id: string }>`
-      select id from instancia where circuito_id = ${circuitoId}::uuid order by numero
-    `.execute(trx);
-
-    const papel = input.papel ?? 'firmante';
-    const orden = input.orden ?? 1;
-
-    // ⚠ Una copia informativa no firma, así que no tiene carácter que elegir:
-    // se marca 'personal' para que no frene el despacho. A un firmante NO se le
-    // pone nada: queda en null hasta que alguien decida, y ésa es la decisión.
-    const caracter = papel === 'firmante' ? (input.caracter ?? null) : 'personal';
-
-    if (caracter === 'representacion') {
-      if (!input.cuentaRepresentadaId) {
-        throw new HttpError(400, 'Decime a qué empresa representa.');
-      }
-      const ok = await sql<{ puede: boolean }>`
-        select app.puede_representar(${destino}::uuid, ${input.cuentaRepresentadaId}::uuid) as puede
-      `.execute(trx);
-      if (!ok.rows[0]?.puede) {
-        throw new HttpError(
-          403,
-          'No podés declarar que esa persona firma en representación de esa empresa. ' +
-            'Sólo vale tu propia cuenta, o una donde esa persona sea miembro activo.',
-        );
-      }
+    const hechos: { email: string; participacion_id: string | undefined }[] = [];
+    for (const email of limpios) {
+      const r = await sumarFirmante(trx, cuentaId, identidadId, circuitoId, c, {
+        email,
+        orden: c.modo === 'serie' ? siguiente++ : 1,
+      });
+      hechos.push({ email, participacion_id: r.participacion_id });
     }
 
-    const creadas: string[] = [];
-
-    for (const inst of instancias.rows) {
-      const id = randomUUID();
-      try {
-        await sql`
-          insert into participacion (id, instancia_id, circuito_id, cuenta_propietaria_id,
-                                     identidad_id, papel, orden, nivel_garantia_minimo,
-                                     caracter, cuenta_representada_id)
-          values (${id}::uuid, ${inst.id}::uuid, ${circuitoId}::uuid, ${cuentaId}::uuid,
-                  ${destino}::uuid, ${papel}, ${orden}, ${input.nivelGarantiaMinimo ?? 'bajo'},
-                  ${caracter}, ${caracter === 'representacion' ? input.cuentaRepresentadaId ?? null : null})
-        `.execute(trx);
-        creadas.push(id);
-      } catch (e: any) {
-        if (e?.code === '23505') {
-          throw new HttpError(409, 'Esa persona ya está en este circuito con ese papel.');
-        }
-        throw e;
-      }
-    }
-
-    return { participacion_id: creadas[0], identidad_id: destino, email, papel, orden };
+    return { ok: true, copias: hechos.length, destinatarios: hechos };
   });
 }
 
@@ -456,7 +691,7 @@ export async function definirCaracter(
 
 export interface ConfigCircuito {
   titulo?: string;
-  modo?: 'serie' | 'paralelo';
+  modo?: 'serie' | 'paralelo' | 'copias';
   nivelFirma?: 'simple' | 'avanzada';
   diasVigencia?: number | null;
   politicaRechazo?: 'bloqueante' | 'continua';
@@ -471,6 +706,26 @@ export async function configurarCircuito(
   return withUsuario(cuentaId, identidadId, async (trx, autz) => {
     exigir(autz, 'circuito', 'crear', 'No tenés permiso para preparar circuitos de firma.');
     const c = await exigirBorrador(trx, circuitoId, cuentaId);
+
+    // ⚠ SALIR de copias no se puede, y hay que decirlo antes de tocar nada.
+    //
+    // Volver a «un solo documento» significa juntar diez copias en una, y ahí
+    // no hay una respuesta buena: cada copia tiene sus propios valores de campo
+    // y quedarse con los de una es tirar los de las otras nueve sin avisar. El
+    // camino sano es dejar este documento como está y subirlo de nuevo.
+    if (cfg.modo && cfg.modo !== 'copias' && c.modo === 'copias') {
+      const n = await sql<{ n: string }>`
+        select count(*)::text as n from participacion
+         where circuito_id = ${circuitoId}::uuid and papel = 'firmante'
+      `.execute(trx);
+      if (Number(n.rows[0]?.n ?? 0) > 0) {
+        throw new HttpError(
+          409,
+          'Este envío ya tiene una copia por destinatario. Para que firmen todos sobre el ' +
+            'mismo documento, quitá primero a los destinatarios, o subí el documento de nuevo.',
+        );
+      }
+    }
 
     await sql`
       update circuito set
@@ -487,6 +742,53 @@ export async function configurarCircuito(
     if (cfg.modo === 'paralelo' && c.modo !== 'paralelo') {
       await sql`update participacion set orden = 1 where circuito_id = ${circuitoId}::uuid`.execute(trx);
     }
+
+    // ═══ PASAR A COPIAS: A CADA UNO EL SUYO ═══
+    //
+    // Es el error más probable de la pantalla, y por eso se arregla solo en vez
+    // de rechazarse: uno carga los diez destinatarios, los ve en fila, y recién
+    // ahí se da cuenta de que no quería que firmaran todos el mismo papel.
+    // Obligarlo a quitar diez y volver a cargar diez sería castigarlo por una
+    // opción que eligió antes de saber que existía la otra.
+    //
+    // Cada firmante que estaba compartiendo el documento se lleva su copia, con
+    // los valores que el emisor ya hubiera escrito. El primero se queda con la
+    // instancia original —que es la que tiene el expediente desde la subida—.
+    if (cfg.modo === 'copias' && c.modo !== 'copias') {
+      const enFila = await sql<{ id: string; instancia_id: string }>`
+        select p.id, p.instancia_id
+          from participacion p
+          join instancia i on i.id = p.instancia_id
+         where p.circuito_id = ${circuitoId}::uuid and p.papel = 'firmante'
+         order by i.numero, p.orden
+      `.execute(trx);
+
+      const otros = await sql<{ n: string }>`
+        select count(*)::text as n from participacion
+         where circuito_id = ${circuitoId}::uuid and papel <> 'firmante'
+      `.execute(trx);
+      if (Number(otros.rows[0]?.n ?? 0) > 0) {
+        throw new HttpError(
+          400,
+          'Este documento tiene veedores o copias informativas, y en un envío de copias ' +
+            'separadas todavía no sabemos qué hacer con ellos. Quitalos y volvé a intentar.',
+        );
+      }
+
+      // El primero se queda donde está; del segundo en adelante, cada uno a la
+      // suya. `copiaParaUno` no va a elegir la original porque ya tiene dueño.
+      for (const p of enFila.rows.slice(1)) {
+        const suya = await copiaParaUno(trx, circuitoId, cuentaId);
+        await sql`
+          update participacion set instancia_id = ${suya}::uuid, orden = 1
+           where id = ${p.id}::uuid
+        `.execute(trx);
+      }
+      await sql`
+        update participacion set orden = 1 where circuito_id = ${circuitoId}::uuid
+      `.execute(trx);
+    }
+
     return { ok: true };
   });
 }
@@ -550,6 +852,25 @@ export async function despachar(
       update circuito
          set estado = 'enviado', enviado_en = now(), vence_en = ${vence}
        where id = ${circuitoId}::uuid
+    `.execute(trx);
+
+    // ⚠ PRIMERO SE CIERRAN LAS COPIAS VACÍAS, Y ESTO NO ES PROLIJIDAD.
+    //
+    // Quitar un destinatario en borrador deja su copia sin firmante, y esa
+    // copia queda libre para el próximo que se agregue —por eso no se borra—.
+    // Pero si se despacha así, pasa a 'en_curso' y no la va a firmar nadie: el
+    // circuito cuenta instancias abiertas para saber si terminó, así que un
+    // documento con nueve firmas de diez se quedaría esperando para siempre a
+    // una copia sin dueño. Nadie podría explicar por qué.
+    //
+    // Se cancelan y quedan en el expediente como lo que fueron: una copia que
+    // se preparó y no se usó.
+    await sql`
+      update instancia set estado = 'cancelada', cerrada_en = now()
+       where circuito_id = ${circuitoId}::uuid
+         and estado = 'pendiente'
+         and not exists (select 1 from participacion p
+                          where p.instancia_id = instancia.id and p.papel = 'firmante')
     `.execute(trx);
 
     await sql`

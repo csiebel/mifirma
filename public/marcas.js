@@ -297,9 +297,21 @@
           'background:rgba(37,99,235,.13);cursor:move;display:grid;place-items:center;' +
           'font-size:11px;font-weight:600;color:var(--brand-600);user-select:none;z-index:3';
         el.textContent = m.tipo === 'firma' ? 'Firma' : 'Rúbrica';
+        // ⚠ EL TIRADOR TIENE QUE VERSE.
+        //
+        // Existía desde el principio: 12 px, del mismo azul que el borde del
+        // recuadro y sin borde propio. Sobre el rectángulo azul no se
+        // distinguía, y Claudio pidió como función nueva la de agrandar la
+        // firma — que ya estaba. **Un control que no se ve es un control que no
+        // existe**, y el arreglo no es explicarlo: es hacerlo visible.
+        //
+        // 14 px con borde blanco y sombra, igual que el del editor de campos,
+        // que tuvo exactamente el mismo problema el 4 de agosto.
         el.innerHTML +=
-          '<span class="tirador" style="position:absolute;right:-5px;bottom:-5px;width:12px;' +
-          'height:12px;border-radius:3px;background:var(--brand-600);cursor:nwse-resize"></span>' +
+          '<span class="tirador" style="position:absolute;right:-7px;bottom:-7px;width:14px;' +
+          'height:14px;border-radius:4px;background:var(--brand-600);border:2px solid #fff;' +
+          'box-shadow:0 1px 3px rgba(0,0,0,.35);cursor:nwse-resize" ' +
+          'title="Arrastrá para cambiar el tamaño"></span>' +
           '<span class="quitar" style="position:absolute;right:-7px;top:-7px;width:16px;height:16px;' +
           'border-radius:50%;background:var(--danger);color:#fff;font-size:11px;line-height:16px;' +
           'text-align:center;cursor:pointer">×</span>';

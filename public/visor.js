@@ -34,7 +34,22 @@
   'use strict';
 
   var ANCHO_OBJETIVO = 760;   // px de pantalla que ocupa una hoja
-  var ESCALA_MAX = 1.6;
+  var ESCALA_MAX = 1.6;       // techo del ajuste automático al abrir
+
+  // ═══ EL ZOOM ═══
+  //
+  // El ajuste automático entra la hoja entera en pantalla, que es lo correcto
+  // para leer y es insuficiente para ubicar algo con precisión: sobre un
+  // formulario apretado, un renglón mide seis píxeles y la firma cae dos
+  // renglones más abajo del que uno quiso.
+  //
+  // ⚠ El zoom NO cambia ni una coordenada guardada. Todo lo que se guarda son
+  // puntos PDF, y `aPdf`/`aPantalla` ya convierten usando `estado.escala`. Si
+  // alguna coordenada se moviera al hacer zoom, la conversión estaría mal en
+  // algún lado — y ese es el defecto que hay que buscar, no compensar acá.
+  var ZOOM_MIN = 0.4;
+  var ZOOM_MAX = 4;
+  var ZOOM_PASOS = [0.4, 0.5, 0.67, 0.8, 1, 1.25, 1.5, 2, 2.5, 3, 4];
 
   // En puntos PDF. Los mismos que usa el editor del emisor: una firma de ~6 × 2
   // cm y una rúbrica de ~2 × 1,4 cm.
@@ -133,8 +148,18 @@
       }
 
       estado.paginas = doc.numPages;
-      caja.innerHTML = '<div id="visHojas" class="vis-hojas"></div>';
+      caja.innerHTML =
+        '<div id="visHojas" class="vis-hojas"></div>' +
+        '<div class="vis-zoom" id="visZoom">' +
+        '<button type="button" class="vis-zoom-b" data-z="-" title="Achicar" aria-label="Achicar">−</button>' +
+        '<button type="button" class="vis-zoom-n" data-z="fit" title="Entrar la hoja en pantalla">100%</button>' +
+        '<button type="button" class="vis-zoom-b" data-z="+" title="Agrandar" aria-label="Agrandar">+</button>' +
+        '</div>';
       var hojas = document.getElementById('visHojas');
+      // Las páginas se guardan: al hacer zoom hay que volver a pedirle a pdf.js
+      // un viewport nuevo y redibujar, y sin la página no se puede.
+      var paginasPdf = [];
+      var escalaAjuste = 1;
 
       // Se dibuja cuando la hoja entra en pantalla, no antes: un contrato de
       // 200 hojas dibujado entero son ~1,6 GB de píxeles y una pestaña colgada.
@@ -154,9 +179,11 @@
 
       for (var n = 1; n <= doc.numPages; n++) {
         var pag = await doc.getPage(n);
+        paginasPdf[n - 1] = pag;
         if (n === 1) {
           var base = pag.getViewport({ scale: 1 });
-          estado.escala = Math.min(ESCALA_MAX, (hojas.clientWidth - 40 || ANCHO_OBJETIVO) / base.width);
+          escalaAjuste = Math.min(ESCALA_MAX, (hojas.clientWidth - 40 || ANCHO_OBJETIVO) / base.width);
+          estado.escala = escalaAjuste;
         }
         var vp = pag.getViewport({ scale: estado.escala });
         estado.viewports[n - 1] = vp;
@@ -186,6 +213,73 @@
         mirador.observe(hoja);
 
         if (estado.editable) hoja.addEventListener('pointerdown', clicEnHoja);
+      }
+
+      // =======================================================================
+      // El zoom
+      //
+      // Rehacer el viewport de cada hoja con la escala nueva, tirar el lienzo
+      // viejo y volver a encolarlo para que se dibuje cuando entre en pantalla
+      // — el mismo camino perezoso del primer dibujo, no uno paralelo.
+      //
+      // ⚠ Y REPINTAR MARCAS Y CAMPOS. Los dos se posicionan en píxeles a partir
+      // de puntos PDF con la escala vigente; si no se repintan, quedan donde
+      // estaban y la firma aparece a diez centímetros de donde está de verdad.
+      // Es el defecto que este bloque tiene que no tener.
+      // =======================================================================
+      function aplicarZoom(nueva) {
+        var e2 = Math.max(ZOOM_MIN, Math.min(ZOOM_MAX, nueva));
+        if (Math.abs(e2 - estado.escala) < 0.001) return;
+
+        // Dónde estaba mirando, para no perder el lugar al agrandar. Sin esto,
+        // hacer zoom sobre la hoja 7 de un contrato de 20 devuelve a la 1.
+        var antes = hojas.scrollTop / Math.max(1, hojas.scrollHeight);
+        estado.escala = e2;
+
+        for (var i = 0; i < paginasPdf.length; i++) {
+          var vista = paginasPdf[i].getViewport({ scale: estado.escala });
+          estado.viewports[i] = vista;
+          var h = hojas.querySelector('.vis-hoja[data-pagina="' + i + '"]');
+          if (!h) continue;
+          h.style.width = Math.round(vista.width) + 'px';
+          h.style.height = Math.round(vista.height) + 'px';
+          var viejo = h.querySelector('.vis-lienzo');
+          if (viejo) viejo.remove();
+          pendientes.set(h, (function (pagina, v2, destino) {
+            return function () {
+              var lienzo = document.createElement('canvas');
+              lienzo.width = Math.round(v2.width);
+              lienzo.height = Math.round(v2.height);
+              lienzo.className = 'vis-lienzo';
+              destino.insertBefore(lienzo, destino.firstChild);
+              pagina.render({ canvasContext: lienzo.getContext('2d'), viewport: v2 });
+            };
+          })(paginasPdf[i], vista, h));
+          mirador.observe(h);
+        }
+
+        pintar();
+        pintarCampos();
+        hojas.scrollTop = antes * hojas.scrollHeight;
+        var n2 = document.querySelector('.vis-zoom-n');
+        if (n2) n2.textContent = Math.round((estado.escala / escalaAjuste) * 100) + '%';
+      }
+
+      var barraZoom = document.getElementById('visZoom');
+      if (barraZoom) {
+        barraZoom.addEventListener('click', function (ev) {
+          var b = ev.target.closest('[data-z]');
+          if (!b) return;
+          ev.preventDefault();
+          if (b.dataset.z === 'fit') return aplicarZoom(escalaAjuste);
+          // Se salta al escalón siguiente en vez de multiplicar por un factor:
+          // así el 100% siempre existe y se vuelve a él sin buscarlo.
+          var rel = estado.escala / escalaAjuste;
+          var paso = b.dataset.z === '+'
+            ? ZOOM_PASOS.find(function (p) { return p > rel + 0.001; })
+            : ZOOM_PASOS.slice().reverse().find(function (p) { return p < rel - 0.001; });
+          if (paso) aplicarZoom(escalaAjuste * paso);
+        });
       }
 
       // =======================================================================
@@ -288,23 +382,47 @@
               });
               el.appendChild(x);
             }
+
+            // ═══ EL TIRADOR PARA AGRANDAR ═══
+            //
+            // La firma entra a un tamaño fijo —unos 6 × 2 cm— y en un documento
+            // cuyo renglón mide la mitad, eso es una firma que pisa dos líneas.
+            // Correrla no lo arregla: hay que poder achicarla.
+            //
+            // ⚠ Grande y con borde blanco. El del editor del emisor existía
+            // desde el principio, medía 12 px sin borde, y sobre el recuadro
+            // azul no se veía: Claudio pidió una función que ya estaba. Un
+            // control que no se ve es un control que no existe.
+            var tir = document.createElement('span');
+            tir.className = 'vis-tirador';
+            tir.title = 'Arrastrá para cambiar el tamaño';
+            tir.addEventListener('pointerdown', empezarArrastre);
+            el.appendChild(tir);
           }
           hoja.appendChild(el);
         });
       }
 
-      // ---- arrastrar ----
+      // ---- arrastrar y redimensionar ----
+      //
+      // Son el mismo gesto con distinto efecto, así que comparten el camino: se
+      // decide por dónde se apretó. Separarlos en dos máquinas de arrastre sería
+      // duplicar el clamp contra los bordes de la hoja y el guardado.
       var arr = null;
       function empezarArrastre(ev) {
         if (!estado.editable) return;
         ev.preventDefault();
         ev.stopPropagation();
-        var el = ev.currentTarget;
+        var esTirador = ev.currentTarget.classList.contains('vis-tirador');
+        var el = esTirador ? ev.currentTarget.parentElement : ev.currentTarget;
         var hoja = el.parentElement;
         var r = el.getBoundingClientRect();
         arr = {
-          el: el, hoja: hoja,
+          el: el, hoja: hoja, redimensiona: esTirador,
           id: el.dataset.id,
+          x0: parseFloat(el.style.left), y0: parseFloat(el.style.top),
+          ancho0: r.width, alto0: r.height,
+          cx: ev.clientX, cy: ev.clientY,
           dx: ev.clientX - r.left, dy: ev.clientY - r.top,
           ancho: r.width, alto: r.height,
         };
@@ -319,6 +437,19 @@
         if (!arr) return;
         ev.preventDefault();
         var rh = arr.hoja.getBoundingClientRect();
+
+        if (arr.redimensiona) {
+          // El mínimo es de pantalla, no de puntos: 24 px es lo más chico que
+          // se puede agarrar con el dedo. El límite en puntos lo pone el
+          // servidor, que es donde tiene que estar.
+          var na = Math.max(24, Math.min(rh.width - arr.x0, arr.ancho0 + (ev.clientX - arr.cx)));
+          var nl = Math.max(14, Math.min(rh.height - arr.y0, arr.alto0 + (ev.clientY - arr.cy)));
+          arr.el.style.width = na + 'px';
+          arr.el.style.height = nl + 'px';
+          arr.ancho = na; arr.alto = nl;
+          return;
+        }
+
         // Se le impide salirse de la hoja: una marca fuera de la página no se
         // estampa en ningún lado y no hay forma de que la persona lo note.
         var x = Math.max(0, Math.min(rh.width - arr.ancho, ev.clientX - rh.left - arr.dx));
@@ -338,7 +469,14 @@
         var pagina = Number(a.hoja.dataset.pagina);
         var p = aPdf(pagina, parseFloat(a.el.style.left), parseFloat(a.el.style.top), a.ancho, a.alto);
         try {
-          await post('/firmar/marca', { marca_id: a.id, x: p.x, y: p.y });
+          // ⚠ El tamaño va SIEMPRE, no sólo al redimensionar. `aPdf` lo devuelve
+          // convertido con la escala vigente, y mandar sólo x/y después de un
+          // zoom dejaría la marca con el tamaño viejo en puntos y el nuevo en
+          // pantalla: se vería de un tamaño y saldría de otro. El servidor no
+          // anota nada si el tamaño no cambió de verdad.
+          await post('/firmar/marca', {
+            marca_id: a.id, x: p.x, y: p.y, ancho: p.ancho, alto: p.alto,
+          });
           aviso('');
         } catch (e) {
           aviso(e.message);
@@ -383,6 +521,24 @@
         fecha: 'fecha', texto: 'texto', numero: 'texto', moneda: 'texto',
       };
 
+      /**
+       * ¿Esta casilla está marcada?
+       *
+       * ⚠ NO alcanza con «tiene algo escrito». Una casilla contestada que NO
+       * puede guardar 'no', 'false' o el 'Off' que traen los formularios de PDF
+       * — y los tres son texto no vacío. Preguntando por el vacío, una casilla
+       * rechazada se dibuja tildada.
+       *
+       * Es la misma lista que usa el dibujante en el servidor (`CASILLA_MARCADA`
+       * en `campos.ts`). Están en dos archivos porque son dos procesos, pero
+       * tienen que decir lo mismo: si acá se agrega una forma, allá también.
+       */
+      var MARCADA = ['sí', 'si', 'true', '1', 'x', 'yes', 'on', 'sim'];
+      function marcada(valor) {
+        if (valor == null) return false;
+        return MARCADA.indexOf(String(valor).trim().toLowerCase()) >= 0;
+      }
+
       async function traerCampos() {
         if (!op.campos) return;
         var lista;
@@ -421,9 +577,21 @@
 
             var v = document.createElement('span');
             v.className = 'vis-campo-fijo';
-            v.textContent = c.valor != null && c.valor !== ''
-              ? (c.tipo === 'casilla' ? '✓' : String(c.valor))
-              : '';
+            // ⚠ UNA CASILLA SE MIRA CON `marcada()`, NO CON «¿tiene valor?».
+            //
+            // Acá alcanzaba con que el valor no estuviera vacío para dibujar el
+            // tilde. Y una casilla que dice que NO tiene valor igual: 'no',
+            // 'false', o el 'Off' que traen los formularios de PDF. Todos son
+            // texto no vacío, así que **una casilla contestada que no se
+            // mostraba tildada, se mostraba tildada** — y quien mira la hoja
+            // antes de firmar ve que aceptó algo que rechazó.
+            //
+            // Es la misma comparación que hace el dibujante en el servidor
+            // (`CASILLA_MARCADA` en campos.ts). Dos lugares que deciden lo
+            // mismo tienen que decidirlo igual.
+            v.textContent = c.tipo === 'casilla'
+              ? (marcada(c.valor) ? '✓' : '')
+              : (c.valor != null && c.valor !== '' ? String(c.valor) : '');
             v.style.fontSize = tamanoLetra(p) + 'px';
             el.appendChild(v);
             hoja.appendChild(el);
@@ -490,7 +658,12 @@
         if (clase === 'casilla') {
           el = document.createElement('input');
           el.type = 'checkbox';
-          el.checked = !!v;
+          // ⚠ `!!v` daba tildada cualquier casilla con valor: 'no', 'false' y
+          // el 'Off' de los formularios de PDF son texto no vacío. Sobre un
+          // formulario adoptado, TODAS las casillas aparecían tildadas de
+          // entrada, y con desmarcarlas no alcanzaba: si la persona no las
+          // tocaba, firmaba aceptando lo que no había leído.
+          el.checked = marcada(v);
           return el;
         }
         if (clase === 'opcion') {

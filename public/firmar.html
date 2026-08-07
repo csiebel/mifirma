@@ -89,6 +89,30 @@
   @media (prefers-reduced-motion:reduce){.vis-marca.fantasma{animation:none;opacity:.6}}
   .vis-marca.arrastrable{cursor:move;touch-action:none}
   .vis-marca.moviendo{opacity:.75;box-shadow:0 3px 12px rgba(0,0,0,.28)}
+
+  /* El tirador para cambiar el tamaño de la firma.
+     ⚠ Grande y con borde blanco a propósito. El equivalente del editor del
+     emisor medía 12 px del mismo color que el borde del recuadro y no se veía:
+     se pidió como función nueva una que ya estaba. Un control que no se ve es
+     un control que no existe. 16 px es además lo mínimo agarrable con el dedo. */
+  .vis-tirador{position:absolute;right:-8px;bottom:-8px;width:16px;height:16px;
+               border-radius:4px;background:var(--acc-700);border:2px solid #fff;
+               box-shadow:0 1px 4px rgba(0,0,0,.4);cursor:nwse-resize;
+               touch-action:none;z-index:4}
+
+  /* El zoom. Fijo abajo a la derecha, arriba de la barra de acciones: si
+     scrolleara con la hoja desaparecería justo cuando se está mirando de cerca
+     un renglón del final. */
+  .vis-zoom{position:fixed;right:16px;bottom:86px;z-index:20;display:flex;gap:2px;
+            background:rgba(15,30,44,.92);border:1px solid rgba(255,255,255,.16);
+            border-radius:10px;padding:4px;box-shadow:0 4px 16px rgba(0,0,0,.45)}
+  .vis-zoom button{border:0;background:transparent;color:#e2e8f0;cursor:pointer;
+                   font-size:15px;font-weight:600;line-height:1;padding:8px 11px;
+                   border-radius:7px;min-width:34px;margin:0;width:auto}
+  .vis-zoom button:hover{background:rgba(255,255,255,.14);color:#fff}
+  .vis-zoom .vis-zoom-n{font-size:12px;min-width:54px;letter-spacing:.2px}
+  @media (max-width:640px){.vis-zoom{bottom:98px;right:10px}}
+
   .vis-quitar{position:absolute;right:-9px;top:-9px;width:20px;height:20px;border-radius:50%;
               border:0;background:var(--danger);color:#fff;font-size:14px;line-height:1;
               cursor:pointer;display:grid;place-items:center;padding:0}

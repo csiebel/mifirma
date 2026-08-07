@@ -145,10 +145,12 @@ export function registrarRutasFirma(app: FastifyInstance) {
     });
   });
   /**
-   * El firmante corre una marca dentro de su hoja.
+   * El firmante acomoda su marca dentro de la hoja: la corre y la redimensiona.
    *
-   * Sólo x e y: cambiar de página o de tamaño sería rehacer la marca, y eso es
-   * del emisor. Lo que se permite es acomodarla cuando tapa un párrafo.
+   * ⚠ La página NO se cambia. Correr o agrandar la firma es acomodarla; ponerla
+   * en otra hoja es firmar en otro lado del contrato, y eso es del emisor.
+   *
+   * Los dos cambios van al expediente, cada uno con su evento. Ver `moverMarca`.
    */
   // ⚠ Ruta SIN parámetro en el camino, y el id va en el cuerpo. No es capricho:
   // `PUBLICAS` en server.ts compara la ruta EXACTA, así que `/firmar/marcas/:id`
@@ -164,12 +166,22 @@ export function registrarRutasFirma(app: FastifyInstance) {
         marca_id: z.string().uuid(),
         x: z.number().min(0).max(20000),
         y: z.number().min(0).max(20000),
+        // Opcionales: arrastrar manda sólo x/y y el tamaño queda como estaba.
+        // Los límites de verdad los pone el servicio —esto es la primera red,
+        // no la única— porque la regla tiene que seguir puesta el día que esto
+        // se llame desde un lote o desde la API.
+        ancho: z.number().positive().max(2000).optional(),
+        alto: z.number().positive().max(2000).optional(),
       })
       .parse(req.body);
-    return moverMarca(tokenDe(req), b.marca_id, b.x, b.y, {
-      ip: req.ip,
-      userAgent: req.headers['user-agent'] ?? null,
-    });
+    return moverMarca(
+      tokenDe(req),
+      b.marca_id,
+      b.x,
+      b.y,
+      { ancho: b.ancho, alto: b.alto },
+      { ip: req.ip, userAgent: req.headers['user-agent'] ?? null },
+    );
   });
 
 
