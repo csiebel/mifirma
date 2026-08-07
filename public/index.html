@@ -238,9 +238,18 @@
   /* La casilla de «obligatorio», en su propio renglón y con la oración entera.
      Apretada al final de la fila competía por el ancho con dos desplegables y
      el texto quedaba cortado — que es lo mismo que no ponerlo. */
-  .cp-obl{display:flex;align-items:center;gap:7px;font-size:13px;color:var(--mut);
+  .cp-obl{display:flex;align-items:center;gap:8px;font-size:13px;color:var(--mut);
           flex:1 0 100%;margin-top:2px;cursor:pointer}
-  .cp-obl input{flex:0 0 auto;margin:0}
+  /* ⚠ `width:auto` y `padding:0` no son cosmética: más abajo hay una regla
+     global `input,select{width:100%;padding:10px 12px}` pensada para los campos
+     de un formulario, y una casilla la toma igual. El resultado es una casilla
+     cuya CAJA ocupa el renglón entero: el tilde se dibuja a la izquierda, el
+     texto queda empujado contra el borde derecho y se lee de a una letra por
+     línea. Se veía como «el texto se sale y no se ve» y no era el texto: era la
+     casilla midiendo 100%. */
+  .cp-obl input[type=checkbox]{flex:0 0 auto;width:16px;height:16px;padding:0;
+                               margin:0;accent-color:var(--acc-700);cursor:pointer}
+  .cp-obl span{flex:1 1 auto}
   .cp-obl:hover{color:var(--tinta)}
   .cp-ops{width:100%;font:inherit;font-size:13px;padding:7px 9px;border:1px solid var(--line);
           border-radius:8px;margin-top:8px}
@@ -263,6 +272,16 @@
   .modal p.sub{color:var(--mut);font-size:14px;margin:0 0 18px}
   label.campo{display:block;font-size:13px;font-weight:600;margin:14px 0 6px}
   input,select{width:100%;font:inherit;padding:10px 12px;border:1px solid var(--line);border-radius:var(--r);background:var(--paper);color:var(--ink)}
+  /* ⚠ UNA CASILLA NO ES UN CAMPO DE TEXTO.
+     La regla de arriba está pensada para un renglón de formulario y le da a la
+     casilla 100% de ancho y 10 px de padding. Una casilla así ocupa el renglón
+     entero: el tilde se dibuja a la izquierda, y el texto que la acompaña queda
+     empujado contra el borde derecho, de a una letra por línea. Se leyó como
+     «el texto se sale y no se ve», y no era el texto.
+     Ya se había parcheado suelto en `.permisos` y con un `style=` en la
+     consola. Va una vez acá, para que no haya una cuarta. */
+  input[type=checkbox],input[type=radio]{width:auto;height:auto;padding:0;
+    accent-color:var(--acc-700);cursor:pointer}
   input:focus,select:focus{outline:2px solid var(--brand-600);outline-offset:-1px}
   .modal .acc{margin-top:22px;justify-content:flex-end}
 
