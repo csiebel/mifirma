@@ -618,7 +618,7 @@
           faltan.forEach(function (p, k) {
             var copia = {};
             for (var q in base) copia[q] = base[q];
-            copia.codigo = base.codigo + '_f' + p.orden;
+            copia.codigo = base.codigo + '_f' + p.posicion;
             copia.quien_completa = 'firmante';
             copia.completa_emisor = false;
             copia.posicion_firmante = p.posicion;

@@ -652,6 +652,46 @@ function camposDe(pdf: Buffer, info: any, acroRef: string): string[] {
 }
 
 /**
+ * Los widgets que MiFirma dejó PRE-DECLARADOS en el AcroForm, por su nombre.
+ *
+ * ⚠ Existe para que una firma pueda COMPLETAR un widget en vez de AGREGARLO, y
+ * eso no es una optimización: es la diferencia entre que Acrobat diga «el
+ * documento se ha modificado o dañado desde que fue firmado» y que diga «esta
+ * revisión del documento no se ha modificado».
+ *
+ * Medido el 8/8 con tres PDF de laboratorio idénticos salvo en eso
+ * (`claude/cambios-posteriores-a-la-firma.md`): agregar un campo de formulario
+ * nuevo después de una firma NO está entre los cambios que un lector da por
+ * permitidos; completar uno que ya estaba, SÍ. Con N firmantes, la forma vieja
+ * deja N−1 firmas en rojo, y el que ve el cartel es el cliente.
+ *
+ * ⚠ Sólo se devuelven los que llevan `/MiFirma true`. El nombre de nuestro
+ * widget se deriva del código del campo, que a su vez ES el nombre de un campo
+ * del formulario del cliente: sin la marca, un cliente que tuviera un campo
+ * llamado `razon_social__mf1` haría que le reescribiéramos EL SUYO, en silencio
+ * y adentro de un documento firmado.
+ */
+function widgetsPredeclarados(pdf: Buffer, info: any, acroRef: string | undefined): Map<string, string> {
+  const mapa = new Map<string, string>();
+  if (!acroRef) return mapa;
+  for (const ref of camposDe(pdf, info, acroRef)) {
+    try {
+      const cuerpo = cuerpoObjeto(pdf, info, ref);
+      if (!/\/MiFirma\s+true\b/.test(cuerpo)) continue;
+      // El `/T` de lo que nosotros escribimos siempre sale de `cadenaPdf`, así
+      // que es una cadena literal con `\\`, `(` y `)` escapados. No hace falta
+      // cubrir la forma hexadecimal: no la generamos.
+      const t = /\/T\s*\(((?:\\.|[^\\()])*)\)/.exec(cuerpo);
+      if (t) mapa.set(t[1]!.replace(/\\([\\()])/g, '$1'), ref.replace(/\s+/g, ' '));
+    } catch {
+      // Un campo ilegible no puede impedir que se usen los demás: se cae al
+      // camino viejo —agregarlo— que sigue produciendo un documento correcto.
+    }
+  }
+  return mapa;
+}
+
+/**
  * Agrega un hueco de firma CON APARIENCIA VISIBLE, en las páginas y posiciones
  * indicadas. Nada del contenido de las páginas se toca: se les agrega una
  * anotación y nada más.
@@ -717,6 +757,7 @@ export function huecoVisible({
 
   const acroRefViejo = acroformExistente(info.root);
   const camposViejos = acroRefViejo ? camposDe(pdf, info, acroRefViejo) : [];
+  const predeclarados = widgetsPredeclarados(pdf, info, acroRefViejo);
   // Único dentro del documento y estable: no depende del reloj.
   //
   // ⚠ Se cuentan sólo los campos de FIRMA, no todos los del AcroForm. Cuando
@@ -836,6 +877,9 @@ export function huecoVisible({
       `/Type /Annot\n/Rect [${m.rect.join(' ')}]\n` +
       `/P ${paginas[m.pagina]}\n/AP << /N ${apRef} >>`;
 
+    // El nombre del widget, cuando lo tiene. Es la llave para saber si ya
+    // existe pre-declarado. Los sellos y el hueco de firma no entran acá.
+    let nombreWidget: string | null = null;
     let cuerpoAnot: string;
     if (esTexto && (m.modo ?? 'campo') === 'campo') {
       // Campo de texto de SÓLO LECTURA, con el valor en `/V`.
@@ -843,7 +887,7 @@ export function huecoVisible({
       // Es lo que semánticamente es: un campo de formulario completado. El
       // valor queda además legible como DATO —no sólo como píxeles—, que es lo
       // que permite que un tercero lo extraiga sin OCR. `/Ff 1` = sólo lectura.
-      const t = m.etiqueta || `Campo${camposExtra.length + 1}_${nombreCampo}`;
+      const t = nombreWidget = m.etiqueta || `Campo${camposExtra.length + 1}_${nombreCampo}`;
       cuerpoAnot =
         `<<\n${comun}\n/Subtype /Widget\n/F 68\n/FT /Tx\n/Ff 1\n` +
         `/V ${cadenaPdf(m.texto!)}\n/T ${cadenaPdf(t)}\n` +
@@ -871,7 +915,7 @@ export function huecoVisible({
       // píxel— y las dos firmas siguen verificando.
       //
       // `/Ff 65537` = sólo lectura (1) + pushbutton (65536).
-      const t = m.etiqueta || `Marca${camposExtra.length + 1}_${nombreCampo}`;
+      const t = nombreWidget = m.etiqueta || `Marca${camposExtra.length + 1}_${nombreCampo}`;
       cuerpoAnot =
         `<<\n${comun}\n/Subtype /Widget\n/F 4\n/FT /Btn\n/Ff 65537\n` +
         `/T ${cadenaPdf(t)}\n/MK << /I ${apRef} >>\n>>`;
@@ -889,13 +933,36 @@ export function huecoVisible({
         `/Contents ${cadenaPdf(`Marca de firma de ${nombre}`)}\n>>`;
     }
 
-    const ref = agregar(Buffer.from(cuerpoAnot, 'latin1'));
+    // ⚠ Si el widget YA EXISTE pre-declarado, se REESCRIBE ESE MISMO OBJETO en
+    // vez de agregar uno nuevo. Ver `widgetsPredeclarados`: es lo que hace que
+    // Acrobat lea esto como «se completó un formulario» y no como «el documento
+    // fue modificado o dañado».
+    //
+    // Y por eso mismo NO se toca ni `/Fields` ni el `/Annots` de la página: el
+    // widget ya está en los dos. Agregarlo de nuevo lo duplicaría, que es el
+    // defecto nº 2 del 4/8 —dos campos con el mismo nombre y el lector
+    // mostrando el vacío— por una puerta nueva.
+    //
+    // Si no existe, se cae al camino de siempre y el documento sale igual que
+    // antes. Los dos caminos conviven a propósito: un circuito despachado antes
+    // de que esto existiera no tiene nada pre-declarado.
+    const refPrevia = nombreWidget ? predeclarados.get(nombreWidget) : undefined;
 
-    if (esTexto) {
-      if ((m.modo ?? 'campo') === 'campo') camposExtra.push(ref);
-    } else if (n !== iPrincipal && m.modo !== 'sello') camposExtra.push(ref);
-    else if (n === iPrincipal) refCampo = ref;
-    anotaciones.push({ pagina: m.pagina, ref });
+    let ref: string;
+    if (refPrevia) {
+      // La marca se conserva al reescribir: el widget sigue siendo nuestro, y
+      // sin ella una segunda pasada no lo reconocería.
+      const conMarca = cuerpoAnot.replace(/>>\s*$/, '/MiFirma true\n>>');
+      ref = escribir(getIndexFromRef(info.xref, refPrevia), Buffer.from(conMarca, 'latin1'));
+    } else {
+      ref = agregar(Buffer.from(cuerpoAnot, 'latin1'));
+      if (esTexto) {
+        if ((m.modo ?? 'campo') === 'campo') camposExtra.push(ref);
+      } else if (n !== iPrincipal && m.modo !== 'sello') camposExtra.push(ref);
+      else if (n === iPrincipal) refCampo = ref;
+      anotaciones.push({ pagina: m.pagina, ref });
+    }
+    if (n === iPrincipal && !refCampo) refCampo = ref;
   }
 
   // ⚠ Si TODAS las marcas son de texto no hay widget de firma. El campo tiene

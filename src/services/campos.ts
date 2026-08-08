@@ -736,7 +736,7 @@ export async function congelarCampos(
  * De la fuente NO se hace nada: ver la 056 sobre por qué el tipo de letra es
  * caro y el tamaño y el color son gratis.
  */
-function letraDelDA(da: string | undefined | null): { cuerpo: number | null; color: string | null } {
+function letraDelDA(da: string | undefined | null, alto: number): { cuerpo: number | null; color: string | null } {
   const vacio = { cuerpo: null, color: null };
   if (!da) return vacio;
 
@@ -748,6 +748,22 @@ function letraDelDA(da: string | undefined | null): { cuerpo: number | null; col
     // nuestro null. Tomarlo como número dejaría el valor invisible.
     if (Number.isFinite(v) && v >= 4 && v <= 72) cuerpo = Math.round(v * 100) / 100;
   }
+
+  // ⚠ Lo que el formulario declara es una PROPUESTA, no un dato. Hay que
+  // contrastarla contra el recuadro donde va a caer.
+  //
+  // Medido el 8/8 sobre un documento YA FIRMADO: el formulario declaraba
+  // `/Helvetica 65 Tf` para «Observaciones», un recuadro de 77 puntos de alto.
+  // Sesenta y cinco «entra» —un renglón de 65 cabe en 77, y el texto tampoco se
+  // pasaba de ancho—, así que ninguna comprobación saltó, y el valor salió del
+  // tamaño de un titular adentro de un documento que ya no se puede arreglar.
+  //
+  // El tope no es el alto pelado sino el alto CON su interlínea: una letra de
+  // cuerpo N necesita del orden de N × 1,25 para no comerse el recuadro. Si no
+  // entra, la propuesta se descarta y queda «auto» — que es el ajuste que SÍ
+  // mira el recuadro. Un formulario cuyo propio `/DA` no entra en su propia
+  // caja está mal armado, y lo seguro es no copiarlo.
+  if (cuerpo !== null && alto > 0 && cuerpo * 1.25 > alto) cuerpo = null;
 
   const hex = (r: number, g: number, b: number) =>
     '#' + [r, g, b].map((v) =>
@@ -892,7 +908,7 @@ export async function detectarCampos(
     if (!da) {
       try { da = (doc.getForm() as any)?.acroForm?.getDefaultAppearance?.(); } catch { da = null; }
     }
-    const letra = letraDelDA(da);
+    const letra = letraDelDA(da, alto);
 
     salida.push({
       // El código es el nombre del campo en el PDF: es lo que después permite
