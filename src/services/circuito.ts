@@ -75,7 +75,7 @@ export async function verCircuito(cuentaId: string, identidadId: string, circuit
 
     const p = await sql<{
       id: string; instancia_id: string; identidad_id: string; email: string;
-      nombre: string | null; papel: string; orden: number; estado: string;
+      nombre: string | null; papel: string; orden: number; posicion: number | null; estado: string;
       nivel_garantia_minimo: string; firmada_en: Date | null; motivo_rechazo: string | null;
       aviso_en: Date | null; aviso_error: string | null; abierto_en: Date | null;
       caracter: string | null; cuenta_representada_id: string | null;
@@ -84,6 +84,11 @@ export async function verCircuito(cuentaId: string, identidadId: string, circuit
       select p.id, p.instancia_id, p.identidad_id,
              i.email_mostrado as email, i.nombre_mostrado as nombre,
              p.papel, p.orden, p.estado, p.nivel_garantia_minimo,
+             -- ⚠ El TURNO y el LUGAR son dos cosas: el orden dice cuándo le
+             -- toca —y en paralelo vale 1 para todos—, la posicion dice quién
+             -- es. El editor de campos necesita el lugar; la fila de la
+             -- pantalla, el turno. Ver migración 055.
+             p.posicion,
              p.firmada_en, p.motivo_rechazo,
              p.caracter, p.cuenta_representada_id,
              -- ⚠ LEFT JOIN, no subconsulta con INNER: si la política no
@@ -132,7 +137,10 @@ export async function verCircuito(cuentaId: string, identidadId: string, circuit
         from participacion p
         join identidad i on i.id = p.identidad_id
        where p.circuito_id = ${circuitoId}::uuid
-       order by p.orden, i.email_mostrado
+       -- ⚠ Por turno y después por LUGAR. En paralelo el turno empata para
+       -- todos, y ordenar por correo hacía que la lista se reacomodara sola
+       -- cuando alguien cambiaba de nombre. El lugar es estable.
+       order by p.orden, p.posicion nulls last, i.email_mostrado
     `.execute(trx);
 
     // Las empresas que se pueden nombrar como representadas. La pantalla no las
@@ -305,16 +313,49 @@ async function sumarFirmante(
   for (const inst of instancias) {
     const id = randomUUID();
     try {
+      // ═══ EL TURNO Y EL LUGAR SON DOS COSAS ═══
+      //
+      // `orden` dice CUÁNDO le toca —serie 1,2,3 · paralelo 1,1,1 · copias 1— y
+      // es lo que manda el despacho. `posicion` dice QUIÉN es: 1..N dentro de su
+      // instancia, propio de cada persona.
+      //
+      // ⚠ En paralelo el turno NO distingue personas, y hasta la migración 055
+      // los campos se ataban al turno. El efecto: el emisor elegía «este dato me
+      // lo escribe Ana» y cualquiera de los tres podía escribirlo, sin ningún
+      // error a la vista. Ver `migrations/055_el_lugar_del_firmante.sql`.
+      //
+      // El lugar sale de `max + 1` y NO de contar los que hay: si alguien se
+      // fue, su lugar queda HUECO y no se reusa. Reusarlo le regalaría al que
+      // entra los campos que el emisor le había pedido al que se fue.
+      //
+      // Un veedor no completa campos: no tiene lugar, y la base lo exige
+      // (`participacion_lugar_solo_firmantes`).
       await sql`
         insert into participacion (id, instancia_id, circuito_id, cuenta_propietaria_id,
-                                   identidad_id, papel, orden, nivel_garantia_minimo,
+                                   identidad_id, papel, orden, posicion, nivel_garantia_minimo,
                                    caracter, cuenta_representada_id)
-        values (${id}::uuid, ${inst.id}::uuid, ${circuitoId}::uuid, ${cuentaId}::uuid,
-                ${destino}::uuid, ${papel}, ${orden}, ${input.nivelGarantiaMinimo ?? 'bajo'},
-                ${caracter}, ${caracter === 'representacion' ? input.cuentaRepresentadaId ?? null : null})
+        select ${id}::uuid, ${inst.id}::uuid, ${circuitoId}::uuid, ${cuentaId}::uuid,
+               ${destino}::uuid, ${papel}, ${orden},
+               case when ${papel} = 'firmante'
+                    then coalesce((select max(p.posicion) from participacion p
+                                    where p.instancia_id = ${inst.id}::uuid
+                                      and p.papel = 'firmante'), 0) + 1
+                    else null end,
+               ${input.nivelGarantiaMinimo ?? 'bajo'},
+               ${caracter}, ${caracter === 'representacion' ? input.cuentaRepresentadaId ?? null : null}
       `.execute(trx);
       creadas.push(id);
     } catch (e: any) {
+      // ⚠ Dos violaciones de unicidad distintas necesitan mensajes distintos.
+      // Con una sola rama, un choque de lugares diría «esa persona ya está en
+      // el circuito» sobre alguien que no está, y a nadie se le ocurriría
+      // mirar la tabla de participaciones.
+      if (e?.code === '23505' && e?.constraint === 'participacion_lugar_unico') {
+        throw new HttpError(
+          409,
+          'Dos personas quedaron en el mismo lugar de este documento. Volvé a agregarla.',
+        );
+      }
       if (e?.code === '23505') {
         throw new HttpError(409, 'Esa persona ya está en este circuito con ese papel.');
       }
@@ -780,12 +821,21 @@ export async function configurarCircuito(
       for (const p of enFila.rows.slice(1)) {
         const suya = await copiaParaUno(trx, circuitoId, cuentaId);
         await sql`
-          update participacion set instancia_id = ${suya}::uuid, orden = 1
+          update participacion set instancia_id = ${suya}::uuid, orden = 1, posicion = 1
            where id = ${p.id}::uuid
         `.execute(trx);
       }
+      // ⚠ El LUGAR también vuelve a 1, no sólo el turno.
+      //
+      // En copias cada uno queda solo en su documento, así que el único lugar
+      // que existe es el 1 — y es al que apuntan los campos, porque el editor
+      // en modo copias muestra un firmante solo. Sin esto, alguien que hubiera
+      // quitado al primero de la lista quedaría de lugar 2 y sus campos
+      // apuntarían a un lugar que en su copia no existe: un documento que su
+      // destinatario abre y no puede completar, sin ningún error.
       await sql`
-        update participacion set orden = 1 where circuito_id = ${circuitoId}::uuid
+        update participacion set orden = 1, posicion = 1
+         where circuito_id = ${circuitoId}::uuid and papel = 'firmante'
       `.execute(trx);
     }
 
@@ -834,6 +884,42 @@ export async function despachar(
     const firmantes = parts.rows.filter((p) => p.papel === 'firmante');
     if (!firmantes.length) {
       throw new HttpError(400, 'Agregá al menos un firmante antes de enviarlo.');
+    }
+
+    // ⚠ NINGÚN CAMPO PUEDE APUNTAR A UN LUGAR VACÍO.
+    //
+    // Quitar a un firmante deja su lugar hueco —a propósito: ver el insert de
+    // `participacion`, reusarlo le regalaría sus campos al que entre después—
+    // pero los campos que le pedían un dato quedan sin dueño. Despachado así,
+    // el documento sale con un recuadro que NADIE puede completar: si además
+    // era obligatorio, no se puede terminar de firmar y no hay nada que el
+    // destinatario pueda hacer.
+    //
+    // Se frena acá porque es el último momento en que tiene arreglo: después
+    // del despacho los campos ya no se tocan.
+    const huerfanos = await sql<{ etiqueta: string; posicion: number }>`
+      select coalesce(c.etiqueta_i18n->>'es', c.codigo) as etiqueta,
+             c.posicion_firmante as posicion
+        from campo c
+       where c.circuito_id = ${circuitoId}::uuid
+         and c.quien_completa = 'firmante'
+         and not exists (
+           select 1 from participacion p
+            where p.circuito_id = ${circuitoId}::uuid
+              and p.papel = 'firmante'
+              and p.posicion = c.posicion_firmante)
+       order by c.pagina, c.orden
+    `.execute(trx);
+
+    if (huerfanos.rows.length) {
+      const cuales = huerfanos.rows.map((h) => `«${h.etiqueta}»`).slice(0, 4).join(', ');
+      throw new HttpError(
+        400,
+        `${huerfanos.rows.length === 1 ? 'Hay un dato pedido' : `Hay ${huerfanos.rows.length} datos pedidos`} ` +
+          `a alguien que ya no está en la lista: ${cuales}` +
+          (huerfanos.rows.length > 4 ? ' y más' : '') +
+          '. Abrí «Campos del documento» y decidí quién los completa, o quitalos.',
+      );
     }
 
     // ⚠ NO se exige el carácter acá, y es a propósito.

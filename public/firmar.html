@@ -279,6 +279,12 @@
              repeating-conic-gradient(#f1f5f9 0 25%,#fff 0 50%) 0 0/16px 16px;
              padding:10px;display:grid;place-items:center;min-height:96px;margin-top:6px}
   .rub-hecha img,.rub-previa{max-width:100%;max-height:120px;display:block}
+  /* La misma proporción que en «Mi firma»: la inicial mide 55 × 40 puntos
+     contra los 170 × 55 de la firma. El recuadro no cambia; la imagen sí. Se
+     aplica en las DOS pantallas a la vez y no sólo donde se reportó — un
+     criterio puesto en un lado y no en el otro es el parche suelto que después
+     hay que volver a hacer, y con las casillas ya iban tres. */
+  .rub-hecha.chica img{max-width:33%;max-height:87px}
   #rubArchivo{width:100%;font:inherit;font-size:13.5px;padding:11px;border:1px solid var(--line);
               border-radius:var(--r);background:var(--paper)}
   .rub-aviso{background:#fef6e7;color:#8a5c05;border:1px solid #f5d9a0;

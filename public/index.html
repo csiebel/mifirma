@@ -93,13 +93,39 @@
           background-size:16px 16px;
           background-position:0 0,0 8px,8px -8px,-8px 0}
   .lienzo img{max-height:130px;max-width:92%}
+  /* ⚠ CADA MARCA SE MUESTRA DEL TAMAÑO QUE VA A TENER EN LA HOJA.
+     En el documento la firma ocupa 170 × 55 puntos y la rúbrica 55 × 40
+     (`marcas.js`): un tercio del ancho. Con las dos dibujadas a lo ancho del
+     recuadro, la pantalla prometía una inicial tres veces más grande de la que
+     se imprime.
+     El RECUADRO no cambia —los dos paneles son pares y se ven pares—; lo que
+     se ajusta es la imagen adentro. Los números salen de esa proporción:
+     55/170 ≈ 30 % del ancho, 40/55 ≈ 73 % del alto. */
+  #visorRubrica img{max-width:30%;max-height:95px}
   .lienzo .vacio{color:var(--mut);font-size:13.5px}
   #padDibujo{border:1px dashed var(--line);border-radius:10px;touch-action:none;cursor:crosshair;
              background:#fff;width:100%}
 
   /* ---------- carpetas ---------- */
+  /* ⚠ `.doscol` NO significa «dos columnas»: significa «barra lateral de 320 px
+     + contenido». Es lo correcto en Documentos y en Carpetas, donde la
+     izquierda es el árbol y la derecha la lista.
+
+     «Mi firma» la reusó para dos paneles que son PARES —la firma y la rúbrica—
+     y por eso la rúbrica se quedaba con todo el ancho sobrante: el recuadro
+     para dibujarla salía tres veces más grande que el de la firma, sobre dos
+     cosas que hacen lo mismo. Reportado como «el lugar de la rúbrica es mucho
+     más grande que el de la firma autógrafa».
+
+     La lección es del nombre: una clase que describe una FORMA («dos
+     columnas») y no un PAPEL («barra y contenido») se reusa donde no va, y el
+     que la reusa no tiene cómo enterarse. */
   .doscol{display:grid;gap:22px;grid-template-columns:1fr}
   @media(min-width:1000px){.doscol{grid-template-columns:320px 1fr;align-items:start}}
+
+  /* Dos paneles del mismo peso, cada uno con la mitad. */
+  .dospares{display:grid;gap:22px;grid-template-columns:1fr}
+  @media(min-width:1000px){.dospares{grid-template-columns:1fr 1fr;align-items:start}}
   .arbol{padding:12px}
   .nodo{display:flex;align-items:center;gap:8px;padding:8px 10px;border-radius:9px;cursor:pointer;font-size:14.5px}
   .nodo:hover{background:var(--soft)}
@@ -253,6 +279,19 @@
   .cp-obl:hover{color:var(--tinta)}
   .cp-ops{width:100%;font:inherit;font-size:13px;padding:7px 9px;border:1px solid var(--line);
           border-radius:8px;margin-top:8px}
+  /* Cómo se ve el valor: tamaño y color. Va en su propio renglón y no apretado
+     al lado de los desplegables — es la lección de la casilla del 7 de agosto:
+     un control que compite por el ancho con otros dos queda ilegible. */
+  .cp-letra{display:flex;align-items:center;gap:8px;flex-wrap:wrap;margin-top:9px;
+            font-size:12.5px;color:var(--mut)}
+  .cp-letra label{margin:0;font-size:12.5px;color:var(--mut)}
+  /* ⚠ Los dos van con ancho propio. La regla global `input,select{width:100%}`
+     los alcanza igual que alcanzaba a las casillas, y sin esto el número y el
+     color ocupan el renglón entero cada uno. Misma familia, tercer caso. */
+  .cp-letra input[type=number]{width:120px;font:inherit;font-size:13px;padding:6px 8px;
+                               border:1px solid var(--line);border-radius:8px}
+  .cp-letra input[type=color]{width:38px;height:30px;padding:2px;border:1px solid var(--line);
+                              border-radius:8px;background:var(--paper);cursor:pointer}
   .cp-campo-pie{display:flex;justify-content:space-between;align-items:center;margin-top:8px;
                 font-size:12px;color:var(--mut)}
   .cp-usos{font-size:12px;color:var(--mut);background:var(--soft);border:1px solid var(--line);
@@ -466,7 +505,8 @@
     <div class="cab"><div>
       <h1>Mi firma</h1>
       <p>Tu firma autógrafa y tu inicial, para que quien reciba el documento reconozca
-         de un vistazo quién firmó.</p>
+         de un vistazo quién firmó. Las dos se muestran <b>del tamaño que van a tener
+         en la hoja</b>: la inicial es más chica que la firma, y así es como va a salir.</p>
     </div></div>
 
     <div class="msg" style="background:var(--soft);color:var(--mut);border:1px solid var(--line)">
@@ -475,7 +515,7 @@
       comunica; la criptografía firma. Un documento sin imagen está firmado igual.
     </div>
 
-    <div class="doscol">
+    <div class="dospares">
       <div class="panel" style="padding:18px">
         <b style="font-size:15.5px">Firma autógrafa</b>
         <p class="pista">La firma completa. Va donde corresponde firmar.</p>

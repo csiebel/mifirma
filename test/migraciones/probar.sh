@@ -65,5 +65,22 @@ psql -q -d mifirma -v ON_ERROR_STOP=1 -f "$MIG"
 echo "── $(basename "$MIG") — segunda pasada (tiene que dar lo mismo)"
 psql -q -d mifirma -v ON_ERROR_STOP=1 -f "$MIG"
 
+# ── Y SI TRAE PRUEBA DE COMPORTAMIENTO, SE CORRE ────────────────────────────
+#
+# Correr una migración dos veces prueba que ENTRA y que se puede repetir. No
+# prueba que HAGA LO QUE DICE. La 055 es el ejemplo: entraba perfecto y la
+# pregunta que importaba —¿el campo de Beto lo puede completar Ana?— no la
+# contestaba nadie.
+#
+# Si existe `ejerce/<mismo nombre>.sql`, se corre acá, contra la base ya
+# migrada. Es opcional: una migración sin comportamiento nuevo no lo necesita.
+EJERCE="$AQUI/ejerce/$(basename "$MIG")"
+if [ -f "$EJERCE" ]; then
+  echo "── ejerce/$(basename "$MIG") — el comportamiento, no el catálogo"
+  psql -q -d mifirma -v ON_ERROR_STOP=1 -f "$EJERCE"
+else
+  echo "── (sin prueba de comportamiento: no hay ejerce/$(basename "$MIG"))"
+fi
+
 echo ""
-echo "✓ Corre, y corre dos veces."
+echo "✓ Corre, corre dos veces$([ -f "$EJERCE" ] && echo ", y hace lo que dice")."

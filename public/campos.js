@@ -89,7 +89,7 @@
     // un documento que se manda a firmar es, casi siempre, un dato que aporta
     // quien firma; es la misma regla que ya gobierna adoptar un campo del
     // formulario. Si no hay firmantes todavía, el emisor es el único que puede.
-    estado_quienInicial = firmantes.length ? 'f' + (firmantes[0].orden || 1) : 'emisor';
+    estado_quienInicial = firmantes.length ? 'f' + (firmantes[0].posicion || 1) : 'emisor';
 
     abrirModal(
       '<h2>Campos del documento</h2>' +
@@ -147,8 +147,10 @@
           opciones: c.opciones || null,
           completa_emisor: c.completa_emisor,
           quien_completa: c.quien_completa ||
-            (c.completa_emisor ? 'emisor' : (c.orden_firmante != null ? 'firmante' : 'cualquiera')),
-          orden_firmante: c.orden_firmante,
+            (c.completa_emisor ? 'emisor' : (c.posicion_firmante != null ? 'firmante' : 'cualquiera')),
+          posicion_firmante: c.posicion_firmante,
+          cuerpo: c.cuerpo == null ? null : Number(c.cuerpo),
+          color: c.color || null,
           obligatorio: c.obligatorio,
           pagina: c.pagina, x: Number(c.x), y: Number(c.y),
           ancho: Number(c.ancho), alto: Number(c.alto),
@@ -230,7 +232,14 @@
         // documento, y tener las dos formas dejaba un estado intermedio —el
         // campo propio vacío que nadie completa— que trababa documentos.
         firmantes.map(function (p) {
-          var v = 'f' + p.orden;
+          // ⚠ El valor es el LUGAR de la persona, no su turno.
+          //
+          // Con el turno, en paralelo los tres firmantes valían 'f1': las tres
+          // opciones eran la misma, las tres quedaban marcadas como elegidas, y
+          // el navegador mostraba la última. Elegías Ana y aparecía Carla.
+          // Reportado así: «selecciono a quien se lo pido y siempre me muestra
+          // el mismo». Ver la migración 055.
+          var v = 'f' + p.posicion;
           return '<option value="' + v + '"' + (quienNueva() === v ? ' selected' : '') +
             '>que escribe ' + esc(p.nombre || p.email) + '</option>';
         }).join('') +
@@ -274,20 +283,20 @@
     function quienDe(c) {
       if (c.quien_completa === 'emisor') return 'emisor';
       if (c.quien_completa === 'cualquiera') return 'cualquiera';
-      return 'f' + (c.orden_firmante || 1);
+      return 'f' + (c.posicion_firmante || 1);
     }
 
     /** Traduce lo que se elige en el desplegable al modo que guarda la base. */
     function aplicarQuien(campo, valor) {
       if (valor === 'emisor') {
         campo.quien_completa = 'emisor';
-        campo.completa_emisor = true; campo.orden_firmante = null;
+        campo.completa_emisor = true; campo.posicion_firmante = null;
       } else if (valor === 'cualquiera') {
         campo.quien_completa = 'cualquiera';
-        campo.completa_emisor = false; campo.orden_firmante = null;
+        campo.completa_emisor = false; campo.posicion_firmante = null;
       } else {
         campo.quien_completa = 'firmante';
-        campo.completa_emisor = false; campo.orden_firmante = Number(String(valor).slice(1));
+        campo.completa_emisor = false; campo.posicion_firmante = Number(String(valor).slice(1));
       }
     }
 
@@ -334,7 +343,14 @@
             'tiene firmantes</span>'
           : '<select data-quien="' + i + '" title="Quién escribe este dato">' +
         firmantes.map(function (p) {
-          var v = 'f' + p.orden;
+          // ⚠ El valor es el LUGAR de la persona, no su turno.
+          //
+          // Con el turno, en paralelo los tres firmantes valían 'f1': las tres
+          // opciones eran la misma, las tres quedaban marcadas como elegidas, y
+          // el navegador mostraba la última. Elegías Ana y aparecía Carla.
+          // Reportado así: «selecciono a quien se lo pido y siempre me muestra
+          // el mismo». Ver la migración 055.
+          var v = 'f' + p.posicion;
           return '<option value="' + v + '"' + (quienDe(c) === v ? ' selected' : '') + '>' +
             'Se lo pido a ' + esc(p.nombre || p.email) + '</option>';
         }).join('') +
@@ -386,6 +402,25 @@
             '</div>'
           : '') +
 
+        // ⚠ CÓMO SE VE EL VALOR. Vacío = «se ajusta solo», que es lo que hacía
+        // hasta ahora y lo que hace Acrobat con «auto». No se pone un número por
+        // omisión: escribir uno obliga a acertarle a mano en cada recuadro, y la
+        // cuenta automática ya le acierta. Un texto fijo también lo lleva: se
+        // estampa igual que un valor.
+        '<div class="cp-letra">' +
+        '<label for="cpCuerpo' + i + '">Tamaño</label>' +
+        '<input type="number" id="cpCuerpo' + i + '" min="4" max="72" step="0.5" ' +
+        'data-cuerpo="' + i + '" placeholder="se ajusta solo" ' +
+        'value="' + (c.cuerpo == null ? '' : c.cuerpo) + '" />' +
+        '<label for="cpColor' + i + '">Color</label>' +
+        '<input type="color" id="cpColor' + i + '" data-color="' + i + '" ' +
+        'value="' + (c.color || '#000000') + '" />' +
+        (c.color
+          ? '<button class="btn btn-s chico" data-sincolor="' + i + '" ' +
+            'title="Volver al color de siempre">Quitar color</button>'
+          : '') +
+        '</div>' +
+
         '<div class="cp-campo-pie">' +
         '<span>hoja ' + (c.pagina + 1) + '</span>' +
         // ⚠ «Uno para cada firmante» no es un modo de campo: es una forma de
@@ -435,7 +470,25 @@
         // aporta quien firma. Si no hay firmantes todavía, queda del emisor,
         // que es el único que puede.
         completa_emisor: !firmantes.length,
-        orden_firmante: firmantes.length ? (firmantes[0].orden || 1) : null,
+        // ⚠ EL MODO SE ESCRIBE ACÁ, NO SE DEDUCE DESPUÉS.
+        //
+        // Faltaba, y el campo adoptado del formulario del PDF quedaba sin modo.
+        // Todo lo que lo miraba tenía que adivinarlo por las otras dos columnas
+        // —y casi todo adivinaba bien, así que no se notó—, menos el botón
+        // «Uno para cada firmante», que pregunta por el modo derecho viejo y
+        // por lo tanto no aparecía. Reportado así: «cuando es un pdf con campos
+        // sólo aparece después de agregar un segundo campo».
+        //
+        // Es la MISMA falta que costó la 052: allá un texto fijo salía a nombre
+        // de un firmante porque el modo no se había escrito. Un campo se crea
+        // diciendo quién lo completa, en todos los caminos que crean campos.
+        quien_completa: firmantes.length ? 'firmante' : 'emisor',
+        posicion_firmante: firmantes.length ? (firmantes[0].posicion || 1) : null,
+        // ⚠ Lo que ese campo YA USA en el documento, leído de su `/DA`. No es
+        // una preferencia nuestra: es la respuesta que dejó escrita quien armó
+        // el formulario. Si el PDF no lo dice, queda en null y se ajusta solo.
+        cuerpo: d.cuerpo == null ? null : Number(d.cuerpo),
+        color: d.color || null,
         obligatorio: false,
         pagina: d.pagina, x: d.x, y: d.y, ancho: d.ancho, alto: d.alto, usos: 0,
       });
@@ -506,7 +559,7 @@
             // nombre de alguien. Se descubrió porque la prueba lo miró.
             campo.quien_completa = 'emisor';
             campo.completa_emisor = true;
-            campo.orden_firmante = null;
+            campo.posicion_firmante = null;
             campo.obligatorio = false;
           }
           estado.sel = +el.dataset.tipo;
@@ -519,6 +572,29 @@
           aplicarQuien(estado.campos[+el.dataset.quien], el.value);
           pintarLista();
           if (HOJA) HOJA.pintar();
+        });
+      });
+      c.querySelectorAll('[data-cuerpo]').forEach(function (el) {
+        el.addEventListener('change', function () {
+          var v = el.value.trim();
+          // Vacío vuelve a «se ajusta solo». Es la única forma de deshacer, y
+          // sin ella el que probó un número queda atrapado en él.
+          estado.campos[+el.dataset.cuerpo].cuerpo = v === '' ? null : Number(v);
+        });
+      });
+      c.querySelectorAll('[data-color]').forEach(function (el) {
+        el.addEventListener('change', function () {
+          estado.campos[+el.dataset.color].color = el.value.toLowerCase();
+          estado.sel = +el.dataset.color;
+          pintarLista();
+        });
+      });
+      c.querySelectorAll('[data-sincolor]').forEach(function (el) {
+        el.addEventListener('click', function (ev) {
+          ev.stopPropagation();
+          estado.campos[+el.dataset.sincolor].color = null;
+          estado.sel = +el.dataset.sincolor;
+          pintarLista();
         });
       });
       c.querySelectorAll('[data-obl]').forEach(function (el) {
@@ -536,7 +612,7 @@
         el.addEventListener('click', function (ev) {
           ev.stopPropagation();
           var base = estado.campos[+el.dataset.cada];
-          var faltan = firmantes.filter(function (p) { return p.orden !== base.orden_firmante; });
+          var faltan = firmantes.filter(function (p) { return p.posicion !== base.posicion_firmante; });
           var alto = Number(base.alto) || 20;
 
           faltan.forEach(function (p, k) {
@@ -545,7 +621,7 @@
             copia.codigo = base.codigo + '_f' + p.orden;
             copia.quien_completa = 'firmante';
             copia.completa_emisor = false;
-            copia.orden_firmante = p.orden;
+            copia.posicion_firmante = p.posicion;
             copia.usos = 0;
             copia.valor = '';
             // ⚠ Apilados hacia ABAJO, separados por su propio alto más un
@@ -626,15 +702,17 @@
               // ⚠ El MODO manda, y las otras dos se derivan de él.
               //
               // Acá quedó la lógica vieja de dos estados un rato: mandaba
-              // `orden_firmante: 1` para un campo de «cualquiera» —porque el
+              // `posicion_firmante: 1` para un campo de «cualquiera» —porque el
               // `|| 1` tapaba el null— y el modo se perdía en el camino. El
               // campo se guardaba como del primer firmante sin que nada fallara.
               quien_completa: c.quien_completa ||
                 (c.completa_emisor ? 'emisor' : 'firmante'),
               completa_emisor: c.quien_completa === 'emisor' || !!c.completa_emisor,
-              orden_firmante: c.quien_completa === 'firmante'
-                ? (c.orden_firmante || 1)
-                : (c.quien_completa ? null : (c.completa_emisor ? null : (c.orden_firmante || 1))),
+              cuerpo: c.cuerpo == null ? null : Number(c.cuerpo),
+              color: c.color || null,
+              posicion_firmante: c.quien_completa === 'firmante'
+                ? (c.posicion_firmante || 1)
+                : (c.quien_completa ? null : (c.completa_emisor ? null : (c.posicion_firmante || 1))),
               obligatorio: !!c.obligatorio,
               pagina: c.pagina,
               x: +Number(c.x).toFixed(2), y: +Number(c.y).toFixed(2),

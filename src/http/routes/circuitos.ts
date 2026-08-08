@@ -149,7 +149,13 @@ export function registrarRutasCircuitos(app: FastifyInstance) {
         opciones: z.array(z.string().max(120)).max(50).optional().nullable(),
         completa_emisor: z.boolean().optional(),
         quien_completa: z.enum(['emisor','firmante','cualquiera']).optional(),
-        orden_firmante: z.number().int().min(1).max(99).optional().nullable(),
+        // El LUGAR del firmante (participacion.posicion), no su turno. Migración 055.
+        posicion_firmante: z.number().int().min(1).max(99).optional().nullable(),
+        // Cómo se ve el valor. Los mismos topes que la restricción de la base:
+        // si la pantalla dejara mandar algo que la base rechaza, el error sale
+        // como un 500 de Postgres en vez de una frase que se entienda. 056.
+        cuerpo: z.number().min(4).max(72).optional().nullable(),
+        color: z.string().regex(/^#[0-9a-fA-F]{6}$/).optional().nullable(),
         obligatorio: z.boolean().optional(),
         pagina: z.number().int().min(0).max(2000),
         x: z.number(), y: z.number(),

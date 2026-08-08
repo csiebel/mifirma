@@ -119,7 +119,9 @@ select c.codigo                                     as campo,
 select c.codigo,
        c.tipo,
        c.quien_completa,
-       c.orden_firmante,
+       -- En copias es siempre 1: cada destinatario está solo en su documento,
+       -- y ése es el único lugar que existe ahí. Ver migración 055.
+       c.posicion_firmante,
        c.pagina,
        count(*) over (partition by c.codigo) as veces
   from campo c

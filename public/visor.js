@@ -555,6 +555,22 @@
         estado.campos.forEach(function (c) {
           var hoja = hojas.querySelector('.vis-hoja[data-pagina="' + c.pagina + '"]');
           if (!hoja) return;
+
+          // ⚠ UN CAMPO CONGELADO YA ESTÁ DIBUJADO DENTRO DEL PDF.
+          //
+          // Congelar y dibujar pasan juntos, en la misma transacción de la firma
+          // de quien lo completó: a partir de ahí el valor vive en el documento
+          // como campo de sólo lectura. Pintarle encima el recuadro de la
+          // pantalla lo mostraba DOS VECES, corrido unos píxeles — el segundo y
+          // el tercer firmante veían «Claudio Mac» encima de «Claudio Mac» y el
+          // documento parecía roto.
+          //
+          // El campo de otro que TODAVÍA no firmó sí se pinta, y tiene que
+          // seguir pintándose: ése no está en el PDF, y sin mostrarlo la persona
+          // firmaría un documento que ve incompleto. La diferencia entre los dos
+          // casos no es de quién es el campo: es si ya se dibujó o no.
+          if (c.congelado) return;
+
           var p = aPantalla(c.pagina, c);
 
           var el = document.createElement('div');

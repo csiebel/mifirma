@@ -50,12 +50,34 @@ export interface CampoParaMostrar {
   pagina: number;
   x: number; y: number; ancho: number; alto: number;
   orden: number;
-  /** Null = lo completa el emisor. */
-  orden_firmante: number | null;
+  /** El LUGAR del firmante a quien se le pide (participacion.posicion). Null = no es de un firmante nombrado. */
+  posicion_firmante: number | null;
+  /** Cuerpo de la letra en puntos. Null = se ajusta al recuadro. Ver migración 056. */
+  cuerpo: number | null;
+  /** Color del valor, «#rrggbb». Null = la tinta de siempre. */
+  color: string | null;
   valor: string | null;
   congelado: boolean;
   /** Si el que mira es quien tiene que completarlo. */
   mio: boolean;
+}
+
+/**
+ * «#rrggbb» → [r, g, b] de 0 a 1, que es como lo quiere el PDF.
+ *
+ * ⚠ Un solo lugar que convierte. La base guarda hexa porque es lo que entiende
+ * el selector del navegador y lo que una persona puede leer; el PDF quiere
+ * decimales. Con la conversión repetida en dos archivos, un día dicen cosas
+ * distintas — es la lección de `CASILLA_MARCADA`, que vive duplicado y hay que
+ * acordarse de tocar los dos.
+ */
+export function colorARgb(hex: string | null | undefined): [number, number, number] | undefined {
+  if (!hex || !/^#[0-9a-fA-F]{6}$/.test(hex)) return undefined;
+  return [
+    parseInt(hex.slice(1, 3), 16) / 255,
+    parseInt(hex.slice(3, 5), 16) / 255,
+    parseInt(hex.slice(5, 7), 16) / 255,
+  ];
 }
 
 const texto = (i18n: any, idioma = 'es'): string =>
@@ -75,7 +97,7 @@ async function leerCampos(
   const r = await sql<any>`
     select c.id, c.codigo, c.etiqueta_i18n, c.tipo, c.opciones, c.obligatorio,
            c.validacion, c.pagina, c.x, c.y, c.ancho, c.alto, c.orden,
-           c.orden_firmante, c.completa_emisor, c.quien_completa,
+           c.posicion_firmante, c.completa_emisor, c.quien_completa, c.cuerpo, c.color,
            v.valor, v.completado_por, (v.congelado_en is not null) as congelado
       from campo c
       join instancia i on i.id = ${instanciaId}::uuid and i.circuito_id = c.circuito_id
@@ -94,12 +116,14 @@ async function leerCampos(
     pagina: f.pagina,
     x: Number(f.x), y: Number(f.y), ancho: Number(f.ancho), alto: Number(f.alto),
     orden: f.orden,
-    orden_firmante: f.orden_firmante,
+    posicion_firmante: f.posicion_firmante,
+    cuerpo: f.cuerpo == null ? null : Number(f.cuerpo),
+    color: f.color ?? null,
     valor: f.valor ?? null,
     congelado: !!f.congelado,
     // ⚠ «Mío» tiene tres formas, no una.
     //
-    //  · el campo que se le pidió a esta persona por su orden;
+    //  · el campo que se le pidió a esta persona por su LUGAR;
     //  · un campo de CUALQUIERA que nadie completó todavía;
     //  · uno de cualquiera que completó ella misma y todavía puede corregir.
     //
@@ -109,7 +133,7 @@ async function leerCampos(
     mio: f.quien_completa === 'cualquiera'
       ? (mioSi !== null && !f.congelado &&
          (f.completado_por == null || f.completado_por === quienSoy))
-      : (mioSi !== null && f.orden_firmante === mioSi),
+      : (mioSi !== null && f.posicion_firmante === mioSi),
   }));
 }
 
@@ -120,16 +144,25 @@ async function leerCampos(
 export async function camposParaFirmar(token: string) {
   const e = await verificarEnlaceFirma(token);
   return withExterno(e.otorgamientoId, e.identidadId, async (trx) => {
-    const p = await sql<{ instancia_id: string; orden: number; idioma: string | null }>`
-      select p.instancia_id, p.orden, p.idioma_efectivo as idioma
+    // ⚠ Se lee `posicion`, NO `orden`.
+    //
+    // El orden dice cuándo le toca; el lugar dice quién es. En paralelo todos
+    // están en el orden 1, así que con el orden esta pantalla le pintaba a cada
+    // firmante TODOS los campos como propios: doce renglones en amarillo y
+    // ninguna forma de saber cuál era el suyo. Ver la migración 055.
+    const p = await sql<{ instancia_id: string; posicion: number | null; idioma: string | null }>`
+      select p.instancia_id, p.posicion, p.idioma_efectivo as idioma
         from participacion p
        where p.instancia_id in (select instancia_id from otorgamiento where id = ${e.otorgamientoId}::uuid)
          and p.identidad_id = ${e.identidadId}::uuid
+         and p.papel = 'firmante'
        limit 1
     `.execute(trx);
     const yo = p.rows[0];
     if (!yo) return { campos: [] as CampoParaMostrar[] };
-    return { campos: await leerCampos(trx, yo.instancia_id, yo.idioma ?? 'es', yo.orden, e.identidadId) };
+    return {
+      campos: await leerCampos(trx, yo.instancia_id, yo.idioma ?? 'es', yo.posicion, e.identidadId),
+    };
   });
 }
 
@@ -206,7 +239,12 @@ export interface DefinicionCampo {
   completa_emisor?: boolean;
   /** 'emisor' | 'firmante' | 'cualquiera'. Ver migración 052. */
   quien_completa?: 'emisor' | 'firmante' | 'cualquiera';
-  orden_firmante?: number | null;
+  /** El LUGAR del firmante (participacion.posicion), no su turno. Ver migración 055. */
+  posicion_firmante?: number | null;
+  /** Cuerpo en puntos, o null/ausente para que se ajuste solo. Ver migración 056. */
+  cuerpo?: number | null;
+  /** Color «#rrggbb», o null/ausente para la tinta de siempre. */
+  color?: string | null;
   obligatorio?: boolean;
   pagina: number;
   x: number; y: number; ancho: number; alto: number;
@@ -347,22 +385,22 @@ export async function definirCampos(
     if (c.tipo === 'etiqueta') {
       c.quien_completa = 'emisor';
       c.completa_emisor = true;
-      c.orden_firmante = null;
+      c.posicion_firmante = null;
       c.obligatorio = false;
     }
 
-    // ⚠ El modo manda, y las dos columnas viejas se derivan de él. Al revés
-    // —deducir el modo de las columnas— «orden_firmante null y no del emisor»
-    // sería ambiguo entre «cualquiera» y «falta decidirlo».
+    // ⚠ El modo manda, y las columnas se derivan de él. Al revés —deducir el
+    // modo de las columnas— «posicion_firmante null y no del emisor» sería
+    // ambiguo entre «cualquiera» y «falta decidirlo».
     const modo = c.quien_completa
-      ?? (c.completa_emisor ? 'emisor' : (c.orden_firmante != null ? 'firmante' : 'cualquiera'));
+      ?? (c.completa_emisor ? 'emisor' : (c.posicion_firmante != null ? 'firmante' : 'cualquiera'));
     if (!['emisor', 'firmante', 'cualquiera'].includes(modo)) {
       throw new HttpError(400, `No entiendo quién completa «${c.codigo}».`);
     }
     c.quien_completa = modo as any;
     c.completa_emisor = modo === 'emisor';
-    if (modo !== 'firmante') c.orden_firmante = null;
-    else if (c.orden_firmante == null) {
+    if (modo !== 'firmante') c.posicion_firmante = null;
+    else if (c.posicion_firmante == null) {
       throw new HttpError(400, `Decidí a qué firmante se le pide «${c.codigo}».`);
     }
   }
@@ -401,13 +439,18 @@ export async function definirCampos(
     for (const [i, c] of campos.entries()) {
       await sql`
         insert into campo (circuito_id, cuenta_propietaria_id, codigo, etiqueta_i18n,
-                           tipo, opciones, completa_emisor, quien_completa, orden_firmante,
-                           obligatorio, pagina, x, y, ancho, alto, orden)
+                           tipo, opciones, completa_emisor, quien_completa, posicion_firmante,
+                           cuerpo, color, obligatorio, pagina, x, y, ancho, alto, orden)
         values (${circuitoId}::uuid, ${cuentaId}::uuid, ${c.codigo.trim()},
                 ${JSON.stringify({ es: c.etiqueta.trim() })}::jsonb,
                 ${c.tipo}, ${c.opciones ? JSON.stringify(c.opciones) : null}::jsonb,
                 ${!!c.completa_emisor}, ${c.quien_completa ?? 'firmante'},
-                ${c.orden_firmante ?? null}, ${!!c.obligatorio},
+                ${c.posicion_firmante ?? null},
+                ${c.cuerpo ?? null},
+                -- En minúsculas, que es lo único que acepta la restricción: si
+                -- cada pantalla manda su forma, la base rebota una y no la otra.
+                ${c.color ? String(c.color).toLowerCase() : null},
+                ${!!c.obligatorio},
                 ${c.pagina}, ${c.x}, ${c.y}, ${c.ancho}, ${c.alto}, ${c.orden ?? i})
       `.execute(trx);
     }
@@ -458,11 +501,12 @@ const CASILLA_MARCADA = new Set(['sí', 'si', 'true', '1', 'x', 'yes', 'on', 'si
 export async function prepararCampos(
   trx: any,
   instanciaId: string,
-  orden: number,
+  /** El LUGAR del que está firmando (participacion.posicion), no su turno. */
+  posicion: number,
 ): Promise<CamposListos> {
   const r = await sql<any>`
     select c.id, c.codigo, c.etiqueta_i18n, c.obligatorio, c.tipo, c.completa_emisor,
-           c.quien_completa,
+           c.quien_completa, c.cuerpo, c.color,
            c.pagina, c.x, c.y, c.ancho, c.alto,
            v.valor, v.congelado_en
       from campo c
@@ -472,7 +516,7 @@ export async function prepararCampos(
      --
      -- Faltaban los del emisor y el efecto era silencioso: se podía escribir el
      -- valor, se guardaba bien, y no aparecía en el documento. La consulta sólo
-     -- miraba orden_firmante = N, y un campo del emisor lo tiene en null.
+     -- miraba el campo del firmante N, y uno del emisor lo tiene en null.
      --
      -- No hace falta saber quién firma primero: los del emisor se dibujan y se
      -- congelan con la primera firma que ocurra, y a partir de ahí el
@@ -480,7 +524,7 @@ export async function prepararCampos(
      -- Los del firmante que firma, los del emisor, y los de cualquiera que
      -- alguien haya completado. Estos últimos los dibuja el primero que firme
      -- después de que se escribieron, y el congelado de abajo evita repetirlos.
-     where c.orden_firmante = ${orden} or c.completa_emisor
+     where c.posicion_firmante = ${posicion} or c.completa_emisor
         or c.quien_completa = 'cualquiera'
      order by c.pagina, c.orden
   `.execute(trx);
@@ -537,6 +581,10 @@ export async function prepararCampos(
       rect: [Number(f.x), Number(f.y), Number(f.x) + Number(f.ancho), Number(f.y) + Number(f.alto)],
       texto: dibujo,
       modo: 'campo',
+      // Cómo se ve el valor. Los dos pueden faltar, y faltar significa lo de
+      // siempre: cuerpo ajustado al recuadro y la tinta general. Ver 056.
+      cuerpo: f.cuerpo == null ? undefined : Number(f.cuerpo),
+      color: colorARgb(f.color),
       // ⚠ El nombre del widget NO puede ser el código del campo.
       //
       // Cuando el campo se adoptó del propio AcroForm del PDF —que es el caso
@@ -550,9 +598,16 @@ export async function prepararCampos(
       // el lector mostraba el original. La persona completaba, firmaba, y el
       // documento salía en blanco.
       //
-      // El sufijo por orden de firmante además evita que dos firmantes que
+      // El sufijo por LUGAR del firmante además evita que dos firmantes que
       // completan el mismo código en vueltas distintas choquen entre sí.
-      etiqueta: `${f.codigo}__mf${orden}`,
+      //
+      // ⚠ El sufijo salía del TURNO, y eso reponía este mismo defecto en modo
+      // paralelo: ahí los tres firmantes están en el turno 1, así que los tres
+      // widgets se llamaban `codigo__mf1` y el AcroForm volvía a tener nombres
+      // repetidos — con el lector mostrando el primero y el documento saliendo
+      // en blanco. El lugar es distinto para cada persona, así que el nombre
+      // también. Ver migración 055.
+      etiqueta: `${f.codigo}__mf${posicion}`,
     });
     congelar.push({
       id: f.id,
@@ -666,6 +721,57 @@ export async function congelarCampos(
  * producto las coloca `apariencia.ts` con su propia lógica. Adoptarlo como
  * campo de texto sería pisar el lugar donde después va la firma.
  */
+/**
+ * Qué letra usa un campo del formulario del cliente, leída de su `/DA`.
+ *
+ * `/DA` («default appearance») es una cadena del PDF con la pinta de
+ * `/Helv 10 Tf 0 g`: la fuente, el cuerpo y el color con que el lector dibuja
+ * ese campo. Es EXACTAMENTE la pregunta «¿qué usa este documento?», ya
+ * contestada por quien armó el formulario — no hay que adivinar nada.
+ *
+ * ⚠ Y está ahí porque la migración 038 lo salvó: antes, al firmar, se reescribía
+ * el AcroForm del cliente perdiendo `/DR`, `/DA`, `/Q` y `/XFA`. Si eso no se
+ * hubiera arreglado, esta función no tendría de dónde leer.
+ *
+ * De la fuente NO se hace nada: ver la 056 sobre por qué el tipo de letra es
+ * caro y el tamaño y el color son gratis.
+ */
+function letraDelDA(da: string | undefined | null): { cuerpo: number | null; color: string | null } {
+  const vacio = { cuerpo: null, color: null };
+  if (!da) return vacio;
+
+  let cuerpo: number | null = null;
+  const tf = /\/[^\s/]+\s+([\d.]+)\s+Tf/.exec(da);
+  if (tf) {
+    const v = Number(tf[1]);
+    // ⚠ `0 Tf` NO es un cuerpo cero: es «auto», y significa lo mismo que
+    // nuestro null. Tomarlo como número dejaría el valor invisible.
+    if (Number.isFinite(v) && v >= 4 && v <= 72) cuerpo = Math.round(v * 100) / 100;
+  }
+
+  const hex = (r: number, g: number, b: number) =>
+    '#' + [r, g, b].map((v) =>
+      Math.round(Math.min(1, Math.max(0, v)) * 255).toString(16).padStart(2, '0')).join('');
+
+  let color: string | null = null;
+  const rg = /([\d.]+)\s+([\d.]+)\s+([\d.]+)\s+rg\b/.exec(da);
+  const k = /([\d.]+)\s+([\d.]+)\s+([\d.]+)\s+([\d.]+)\s+k\b/.exec(da);
+  const g1 = /(?:^|\s)([\d.]+)\s+g\b/.exec(da);
+  if (rg) color = hex(+rg[1]!, +rg[2]!, +rg[3]!);
+  else if (k) {
+    const [c, m, y, kk] = [+k[1]!, +k[2]!, +k[3]!, +k[4]!];
+    color = hex((1 - c) * (1 - kk), (1 - m) * (1 - kk), (1 - y) * (1 - kk));
+  } else if (g1) color = hex(+g1[1]!, +g1[1]!, +g1[1]!);
+
+  // ⚠ El negro NO se propone. Es el color por omisión de casi todo formulario,
+  // y proponerlo llenaría de color propio a campos que no lo necesitan —
+  // perdiendo la propiedad de que «null = como siempre», que es la que hace que
+  // un cambio futuro en la tinta general los alcance a todos.
+  if (color === '#000000') color = null;
+
+  return { cuerpo, color };
+}
+
 export interface CampoDetectado {
   codigo: string;
   etiqueta: string;
@@ -675,6 +781,10 @@ export interface CampoDetectado {
   x: number; y: number; ancho: number; alto: number;
   /** Lo que el PDF ya trae escrito ahí, si trae algo. */
   valor_actual: string | null;
+  /** El cuerpo que ese campo usa en el PDF, si lo declara. Null = «auto». */
+  cuerpo: number | null;
+  /** El color que ese campo usa en el PDF, si no es negro. Null = el de siempre. */
+  color: string | null;
   /** Si ese código ya está adoptado como campo del circuito. */
   ya_adoptado: boolean;
 }
@@ -774,6 +884,16 @@ export async function detectarCampos(
       }
     } catch { /* sin rectángulo: queda en 0 y el editor lo acomoda */ }
 
+    // Qué letra usa ESTE campo en el documento. Si el campo no lo dice, lo dice
+    // el formulario entero: `/DA` se hereda del AcroForm, que es donde suele
+    // estar en un formulario armado con una sola tipografía.
+    let da: string | null | undefined;
+    try { da = f.acroField?.getDefaultAppearance?.(); } catch { da = null; }
+    if (!da) {
+      try { da = (doc.getForm() as any)?.acroForm?.getDefaultAppearance?.(); } catch { da = null; }
+    }
+    const letra = letraDelDA(da);
+
     salida.push({
       // El código es el nombre del campo en el PDF: es lo que después permite
       // reconocerlo si el archivo se reemplaza por una versión nueva.
@@ -792,6 +912,8 @@ export async function detectarCampos(
       alto: Math.round(Math.max(10, alto) * 100) / 100,
       valor_actual: valor && valor.trim() ? valor.trim().slice(0, 500) : null,
       ya_adoptado: datos.adoptados.has(nombre.slice(0, 60)),
+      cuerpo: letra.cuerpo,
+      color: letra.color,
     });
   }
 

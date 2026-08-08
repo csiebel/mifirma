@@ -330,6 +330,7 @@ export async function firmar(token: string, input: FirmaInput) {
     const r = await sql<{
       participacion_id: string; instancia_id: string; circuito_id: string;
       cuenta_propietaria_id: string; estado: string; papel: string; orden: number;
+      posicion: number | null;
       identidad_id: string; caracter: string | null; cuenta_representada_id: string | null;
       sha256: Buffer; titulo: string; nivel_firma: string; me_toca: boolean;
       anclaje_email: string | null; clave: string; mime: string;
@@ -338,6 +339,10 @@ export async function firmar(token: string, input: FirmaInput) {
     }>`
       select p.id as participacion_id, p.instancia_id, p.circuito_id,
              p.cuenta_propietaria_id, p.estado, p.papel, p.orden, p.identidad_id,
+             -- ⚠ El TURNO decide si le toca firmar; el LUGAR decide qué
+             -- campos son suyos. En paralelo todos comparten el turno, así
+             -- que uno solo no alcanza. Ver migración 055.
+             p.posicion,
              p.caracter, p.cuenta_representada_id,
              a.sha256, c.titulo, c.nivel_firma,
              not exists (
@@ -400,7 +405,7 @@ export async function firmar(token: string, input: FirmaInput) {
   // tipeo ni reintentar. Es el mismo motivo por el que la evidencia tampoco se
   // anota antes de sellar.
   const campos = await withExterno(e.otorgamientoId, e.identidadId, (trx) =>
-    prepararCampos(trx, ctx.instancia_id, ctx.orden));
+    prepararCampos(trx, ctx.instancia_id, ctx.posicion ?? 1));
 
   // La normalización sólo hace falta la primera vez: deja el PDF con tabla xref
   // clásica, que es lo que el placeholder sabe leer. Si ya hay una firma, el

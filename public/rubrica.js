@@ -311,7 +311,9 @@
       if (tiene[tipo]) {
         caja.innerHTML =
           '<label>' + esc(e.titulo) + '</label>' +
-          '<div class="rub-hecha">' +
+          // La inicial se dibuja a la escala que va a tener en el documento.
+          // Ver `.rub-hecha.chica` en firmar.html.
+          '<div class="rub-hecha' + (tipo === 'rubrica' ? ' chica' : '') + '">' +
           '  <img alt="" src="/firmar/rubrica/imagen?tipo=' + tipo + '&amp;v=' + version + '" />' +
           '</div>' +
           '<div class="rub-acc">' +

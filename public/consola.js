@@ -1058,8 +1058,14 @@
     // El turno lo tienen sólo los firmantes: una copia informativa se notifica
     // al despachar y no hace esperar a nadie. Por eso las flechas se calculan
     // sobre esta lista y no sobre `parts`.
+    // ⚠ Por turno y, cuando el turno empata, por LUGAR. En paralelo todos están
+    // en el turno 1: sin el desempate la lista quedaba en el orden en que la
+    // devolviera la base y podía reacomodarse sola entre dos visitas, con los
+    // campos de cada persona apuntando a otra fila de la pantalla.
     var enFila = parts.filter(function (p) { return p.papel === 'firmante'; })
-                      .sort(function (a, b) { return a.orden - b.orden; });
+                      .sort(function (a, b) {
+                        return (a.orden - b.orden) || ((a.posicion || 0) - (b.posicion || 0));
+                      });
     var minOrden = enFila.length ? enFila[0].orden : 0;
     var maxOrden = enFila.length ? enFila[enFila.length - 1].orden : 0;
 
@@ -1375,12 +1381,20 @@
      *
      * Con uno solo, el editor esconde el selector por persona y el botón de
      * «uno para cada uno» —que tampoco tienen sentido acá— y todo campo de
-     * firmante queda en orden 1, que es el que tiene cada copia.
+     * firmante queda en el lugar 1, que es el que tiene cada copia.
+     *
+     * ⚠ Se pasa el LUGAR (`posicion`), no el turno (`orden`).
+     *
+     * El turno dice cuándo le toca a cada uno y en paralelo vale 1 para TODOS.
+     * Con el turno, el desplegable de «quién escribe este dato» ofrecía los tres
+     * nombres pero las tres opciones valían lo mismo por dentro: elegías uno y
+     * mostraba siempre el último. Y peor, la base dejaba que cualquiera de los
+     * tres completara el campo de cualquier otro. Ver la migración 055.
      */
     function quienesParaCampos() {
-      if (copias) return [{ orden: 1, nombre: 'Quien recibe la copia', email: '' }];
+      if (copias) return [{ posicion: 1, nombre: 'Quien recibe la copia', email: '' }];
       return enFila.map(function (p) {
-        return { orden: p.orden, nombre: p.nombre, email: p.email };
+        return { posicion: p.posicion, nombre: p.nombre, email: p.email };
       });
     }
 

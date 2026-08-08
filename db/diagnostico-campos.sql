@@ -48,8 +48,9 @@ select ca.codigo,
        ca.etiqueta_i18n ->> 'es'          as etiqueta,
        ca.tipo,
        ca.obligatorio,
-       case when ca.completa_emisor then 'el emisor'
-            else 'el firmante nº ' || coalesce(ca.orden_firmante::text, '?')
+       case when ca.quien_completa = 'emisor'     then 'el emisor'
+            when ca.quien_completa = 'cualquiera' then 'cualquiera de los firmantes'
+            else 'el firmante del LUGAR ' || coalesce(ca.posicion_firmante::text, '?')
        end                                as quien_lo_completa,
        ca.pagina + 1                      as hoja,
        ca.x, ca.y, ca.ancho, ca.alto
@@ -58,13 +59,17 @@ select ca.codigo,
  order by ca.pagina, ca.orden, ca.codigo;
 
 \echo ''
-\echo '════ 2. LOS FIRMANTES, EN SU ORDEN ════'
-\echo '   Cruzar la columna «orden» con «quien_lo_completa» de arriba.'
-\echo '   Si los campos dicen «firmante nº 1» y estás firmando como el 2,'
-\echo '   no son tuyos y no te los va a mostrar. Es correcto, pero no es'
-\echo '   lo que quisiste.'
+\echo '════ 2. LOS FIRMANTES: SU TURNO Y SU LUGAR ════'
+\echo '   Son dos cosas distintas y conviene no confundirlas:'
+\echo '     · turno  = cuándo le toca. Serie 1,2,3 · paralelo 1,1,1 · copias 1.'
+\echo '     · lugar  = quién es. Siempre distinto dentro del mismo documento.'
+\echo '   Cruzar «lugar» con «quien_lo_completa» de arriba. Si un campo dice'
+\echo '   «el firmante del LUGAR 1» y estás firmando desde el lugar 2, no es'
+\echo '   tuyo y no te lo va a mostrar. Es correcto, pero puede no ser lo que'
+\echo '   quisiste. (Ver migración 055.)'
 
-select p.orden,
+select p.orden as turno,
+       p.posicion as lugar,
        coalesce(i.nombre_mostrado, '(sin nombre)') as firmante,
        i.email_mostrado                    as email,
        p.papel,
@@ -136,10 +141,12 @@ begin
   select count(*) into v_huerfanos
     from campo ca
    where ca.circuito_id = v_circ
-     and not ca.completa_emisor
+     and ca.quien_completa = 'firmante'
      and not exists (
        select 1 from participacion p join instancia i on i.id = p.instancia_id
-        where i.circuito_id = v_circ and p.orden = ca.orden_firmante
+        where i.circuito_id = v_circ
+          and p.papel = 'firmante'
+          and p.posicion = ca.posicion_firmante
      );
 
   raise notice '';
@@ -147,13 +154,15 @@ begin
 
   if v_huerfanos > 0 then
     raise notice '';
-    raise notice '  ⚠ % campo(s) están pedidos a un número de firmante que no', v_huerfanos;
-    raise notice '    existe en este circuito. Nadie los va a poder completar.';
+    raise notice '  ⚠ % campo(s) están pedidos a un LUGAR que nadie ocupa en', v_huerfanos;
+    raise notice '    este circuito. Nadie los va a poder completar. Suele ser';
+    raise notice '    que se quitó a un firmante y sus campos quedaron colgados.';
   end if;
 
   select string_agg(distinct
-           case when completa_emisor then 'el emisor'
-                else 'el firmante nº ' || orden_firmante end, ', ')
+           case when quien_completa = 'emisor'     then 'el emisor'
+                when quien_completa = 'cualquiera' then 'cualquiera de los firmantes'
+                else 'el firmante del lugar ' || posicion_firmante end, ', ')
     into v_ordenes
     from campo where circuito_id = v_circ;
 

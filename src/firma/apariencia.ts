@@ -116,6 +116,14 @@ export interface Marca {
   /** Cuerpo en puntos. Si no se indica, se ajusta al alto del rect. */
   cuerpo?: number;
   /**
+   * Color del texto, [r, g, b] de 0 a 1. Si no se indica, la tinta general.
+   *
+   * ⚠ Es POR MARCA y no del documento entero. Antes había un solo color para
+   * todo, y con un formulario que usa azul para lo que se completa a mano no
+   * había forma de que el valor saliera como corresponde. Ver migración 056.
+   */
+  color?: [number, number, number];
+  /**
    * Cómo se materializa la marca que NO es el campo de firma. Por omisión,
    * 'campo' — que es lo que se imprime.
    *
@@ -728,7 +736,10 @@ export function huecoVisible({
   // idénticas del mismo trazo. Medido: 4,39 KB por hoja, 879 KB de sobrecosto
   // para dos firmantes. El PDF está hecho justamente para que un XObject se
   // referencie desde muchos lugares.
-  const rgb = tinta.map((v) => Math.min(1, Math.max(0, v)).toFixed(3)).join(' ');
+  /** [r,g,b] de 0 a 1 → la cadena de tres decimales que espera el PDF. */
+  const aRgb = (c: readonly number[]) =>
+    c.map((v) => Math.min(1, Math.max(0, v)).toFixed(3)).join(' ');
+  const rgb = aRgb(tinta);
   const imagenes = new Map<string, string>();
   const apariencias = new Map<string, string>();
 
@@ -765,13 +776,19 @@ export function huecoVisible({
    * recursos de la página, así que no hay nada compartido que se pueda pisar
    * entre dos firmantes.
    */
-  const refTexto = (texto: string, w: number, h: number, pedido?: number) => {
+  const refTexto = (texto: string, w: number, h: number, pedido?: number,
+                    color?: [number, number, number]) => {
     let cuerpo = pedido ?? Math.min(11, Math.max(6, h * 0.62));
     // Que no se desborde del rect. Es lo que hace Acrobat con «auto».
     const ancho = anchoHelvetica(texto) / 1000;
     if (ancho * cuerpo > w - 4) cuerpo = Math.max(4, (w - 4) / Math.max(ancho, 0.001));
     const base = Math.max(1, (h - cuerpo * 0.72) / 2);
-    const clave = `${texto}|${w}|${h}|${cuerpo.toFixed(2)}`;
+    const rgbTexto = color ? aRgb(color) : rgb;
+    // ⚠ El color va en la CLAVE de la caché. Sin él, dos campos con el mismo
+    // texto y el mismo recuadro comparten apariencia, y el segundo sale del
+    // color del primero — un valor dibujado de un color que nadie eligió, sin
+    // ningún error a la vista.
+    const clave = `${texto}|${w}|${h}|${cuerpo.toFixed(2)}|${rgbTexto}`;
     let ref = apariencias.get(clave);
     if (ref) return ref;
     ref = agregar(flujo(
@@ -780,7 +797,7 @@ export function huecoVisible({
       '/BaseFont /Helvetica /Encoding /WinAnsiEncoding >> >> >>',
       // `/Tx BMC … EMC` es lo que envuelve Acrobat en la apariencia de un campo
       // de texto. Para un sello es inocuo; para un campo, lo esperado.
-      Buffer.from(`/Tx BMC\nq\nBT\n/Ayuda ${cuerpo.toFixed(2)} Tf\n${rgb} rg\n` +
+      Buffer.from(`/Tx BMC\nq\nBT\n/Ayuda ${cuerpo.toFixed(2)} Tf\n${rgbTexto} rg\n` +
                   `2 ${base.toFixed(2)} Td\n${cadenaContenido(texto)} Tj\nET\nQ\nEMC`, 'latin1')));
     apariencias.set(clave, ref);
     return ref;
@@ -812,7 +829,7 @@ export function huecoVisible({
       throw new Error('cada marca lleva imagen o texto, uno y sólo uno');
     }
     const apRef = esTexto
-      ? refTexto(m.texto!, w, h, m.cuerpo)
+      ? refTexto(m.texto!, w, h, m.cuerpo, m.color)
       : refApariencia(m.imagen!, w, h);
 
     const comun =
@@ -830,7 +847,10 @@ export function huecoVisible({
       cuerpoAnot =
         `<<\n${comun}\n/Subtype /Widget\n/F 68\n/FT /Tx\n/Ff 1\n` +
         `/V ${cadenaPdf(m.texto!)}\n/T ${cadenaPdf(t)}\n` +
-        `/DA (/Ayuda 0 Tf ${rgb} rg)\n>>`;
+        // ⚠ El `/DA` tiene que decir el MISMO color que la apariencia. Si
+        // discrepan, un lector que regenere la apariencia dibuja un color
+        // distinto del que se firmó.
+        `/DA (/Ayuda 0 Tf ${m.color ? aRgb(m.color) : rgb} rg)\n>>`;
     } else if (esTexto) {
       cuerpoAnot =
         `<<\n${comun}\n/Subtype /Stamp\n/F 68\n` +

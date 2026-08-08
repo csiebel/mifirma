@@ -301,8 +301,11 @@
           quien_completa: quien === 'emisor' ? 'emisor'
             : (quien === 'cualquiera' ? 'cualquiera' : 'firmante'),
           completa_emisor: quien === 'emisor',
-          orden_firmante: (quien === 'emisor' || quien === 'cualquiera')
+          posicion_firmante: (quien === 'emisor' || quien === 'cualquiera')
             ? null : Number(String(quien).slice(1)),
+          // Un campo dibujado a mano no hereda letra de nadie: el PDF no tiene
+          // formulario del que leerla. Null = se ajusta al recuadro. Ver 056.
+          cuerpo: null, color: null,
           obligatorio: false,
           pagina: pagina, x: p.x, y: p.y, ancho: p.ancho, alto: p.alto,
           usos: 0,
@@ -321,8 +324,13 @@
       function nombreDe(c) {
         if (c.quien_completa === 'cualquiera') return 'lo llena cualquiera de los firmantes';
         if (c.completa_emisor) return 'texto fijo, no lo completa nadie';
-        var p = (op.firmantes || []).filter(function (x) { return x.orden === c.orden_firmante; })[0];
-        return p ? (p.nombre || p.email) : 'firmante ' + (c.orden_firmante || '?');
+        // ⚠ Se busca por LUGAR, no por turno: en paralelo el turno vale 1 para
+        // todos y este rótulo mostraba siempre al mismo. Ver migración 055.
+        var p = (op.firmantes || []).filter(function (x) {
+          return x.posicion === c.posicion_firmante;
+        })[0];
+        return p ? (p.nombre || p.email) : 'el firmante que estaba en el lugar ' +
+          (c.posicion_firmante || '?') + ' y ya no está';
       }
 
       function pintar() {

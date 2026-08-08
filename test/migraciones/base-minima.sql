@@ -47,7 +47,26 @@
 -- =============================================================================
 
 
-create role app_rw;
+-- ⚠ UN ROL ES DEL CLUSTER, NO DE LA BASE.
+--
+-- `probar.sh` borra y recrea la base `mifirma` en cada corrida, pero `app_rw`
+-- NO se va con ella: vive en el servidor entero. El script intenta soltarlo, y
+-- eso falla sin ruido en cuanto el rol tiene privilegios en otra base o el
+-- usuario que corre no es superusuario — que es el caso normal de un Postgres
+-- instalado a mano, donde uno usa su propio usuario.
+--
+-- Resultado: el banco andaba en una máquina y moría en otra con «role app_rw
+-- already exists», sin que nada del proyecto hubiera cambiado.
+--
+-- Se crea sólo si falta. Un `if not exists` acá vale más que un `drop` allá:
+-- borrar depende de permisos y de quién más lo esté usando; no crear dos veces,
+-- no depende de nada.
+do $rol$ begin
+  if not exists (select 1 from pg_roles where rolname = 'app_rw') then
+    create role app_rw;
+  end if;
+end $rol$;
+
 create schema app;
 
 create table identidad (
@@ -86,6 +105,10 @@ create table participacion (
   identidad_id uuid not null references identidad(id),
   papel text not null, orden int not null default 1,
   estado text not null default 'pendiente',
+  -- La 055 reparte el lugar por antigüedad cuando el turno no alcanza para
+  -- desempatar (paralelo: todos en orden 1). Sin esta columna acá, la
+  -- migración corre en el banco por un camino que la base real no toma.
+  creada_en timestamptz not null default now(),
   unique (instancia_id, identidad_id, papel)
 );
 
@@ -214,3 +237,132 @@ create table marca_firma (
   movida_en timestamptz, movida_por uuid references identidad(id),
   creada_por uuid references identidad(id)
 );
+
+-- ═══ LO INCÓMODO QUE AGREGA LA 055 ═══
+--
+-- La 055 separa el LUGAR (quién es cada uno) del TURNO (cuándo le toca). El
+-- relleno tiene que resolver tres situaciones distintas y una de ellas NO tiene
+-- respuesta correcta, así que las tres tienen que estar acá:
+--
+--   · serie    → turnos 1,2,3 y una persona por turno. Se traduce sin perder nada.
+--   · paralelo → TODOS en turno 1. Un campo que dice «turno 1» no señala a
+--                nadie en particular: es el defecto que la 055 viene a arreglar,
+--                y lo que ya está guardado NO se puede desambiguar. Tiene que
+--                quedar como «lo llena cualquiera».
+--   · copias   → una participación por instancia, todas en turno 1. Ahí «turno
+--                1» sí es una persona sola, y no hay nada que traducir.
+--
+-- ⚠ Además, el circuito 3333… que ya estaba arriba tiene un campo de firmante y
+-- NINGUNA participación. Es el caso que rompe cualquier relleno escrito como un
+-- join: hay que dejarlo pasar, no explotar.
+
+insert into identidad (id, email_mostrado, nombre_mostrado) values
+  ('aaaaaaaa-0000-0000-0000-000000000001', 'ana@ejemplo.com',   'Ana'),
+  ('aaaaaaaa-0000-0000-0000-000000000002', 'beto@ejemplo.com',  'Beto'),
+  ('aaaaaaaa-0000-0000-0000-000000000003', 'carla@ejemplo.com', 'Carla');
+
+-- ── (1) PARALELO: el acta del consorcio, ya enviada ─────────────────────────
+insert into circuito (id, cuenta_propietaria_id, titulo, estado, modo) values
+  ('66666666-6666-6666-6666-666666666666', '22222222-2222-2222-2222-222222222222',
+   'Acta de asamblea', 'borrador', 'paralelo');
+
+insert into instancia (id, circuito_id, cuenta_propietaria_id, numero) values
+  ('66666666-0000-0000-0000-000000000001', '66666666-6666-6666-6666-666666666666',
+   '22222222-2222-2222-2222-222222222222', 1);
+
+-- Los tres en turno 1: es lo que significa paralelo. Con `creada_en` separada,
+-- para que el reparto del lugar sea reproducible y no dependa del uuid.
+insert into participacion (instancia_id, circuito_id, cuenta_propietaria_id,
+                           identidad_id, papel, orden, creada_en) values
+  ('66666666-0000-0000-0000-000000000001', '66666666-6666-6666-6666-666666666666',
+   '22222222-2222-2222-2222-222222222222', 'aaaaaaaa-0000-0000-0000-000000000001',
+   'firmante', 1, '2026-08-01 10:00:00+00'),
+  ('66666666-0000-0000-0000-000000000001', '66666666-6666-6666-6666-666666666666',
+   '22222222-2222-2222-2222-222222222222', 'aaaaaaaa-0000-0000-0000-000000000002',
+   'firmante', 1, '2026-08-01 10:01:00+00'),
+  ('66666666-0000-0000-0000-000000000001', '66666666-6666-6666-6666-666666666666',
+   '22222222-2222-2222-2222-222222222222', 'aaaaaaaa-0000-0000-0000-000000000003',
+   'firmante', 1, '2026-08-01 10:02:00+00');
+
+-- Un veedor, que NO firma. No tiene lugar y no debe recibir ninguno.
+insert into participacion (instancia_id, circuito_id, cuenta_propietaria_id,
+                           identidad_id, papel, orden, creada_en) values
+  ('66666666-0000-0000-0000-000000000001', '66666666-6666-6666-6666-666666666666',
+   '22222222-2222-2222-2222-222222222222', '11111111-1111-1111-1111-111111111111',
+   'veedor', 1, '2026-08-01 10:03:00+00');
+
+-- Tres campos «nombre y apellido», uno por propietario, los tres apuntando al
+-- turno 1 — que es todo lo que el modelo viejo sabía decir.
+insert into campo (circuito_id, cuenta_propietaria_id, codigo, etiqueta_i18n, tipo,
+                   completa_emisor, orden_firmante, pagina, x, y, ancho, alto) values
+  ('66666666-6666-6666-6666-666666666666', '22222222-2222-2222-2222-222222222222',
+   'nombre_1', '{"es":"Nombre y apellido"}', 'texto', false, 1, 0, 10, 100, 100, 20),
+  ('66666666-6666-6666-6666-666666666666', '22222222-2222-2222-2222-222222222222',
+   'nombre_2', '{"es":"Nombre y apellido"}', 'texto', false, 1, 0, 10,  70, 100, 20),
+  ('66666666-6666-6666-6666-666666666666', '22222222-2222-2222-2222-222222222222',
+   'nombre_3', '{"es":"Nombre y apellido"}', 'texto', false, 1, 0, 10,  40, 100, 20),
+  ('66666666-6666-6666-6666-666666666666', '22222222-2222-2222-2222-222222222222',
+   'fecha_acta', '{"es":"Fecha"}', 'fecha', true, null, 0, 10, 130, 100, 20);
+update circuito set estado = 'enviado' where id = '66666666-6666-6666-6666-666666666666';
+
+-- ── (2) SERIE: dos turnos, dos personas. Se traduce sin ambigüedad ──────────
+insert into circuito (id, cuenta_propietaria_id, titulo, estado, modo) values
+  ('77777777-7777-7777-7777-777777777777', '22222222-2222-2222-2222-222222222222',
+   'Contrato en fila', 'borrador', 'serie');
+
+insert into instancia (id, circuito_id, cuenta_propietaria_id, numero) values
+  ('77777777-0000-0000-0000-000000000001', '77777777-7777-7777-7777-777777777777',
+   '22222222-2222-2222-2222-222222222222', 1);
+
+insert into participacion (instancia_id, circuito_id, cuenta_propietaria_id,
+                           identidad_id, papel, orden, creada_en) values
+  ('77777777-0000-0000-0000-000000000001', '77777777-7777-7777-7777-777777777777',
+   '22222222-2222-2222-2222-222222222222', 'aaaaaaaa-0000-0000-0000-000000000001',
+   'firmante', 1, '2026-08-02 10:00:00+00'),
+  ('77777777-0000-0000-0000-000000000001', '77777777-7777-7777-7777-777777777777',
+   '22222222-2222-2222-2222-222222222222', 'aaaaaaaa-0000-0000-0000-000000000002',
+   'firmante', 2, '2026-08-02 10:01:00+00');
+
+insert into campo (circuito_id, cuenta_propietaria_id, codigo, etiqueta_i18n, tipo,
+                   completa_emisor, orden_firmante, pagina, x, y, ancho, alto) values
+  ('77777777-7777-7777-7777-777777777777', '22222222-2222-2222-2222-222222222222',
+   'cargo_1', '{"es":"Cargo"}', 'texto', false, 1, 0, 10, 100, 100, 20),
+  ('77777777-7777-7777-7777-777777777777', '22222222-2222-2222-2222-222222222222',
+   'cargo_2', '{"es":"Cargo"}', 'texto', false, 2, 0, 10,  70, 100, 20);
+update circuito set estado = 'enviado' where id = '77777777-7777-7777-7777-777777777777';
+
+-- ── (3) COPIAS: dos instancias, un firmante cada una ────────────────────────
+insert into circuito (id, cuenta_propietaria_id, titulo, estado, modo) values
+  ('88888888-8888-8888-8888-888888888888', '22222222-2222-2222-2222-222222222222',
+   'Reglamento, una copia por persona', 'borrador', 'copias');
+
+insert into instancia (id, circuito_id, cuenta_propietaria_id, numero) values
+  ('88888888-0000-0000-0000-000000000001', '88888888-8888-8888-8888-888888888888',
+   '22222222-2222-2222-2222-222222222222', 1),
+  ('88888888-0000-0000-0000-000000000002', '88888888-8888-8888-8888-888888888888',
+   '22222222-2222-2222-2222-222222222222', 2);
+
+insert into participacion (instancia_id, circuito_id, cuenta_propietaria_id,
+                           identidad_id, papel, orden, creada_en) values
+  ('88888888-0000-0000-0000-000000000001', '88888888-8888-8888-8888-888888888888',
+   '22222222-2222-2222-2222-222222222222', 'aaaaaaaa-0000-0000-0000-000000000001',
+   'firmante', 1, '2026-08-03 10:00:00+00'),
+  ('88888888-0000-0000-0000-000000000002', '88888888-8888-8888-8888-888888888888',
+   '22222222-2222-2222-2222-222222222222', 'aaaaaaaa-0000-0000-0000-000000000002',
+   'firmante', 1, '2026-08-03 10:01:00+00');
+
+insert into campo (circuito_id, cuenta_propietaria_id, codigo, etiqueta_i18n, tipo,
+                   completa_emisor, orden_firmante, pagina, x, y, ancho, alto) values
+  ('88888888-8888-8888-8888-888888888888', '22222222-2222-2222-2222-222222222222',
+   'acepto', '{"es":"Acepto"}', 'texto', false, 1, 0, 10, 100, 100, 20);
+update circuito set estado = 'enviado' where id = '88888888-8888-8888-8888-888888888888';
+
+-- ── LA MARCA DEL BANCO ──────────────────────────────────────────────────────
+-- Existe para una sola cosa: que un script de prueba pueda negarse a correr si
+-- no está. La base de producción también se llama `mifirma`, así que el guard
+-- del nombre no distingue el banco de la de verdad — ésta sí.
+create table banco_de_pruebas (
+  advertencia text primary key default
+    'Base de descarte. Si ves esta tabla en producción, algo se corrió donde no debía.'
+);
+insert into banco_de_pruebas default values;
