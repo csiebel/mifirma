@@ -6,6 +6,7 @@ import { withExterno } from '../db/pool';
 import { verificarEnlaceFirma } from '../auth/enlace_firma';
 import { anotar } from './evidencia';
 import { almacen } from '../almacenamiento/almacen';
+import type { WidgetPredeclarado } from '../firma/apariencia';
 import { HttpError } from '../http/errors';
 
 /**
@@ -34,6 +35,108 @@ export interface MarcaEntrada {
   alto: number;
   /** Replica la marca en todas las hojas del documento. */
   todasLasPaginas?: boolean;
+}
+
+/** Los dos tipos de marca, y no hay más: lo dice el índice único de la tabla. */
+const TIPOS = ['firma', 'rubrica'] as const;
+
+/**
+ * El `/T` del widget donde va a caer esta marca en el PDF.
+ *
+ * ⚠ Se calcula DOS veces sobre la misma marca: una antes de la primera firma,
+ * cuando `predeclarar()` reserva el lugar, y otra al firmar, cuando la marca lo
+ * completa. Si las dos formas difieren en un carácter, la firma no encuentra el
+ * lugar reservado, lo AGREGA, y Acrobat vuelve a decir «el documento se ha
+ * modificado o dañado» en todas las firmas menos la última. Por eso vive acá y
+ * en ningún otro lado.
+ *
+ * ═══ POR QUÉ LUGAR Y HOJA, Y NUNCA EL ORDEN DE FIRMA ═══
+ *
+ * ⚠ Antes estos widgets se llamaban `Marca1_MiFirma2`, o sea que el nombre
+ * llevaba **el orden en que se firmó**, que en el momento de reservar el lugar
+ * todavía no se conoce —y en modo paralelo no se puede predecir—. Es la lección
+ * de la 055 por tercera vez: `MiFirma1` no es el lugar 1, es el primero que
+ * firmó.
+ *
+ * El LUGAR es de la persona y no cambia. La HOJA tampoco: la variante D del
+ * laboratorio demostró que un widget no se puede mudar de hoja —Acrobat lo lee
+ * como uno eliminado y otro agregado—, así que el lugar reservado está atado a
+ * su hoja desde que nace. Ver `claude/cambios-posteriores-a-la-firma.md` §8.
+ */
+export function nombreDeMarca(m: {
+  /** `participacion.posicion`: el lugar del firmante, NO su turno. */
+  posicion: number;
+  tipo: 'firma' | 'rubrica';
+  /** Base 0. En el nombre va base 1, que es como se cuentan las hojas. */
+  pagina: number;
+}): string {
+  return `marca_${m.tipo}_h${m.pagina + 1}__mf${m.posicion}`;
+}
+
+/**
+ * Todos los lugares donde un firmante PODRÍA poner una marca, para reservarlos
+ * antes de la primera firma.
+ *
+ * ═══ POR QUÉ SON TANTOS, Y POR QUÉ NO PUEDEN SER MENOS ═══
+ *
+ * Son `2 × firmantes × hojas`. Parece mucho y es el mínimo:
+ *
+ * · **Por qué por hoja.** Un widget no se puede mudar de hoja (variante D).
+ * · **Por qué dos.** El índice único `(participacion, tipo, pagina)` dice que
+ *   el máximo que una persona puede poner en una hoja es una firma y una
+ *   rúbrica. Ni uno más, ni uno menos.
+ * · **Por qué no se filtra por lo que ya está reservado.** Porque el firmante
+ *   puede agregar marcas con su propio enlace **después** de que el documento
+ *   se normalizó, y ésa es justamente la libertad que no se le quiere sacar.
+ *   Reservar sólo lo que hoy existe sería arreglar el caso fácil y dejar roto
+ *   el que importa.
+ *
+ * ⚠ **Y por eso tampoco se lee `marca_firma`.** Además de ser innecesario,
+ * evita una trampa: esta consulta corre con el contexto del firmante, y si la
+ * RLS no le dejara ver las marcas de los demás, el juego saldría incompleto
+ * **sin ningún error a la vista** — se reservarían los lugares de uno solo y
+ * las firmas de los otros volverían a agregar. Un juego que se calcula sin
+ * mirar datos ajenos no puede salir incompleto por un permiso.
+ *
+ * El rectángulo va en cero: un lugar reservado no tiene por qué verse, y
+ * cuando la marca lo complete le va a poner el suyo, que es un cambio de
+ * propiedad y está permitido (variante C). De paso resuelve el R10: con
+ * «Resaltar campos existentes», un rectángulo de tamaño cero no pinta nada.
+ */
+export async function marcasAPredeclarar(
+  trx: any,
+  instanciaId: string,
+  paginas: number,
+): Promise<WidgetPredeclarado[]> {
+  const r = await sql<{ posicion: number | null }>`
+    select p.posicion
+      from participacion p
+     where p.instancia_id = ${instanciaId}::uuid and p.papel = 'firmante'
+     order by p.posicion
+  `.execute(trx);
+
+  const salida: WidgetPredeclarado[] = [];
+  const vistos = new Set<string>();
+
+  for (const p of r.rows) {
+    // Una participación sin lugar no debería existir desde la 055. Si aparece
+    // una vieja, se la saltea: reservar con un lugar inventado produciría un
+    // nombre que la firma nunca va a buscar, y eso es peor que no reservar.
+    if (p.posicion == null) {
+      console.warn('[predeclarar] hay una participación de firmante sin posición: no se le reservan marcas');
+      continue;
+    }
+    for (let pagina = 0; pagina < paginas; pagina++) {
+      for (const tipo of TIPOS) {
+        const nombre = nombreDeMarca({ posicion: p.posicion, tipo, pagina });
+        if (vistos.has(nombre)) continue;      // dos firmantes con el mismo lugar
+        vistos.add(nombre);
+        salida.push({ nombre, pagina, rect: [0, 0, 0, 0], clase: 'marca' });
+      }
+    }
+  }
+
+  return salida;
 }
 
 /** Las marcas de un documento, para dibujarlas sobre el visor. */

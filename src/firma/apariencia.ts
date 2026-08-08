@@ -691,6 +691,207 @@ function widgetsPredeclarados(pdf: Buffer, info: any, acroRef: string | undefine
   return mapa;
 }
 
+/** Un widget que hay que dejar creado ANTES de la primera firma. */
+export interface WidgetPredeclarado {
+  /**
+   * El `/T`. Tiene que ser EXACTAMENTE el mismo que después va a mandar
+   * `huecoVisible` en `Marca.etiqueta`: si difiere en un carácter, la firma no
+   * lo encuentra, lo agrega, y volvemos al cartel rojo. Por eso el nombre lo
+   * calcula una sola función por familia —`nombreDelWidget` en
+   * `services/campos.ts` y `nombreDeMarca` en `services/marcas.ts`— y no cada
+   * quien por su lado. Es la lección de la 055.
+   */
+  nombre: string;
+  /**
+   * ⚠ Índice de página, base 0, **y no se puede cambiar después**.
+   *
+   * Medido el 8/8 con la variante D del laboratorio: si una firma completa el
+   * widget en OTRA hoja, hay que sacarlo del `/Annots` de una y meterlo en el
+   * de la otra, y Acrobat no ve un campo que se mudó — ve uno **eliminado** y
+   * otro **agregado**, que es tan grave como agregarlo. Por eso hay que
+   * reservar un lugar por hoja. Ver `cambios-posteriores-a-la-firma.md` §8.
+   */
+  pagina: number;
+  /** El rectángulo propuesto. Moverlo o cambiarle el tamaño está permitido. */
+  rect: [number, number, number, number];
+  /**
+   * Qué va a caer acá. Decide el tipo de campo con el que nace, y tiene que
+   * coincidir con el que después le va a poner `huecoVisible`:
+   *
+   * · `valor`  → `/FT /Tx` de sólo lectura, el valor de un campo del documento;
+   * · `marca`  → `/FT /Btn` de sólo lectura, una rúbrica o una firma autógrafa
+   *              que no es la principal.
+   *
+   * ⚠ No es cosmético. Si naciera como `/Tx` y se completara como `/Btn`,
+   * estaríamos cambiándole el TIPO al campo adentro de un documento firmado —
+   * una variable más que el laboratorio nunca aisló. Nace como lo que va a ser.
+   */
+  clase?: 'valor' | 'marca';
+}
+
+/**
+ * Deja creados, VACÍOS y de sólo lectura, los widgets que el documento va a
+ * necesitar. Corre una sola vez, desde `normalizar()`, antes de que exista
+ * ninguna firma. A partir de ahí ninguna firma AGREGA: cada una COMPLETA.
+ *
+ * ═══ POR QUÉ EXISTE ═══
+ *
+ * Medido en Acrobat el 8/8 con tres PDF de laboratorio que difieren en una sola
+ * cosa (`claude/cambios-posteriores-a-la-firma.md`):
+ *
+ * · agregar un campo de formulario después de una firma → «El documento se ha
+ *   modificado o dañado desde que fue firmado», y la banda roja «Hay al menos
+ *   una firma no válida»;
+ * · completar uno que ya estaba → «Esta revisión del documento NO SE HA
+ *   MODIFICADO», que es la descripción de un trámite normal;
+ * · y moverle el rectángulo tampoco molesta, así que la rúbrica que el firmante
+ *   arrastra NO es un obstáculo.
+ *
+ * Con N firmantes, la forma vieja dejaba N−1 firmas en rojo sobre un documento
+ * perfectamente legítimo. Es lo primero que ve un cliente al abrirlo.
+ *
+ * ═══ POR QUÉ SE ESCRIBE CON BYTES Y NO CON pdf-lib ═══
+ *
+ * ⚠ Porque `widgetsPredeclarados()` reconoce el `/T` con una regex de CADENA
+ * LITERAL —`(así)`— y dice, correctamente, que no hace falta cubrir la forma
+ * hexadecimal «porque no la generamos». Si estos widgets los escribiera la API
+ * de formularios de pdf-lib, el `/T` podría salir hexadecimal: no se
+ * reconocería ninguno, cada firma volvería a AGREGAR, y el arreglo entero no
+ * haría nada **sin un solo error a la vista**. Escribirlos con la misma
+ * maquinaria que los lee hace que se reconozcan por construcción.
+ *
+ * ⚠ Y aun así se comprueba abajo, porque «por construcción» es un argumento y
+ * no una medición.
+ */
+export function predeclarar(pdf: Buffer, widgets: WidgetPredeclarado[]): Buffer {
+  if (!widgets.length) return pdf;
+
+  const info = readPdf(pdf);
+  const paginas = refsDePaginas(pdf, info);
+
+  let salida = Buffer.from(pdf);
+  const refs = new Map<number, number>();
+  let indice: number = info.xref.maxIndex;
+
+  const escribir = (idx: number, cuerpo: Buffer) => {
+    refs.set(idx, salida.length + 1);
+    salida = Buffer.concat([
+      salida, Buffer.from('\n'), Buffer.from(`${idx} 0 obj\n`), cuerpo, Buffer.from('\nendobj\n'),
+    ]);
+    return `${idx} 0 R`;
+  };
+  const agregar = (cuerpo: Buffer) => escribir((indice += 1), cuerpo);
+
+  // Una sola apariencia vacía para todos. Medido en el laboratorio: un widget
+  // con apariencia vacía no dibuja nada.
+  //
+  // ⚠ Sin `/AP`, un lector puede decidir dibujarlo él. Acá lo que se ve tiene
+  // que estar decidido por nosotros y congelado, que es el mismo motivo por el
+  // que `normalizar()` saca `/NeedAppearances`.
+  const vacia = agregar(Buffer.from(
+    '<<\n/Type /XObject\n/Subtype /Form\n/BBox [0 0 1 1]\n/Resources << >>\n/Length 0\n>>\n' +
+    'stream\n\nendstream'));
+
+  const anotaciones: { pagina: number; ref: string }[] = [];
+  const nuevos: string[] = [];
+  const puestos: string[] = [];
+
+  for (const w of widgets) {
+    if (!paginas[w.pagina]) {
+      // ⚠ No se tira. Pre-declarar es una mejora de lo que el cliente LEE, no
+      // un requisito para firmar: si un campo quedó apuntando a una hoja que no
+      // existe, este documento tiene otro problema y lo va a contar quien
+      // corresponde. Impedir la firma acá sería cambiar un cartel feo por un
+      // documento que no se puede firmar.
+      console.warn(`[predeclarar] «${w.nombre}» apunta a la hoja ${w.pagina + 1} y el documento tiene ${paginas.length}`);
+      continue;
+    }
+    // Nace exactamente como va a quedar. Las banderas son las mismas que pone
+    // `huecoVisible` al completarlo: el widget pre-declarado y el completado
+    // tienen que ser el MISMO objeto con el mismo carácter, no dos cosas
+    // parecidas.
+    //
+    // · valor → `/F 68` (imprimible + sólo lectura) y `/Ff 1` (campo de sólo
+    //   lectura), con el valor en `/V`.
+    // · marca → `/F 4` (imprimible) y `/Ff 65537` (sólo lectura + pushbutton).
+    //   Un botón no tiene `/V`: lo que se ve vive en `/MK /I`.
+    const propio = (w.clase ?? 'valor') === 'marca'
+      ? '/F 4\n/FT /Btn\n/Ff 65537\n'
+      : `/F 68\n/FT /Tx\n/Ff 1\n/V ()\n/DA (/Ayuda 0 Tf 0 g)\n`;
+    const cuerpo =
+      `<<\n/Type /Annot\n/Subtype /Widget\n/Rect [${w.rect.join(' ')}]\n` +
+      `/P ${paginas[w.pagina]}\n/AP << /N ${vacia} >>\n` +
+      propio +
+      `/T ${cadenaPdf(w.nombre)}\n/MiFirma true\n>>`;
+    const ref = agregar(Buffer.from(cuerpo, 'latin1'));
+    nuevos.push(ref);
+    anotaciones.push({ pagina: w.pagina, ref });
+    puestos.push(w.nombre);
+  }
+
+  if (!nuevos.length) return pdf;
+
+  // El AcroForm, con los campos que había más los nuestros. Si no había, se
+  // crea y se le cuelga a la raíz.
+  const acroRefViejo = acroformExistente(info.root);
+  const cuerpoAcro = Buffer.from(acroExtendido(
+    acroRefViejo ? cuerpoObjeto(pdf, info, acroRefViejo) : null,
+    [...(acroRefViejo ? camposDe(pdf, info, acroRefViejo) : []), ...nuevos],
+  ), 'latin1');
+
+  if (acroRefViejo) {
+    escribir(getIndexFromRef(info.xref, acroRefViejo), cuerpoAcro);
+  } else {
+    const acro = agregar(cuerpoAcro);
+    escribir(getIndexFromRef(info.xref, info.rootRef),
+             Buffer.from(raizConAcroform(pdf, info, acro), 'latin1'));
+  }
+
+  // ⚠ Y en el `/Annots` de su página. Un campo que está en `/Fields` pero no en
+  // la página no se dibuja; y —lo que importa acá— si la firma tuviera que
+  // agregarlo a `/Annots` después, ESE cambio ya alcanza para que Acrobat diga
+  // que el documento se modificó. Los dos lugares, ahora, o no sirve de nada.
+  for (const pref of new Set(anotaciones.map((a) => paginas[a.pagina]))) {
+    const deEsta = anotaciones.filter((a) => paginas[a.pagina] === pref).map((a) => a.ref);
+    for (const o of objetosConAnotacion(pdf, info, pref!, deEsta)) {
+      escribir(o.idx, Buffer.from(o.cuerpo, 'latin1'));
+    }
+  }
+
+  info.xref.maxIndex = indice;
+  const salidaFinal = Buffer.concat([salida, Buffer.from('\n'), trailer(salida, info, refs)]);
+
+  // ═══ LA COMPROBACIÓN QUE NO DEJA FALLAR EN SILENCIO ═══
+  //
+  // Se releen los widgets con la MISMA función que los va a buscar al firmar. Si
+  // no los encuentra, el arreglo no sirvió — y sin esto no se enteraría nadie
+  // hasta que un cliente abriera el documento en Acrobat y viera la banda roja.
+  //
+  // ⚠ Cuando falla se devuelve el PDF SIN pre-declarar, no una excepción. El
+  // resultado es exactamente el de antes de existir esto: un cartel feo. Tirar
+  // acá cambiaría un problema de presentación por un documento que no se puede
+  // firmar, y eso es peor.
+  try {
+    const infoFinal = readPdf(salidaFinal);
+    const hallados = widgetsPredeclarados(salidaFinal, infoFinal, acroformExistente(infoFinal.root));
+    const faltan = puestos.filter((n) => !hallados.has(n));
+    if (faltan.length) {
+      console.error(
+        `[predeclarar] se escribieron ${puestos.length} widget(s) y se releyeron ${hallados.size}. ` +
+        `No se reconocen: ${faltan.slice(0, 5).join(', ')}. ` +
+        'Se firma sin pre-declarar: Acrobat va a marcar en rojo todas las firmas menos la última.',
+      );
+      return pdf;
+    }
+  } catch (err) {
+    console.error('[predeclarar] no se pudo releer lo que se escribió, se firma sin pre-declarar:', err);
+    return pdf;
+  }
+
+  console.info(`[predeclarar] ${puestos.length} widget(s) pre-declarados antes de la primera firma`);
+  return salidaFinal;
+}
+
 /**
  * Agrega un hueco de firma CON APARIENCIA VISIBLE, en las páginas y posiciones
  * indicadas. Nada del contenido de las páginas se toca: se les agrega una
@@ -769,7 +970,35 @@ export function huecoVisible({
   const nombreCampo = `MiFirma${firmasPrevias + 1}`;
 
   // Cuál de las marcas es el campo de firma. El resto se dibuja como sello.
-  const iPrincipal = Math.max(0, marcas.findIndex((m) => m.principal));
+  //
+  // ⚠⚠ ACÁ DECÍA `Math.max(0, findIndex(principal))`, Y ESE 0 PRODUCÍA UN
+  // DOCUMENTO FIRMADO SIN NINGUNA FIRMA EN EL AcroForm.
+  //
+  // Cuando nadie declara principal, aquello tomaba la marca 0. Mientras todas
+  // las marcas fueron imágenes, la marca 0 era una firma autógrafa y estaba
+  // bien. Desde que conviven con los VALORES DE LOS CAMPOS, la marca 0 puede
+  // ser un valor —un `/FT /Tx`, que no puede ser el campo de firma— y entonces
+  // pasaban dos cosas a la vez, las dos calladas:
+  //
+  //   · `refCampo` quedaba apuntando al widget del valor, así que el `/Fields`
+  //     salía con ese campo DOS VECES; y
+  //   · el `if (!refCampo)` de más abajo no se disparaba, así que el campo de
+  //     firma nunca entraba al AcroForm. El `/Sig` existe y la firma verifica
+  //     —`integro` da true, `pdfsig` la encuentra— pero un lector que arme el
+  //     panel desde `/Fields` no muestra ninguna firma.
+  //
+  // Se ve sólo con un firmante que **no cargó su firma visual** y sí completa
+  // campos, que es un caso soportado a propósito («si no cargó imagen, no se
+  // estampa nada»). Las cuatro vueltas del 8/8 tenían imagen, así que no salió.
+  // Medido: `/Fields [13 0 R 13 0 R]`, ningún `/FT /Sig`.
+  //
+  // La regla correcta no es «la primera», es «la primera que PUEDA serlo»: una
+  // imagen que no sea sello. Si no hay ninguna, no hay principal y el campo de
+  // firma invisible de más abajo hace su trabajo.
+  const declarada = marcas.findIndex((m) => m.principal);
+  const iPrincipal = declarada >= 0
+    ? declarada
+    : marcas.findIndex((m) => m.imagen != null && m.modo !== 'sello');
 
   // ⚠ La imagen y la apariencia se embeben UNA vez y se reusan.
   //

@@ -5,7 +5,7 @@ import { db, withExterno } from '../db/pool';
 import { fijarContexto } from '../db/contexto';
 import { withUsuario, exigir } from '../auth/authz';
 import { verificarEnlaceFirma } from '../auth/enlace_firma';
-import { fueraDeWinAnsi, type Marca } from '../firma/apariencia';
+import { fueraDeWinAnsi, type Marca, type WidgetPredeclarado } from '../firma/apariencia';
 import { almacen } from '../almacenamiento/almacen';
 import { anotar } from './evidencia';
 import { HttpError } from '../http/errors';
@@ -498,6 +498,64 @@ export interface CamposListos {
 /** Las formas de «marcada» que pueden llegar de verdad. Ver `prepararCampos`. */
 const CASILLA_MARCADA = new Set(['sí', 'si', 'true', '1', 'x', 'yes', 'on', 'sim']);
 
+/** Lo mínimo que hace falta saber de un campo para nombrarlo. */
+type CampoNombrable = {
+  codigo: string;
+  quien_completa?: string | null;
+  completa_emisor?: boolean | null;
+  posicion_firmante?: number | null;
+};
+
+/**
+ * El `/T` del widget que MiFirma escribe en el PDF para este campo.
+ *
+ * ═══ POR QUÉ ESTÁ EN UNA SOLA FUNCIÓN ═══
+ *
+ * ⚠ Este nombre se calcula DOS veces sobre el mismo campo: una antes de la
+ * primera firma, cuando `predeclarar()` deja el widget creado y vacío, y otra
+ * en cada firma, cuando `prepararCampos` lo completa. Si las dos formas
+ * difieren en un carácter, la firma no encuentra el widget pre-declarado, lo
+ * AGREGA, y Acrobat vuelve a decir «el documento se ha modificado o dañado
+ * desde que fue firmado» — sin un solo error a la vista de nadie.
+ *
+ * Un valor calculado en dos lugares se desincroniza; es exactamente lo que pasó
+ * con `orden` y `posicion` en la 055. Así que se calcula acá y en ningún otro
+ * lado.
+ *
+ * ═══ POR QUÉ EL SUFIJO NO ES SIEMPRE EL LUGAR ═══
+ *
+ * ⚠ Antes era siempre el lugar del que estaba firmando, y para un campo DEL
+ * FIRMANTE está bien: el lugar es suyo, no cambia, y es lo que evita que dos
+ * personas que completan el mismo código choquen entre sí (055).
+ *
+ * Pero un campo del EMISOR y uno de `cualquiera` los dibuja **el primero que
+ * firme**, y en modo paralelo eso no se sabe de antemano: el mismo campo salía
+ * `razon_social__mf1` o `razon_social__mf2` según quién llegara primero. Un
+ * nombre que no se puede predecir no se puede pre-declarar — y la mitad del
+ * arreglo se caía justo ahí, en silencio.
+ *
+ * Los dos se congelan en la primera vuelta y no se vuelven a dibujar (ver el
+ * `congelado_en` de `prepararCampos`), así que un sufijo fijo no puede chocar
+ * con nada: hay uno solo por documento.
+ *
+ * ⚠ Y el nombre NO puede ser el código pelado: cuando el campo se adoptó del
+ * AcroForm del cliente, el código ES el nombre del campo original, y el
+ * documento firmado terminaría con dos campos llamados igual. Ver el comentario
+ * largo en `prepararCampos`.
+ */
+export function nombreDelWidget(campo: CampoNombrable): string {
+  // El modo manda; las columnas se derivan de él. Es la misma regla que aplica
+  // `definirCampos`, y se repite el `??` para que una fila vieja sin
+  // `quien_completa` no produzca un nombre distinto del que produciría hoy.
+  const modo = campo.quien_completa
+    ?? (campo.completa_emisor ? 'emisor'
+      : campo.posicion_firmante != null ? 'firmante' : 'cualquiera');
+  const sufijo = modo === 'emisor' ? 'E'
+    : modo === 'cualquiera' ? 'C'
+    : String(campo.posicion_firmante ?? 1);
+  return `${campo.codigo}__mf${sufijo}`;
+}
+
 export async function prepararCampos(
   trx: any,
   instanciaId: string,
@@ -506,7 +564,7 @@ export async function prepararCampos(
 ): Promise<CamposListos> {
   const r = await sql<any>`
     select c.id, c.codigo, c.etiqueta_i18n, c.obligatorio, c.tipo, c.completa_emisor,
-           c.quien_completa, c.cuerpo, c.color,
+           c.quien_completa, c.posicion_firmante, c.cuerpo, c.color,
            c.pagina, c.x, c.y, c.ancho, c.alto,
            v.valor, v.congelado_en
       from campo c
@@ -607,7 +665,12 @@ export async function prepararCampos(
       // repetidos — con el lector mostrando el primero y el documento saliendo
       // en blanco. El lugar es distinto para cada persona, así que el nombre
       // también. Ver migración 055.
-      etiqueta: `${f.codigo}__mf${posicion}`,
+      //
+      // ⚠ Y sale del CAMPO, no del `posicion` que recibió esta llamada. Para un
+      // campo del firmante da lo mismo —son el mismo número— pero para uno del
+      // emisor daba el lugar del que firmara primero, que no se puede predecir
+      // y por lo tanto no se puede pre-declarar. Ver `nombreDelWidget`.
+      etiqueta: nombreDelWidget(f),
     });
     congelar.push({
       id: f.id,
@@ -629,6 +692,76 @@ export async function prepararCampos(
   }
 
   return { marcas, congelar };
+}
+
+/**
+ * Todos los widgets que este documento va a necesitar, para dejarlos creados
+ * antes de la primera firma.
+ *
+ * ═══ POR QUÉ NO FILTRA NADA ═══
+ *
+ * `prepararCampos` filtra por lugar, por valor y por congelado, porque le
+ * interesa lo que hay que DIBUJAR ahora. Acá interesa lo que va a hacer falta
+ * ALGUNA VEZ, y eso incluye los campos de los que todavía no firmaron, los
+ * opcionales que quizá nadie complete, y los que en esta vuelta están vacíos.
+ * Pre-declarar de menos es no arreglar nada; pre-declarar de más deja un widget
+ * vacío que no dibuja nada.
+ *
+ * ⚠ Un widget pre-declarado que nadie complete se queda en el AcroForm sin
+ * valor, y con «Resaltar campos existentes» Acrobat le va a pintar el recuadro
+ * —el R10 de `campos-sobre-el-pdf.md`, ahora multiplicado—. Es un costo
+ * conocido y aceptado: la alternativa es la banda roja en todos los documentos
+ * de más de un firmante.
+ *
+ * ═══ QUÉ VE ESTA CONSULTA ═══
+ *
+ * ⚠ Corre con el contexto del firmante, y trae campos que NO son suyos. Eso no
+ * es un descuido de la RLS: la política `campo_select` de la 038 lo dice con
+ * todas las letras — «un firmante tiene que poder ver TODOS los campos, no sólo
+ * los suyos, porque necesita leer lo que completó el anterior». Ver el valor es
+ * otra cosa y lo decide `valor_select`; acá no se leen valores.
+ *
+ * ⚠ El `join` contra `instancia` es contra una tabla con RLS. Es el mismo que
+ * ya hace `prepararCampos` desde el mismo contexto. Ver `rls-trampas.md` §19.
+ */
+export async function widgetsAPredeclarar(
+  trx: any,
+  instanciaId: string,
+): Promise<WidgetPredeclarado[]> {
+  const r = await sql<any>`
+    select c.codigo, c.quien_completa, c.completa_emisor, c.posicion_firmante,
+           c.pagina, c.x, c.y, c.ancho, c.alto
+      from campo c
+      join instancia i on i.id = ${instanciaId}::uuid and i.circuito_id = c.circuito_id
+     order by c.pagina, c.orden
+  `.execute(trx);
+
+  const vistos = new Set<string>();
+  const salida: WidgetPredeclarado[] = [];
+
+  for (const f of r.rows) {
+    const nombre = nombreDelWidget(f);
+    // `unique (circuito_id, codigo)` de la 038 hace que esto no pueda pasar. Se
+    // comprueba igual porque el costo es una línea y la consecuencia sería dos
+    // widgets con el mismo `/T` adentro de un documento firmado — el defecto
+    // nº 2 del 4/8, con el lector mostrando el vacío.
+    if (vistos.has(nombre)) {
+      console.warn(`[predeclarar] dos campos quieren llamarse «${nombre}»; se pre-declara uno solo`);
+      continue;
+    }
+    vistos.add(nombre);
+    const x = Number(f.x), y = Number(f.y);
+    salida.push({
+      nombre,
+      pagina: f.pagina,
+      // El rectángulo propuesto. Si después el valor se dibuja en otro lado
+      // —o el firmante mueve algo— el widget se reescribe con el rectángulo
+      // nuevo, que es un cambio permitido. Variante C del laboratorio.
+      rect: [x, y, x + Number(f.ancho), y + Number(f.alto)],
+    });
+  }
+
+  return salida;
 }
 
 /**

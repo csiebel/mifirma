@@ -13,7 +13,7 @@ import { SignPdf } from '@signpdf/signpdf';
 import { huecoVisible, type Marca } from '../../src/firma/apariencia';
 import { normalizar, sellar, verificar } from '../../src/firma/pades';
 import { base, firma, firmanteLab, prepararFixtures, rubrica, sinPoppler } from './fixtures';
-import { firmasSegunPoppler, guardar } from './inspeccion';
+import { acroformFinal, estructura, firmasSegunPoppler, guardar } from './inspeccion';
 
 const signpdf = new SignPdf();
 let FIRMA: Buffer;
@@ -71,6 +71,34 @@ describe('huecoVisible: casos de borde', () => {
                      ['firma_posterior', 'firma_posterior', 'final']);
     assert.deepEqual(v.firmas.map((f) => f.nombre_declarado),
                      ['Ana Pérez', 'Beto Silva', 'Carla Núñez']);
+  });
+
+  test('⚠ un firmante SIN firma visual que completa campos: el /Sig tiene que estar en el AcroForm', async () => {
+    // ═══ REGRESIÓN, Y DE LAS QUE NO SE VEN ═══
+    //
+    // `iPrincipal` salía de `Math.max(0, findIndex(principal))`. Cuando nadie
+    // declara principal —que es lo que pasa con un firmante que NO cargó su
+    // imagen y sólo completa campos, un caso soportado a propósito— ese 0
+    // tomaba la marca 0, que ahora puede ser el VALOR DE UN CAMPO.
+    //
+    // Resultado medido: `/Fields [13 0 R 13 0 R]` — el mismo campo dos veces —
+    // y **ningún `/FT /Sig` en el AcroForm**. La firma existe, verifica, e
+    // `integro` da true; pero un lector que arme el panel de firmas desde
+    // `/Fields` no muestra ninguna. Un documento firmado que se lee «sin
+    // firmar»: otra vez lo que se ve no es lo que hay.
+    //
+    // No apareció el 8/8 porque las cuatro vueltas tenían firma visual.
+    const p = await firmarCon(BASE, [
+      { pagina: 0, rect: [80, 700, 300, 722], texto: 'Ana Pérez', modo: 'campo', etiqueta: 'nombre__mf1' },
+    ], 'Ana Pérez', 'a');
+
+    const { campos } = acroformFinal(p);
+    const declarados = estructura(p, campos);
+    assert.ok(declarados.some((c) => c.esFirma), 'el campo de firma no llegó al AcroForm');
+
+    const nombres = declarados.map((c) => c.nombre);
+    assert.equal(new Set(nombres).size, nombres.length, `hay un campo repetido: ${nombres.join(', ')}`);
+    assert.ok(verificar(p).integro);
   });
 
   test('sin marcas: el hueco invisible también es nuestro', async (t) => {

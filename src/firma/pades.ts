@@ -4,7 +4,7 @@ import { SignPdf } from '@signpdf/signpdf';
 import forge from 'node-forge';
 import { Signer } from '@signpdf/utils';
 import { insertarSelloEnFirma, loQueSeSella, leerSelloDeFirma, type SelloObtenido } from './tsa';
-import { huecoVisible, type Marca } from './apariencia';
+import { huecoVisible, predeclarar, type Marca, type WidgetPredeclarado } from './apariencia';
 import { cambiosEntreFirmas, type CambioEntreFirmas } from './cambios';
 import { HttpError } from '../http/errors';
 import type { Firmante } from './adaptadores/tipos';
@@ -85,8 +85,22 @@ export interface DatosSello {
  * Se corre UNA vez, sobre el documento base, antes de la primera firma. A
  * partir de ahí cada firma agrega bytes al final y nadie vuelve a serializar
  * nada — que es la única forma de que las firmas anteriores sigan valiendo.
+ *
+ * ⚠ Y es el ÚNICO momento en que se puede declarar la estructura del documento.
+ * `widgets` es la lista de campos que el documento va a necesitar: se dejan
+ * creados y vacíos acá, y de ahí en adelante cada firma los COMPLETA en vez de
+ * agregarlos. Sin eso, con N firmantes, N−1 firmas se abren en rojo. El porqué
+ * está medido en `claude/cambios-posteriores-a-la-firma.md` y la mecánica en
+ * `predeclarar()`.
+ *
+ * Se puede llamar sin lista: el documento sale como salía antes. Es lo que
+ * hacen las pruebas que no miran los campos, y lo que hace un circuito que se
+ * despachó antes de que esto existiera.
  */
-export async function normalizar(pdf: Buffer): Promise<Buffer> {
+export async function normalizar(
+  pdf: Buffer,
+  widgets: WidgetPredeclarado[] = [],
+): Promise<Buffer> {
   const roto = () => new HttpError(
     400,
     'No se pudo preparar el PDF para firmar. Puede estar dañado o protegido con contraseña.',
@@ -177,13 +191,27 @@ export async function normalizar(pdf: Buffer): Promise<Buffer> {
     }
   }
 
+  let plano: Buffer;
   try {
     // `updateFieldAppearances: false` porque ya se hizo arriba, con su manejo de
     // error propio. Dejárselo a `save()` es volver a la casualidad.
-    return Buffer.from(await doc.save({ useObjectStreams: false, updateFieldAppearances: false }));
+    plano = Buffer.from(await doc.save({ useObjectStreams: false, updateFieldAppearances: false }));
   } catch {
     throw roto();
   }
+
+  // ⚠ DESPUÉS del `save()`, y no antes. `pdf-lib` reescribe el archivo entero:
+  // cualquier cosa que le agreguemos con él sale con el formato que él decida, y
+  // `widgetsPredeclarados()` lee el `/T` con una regex de cadena literal. Ver el
+  // comentario largo de `predeclarar()`, que es de las que se leen una vez y
+  // ahorran una tarde.
+  //
+  // Que agregue un incremento más al archivo no molesta: acá todavía no hay
+  // ninguna firma que proteger. ⚠ Sí cambia una cosa para quien disecciona el
+  // documento cortándolo en cada `%%EOF`: la revisión 1 es la salida de pdf-lib
+  // y la 2 es el documento pre-declarado. La primera FIRMA es la revisión 3.
+  // Ver `claude/prueba-acrobat.md` §9.
+  return predeclarar(plano, widgets);
 }
 
 /**

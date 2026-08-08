@@ -1,4 +1,5 @@
 import { createHash, randomUUID } from 'node:crypto';
+import { PDFDocument } from 'pdf-lib';
 import { sql } from 'kysely';
 import { withExterno, db } from '../db/pool';
 import { fijarContexto } from '../db/contexto';
@@ -11,7 +12,8 @@ import { anotar } from './evidencia';
 import { obtenerSello, selloObligatorio, type ResultadoSello } from './tsa';
 import { avisarAlQueSigue, avisarCompletado, ubicarEnBandeja, consolidarOtorgamiento } from './circuito';
 import { emitirCertificado } from './certificado';
-import { prepararCampos, congelarCampos } from './campos';
+import { prepararCampos, congelarCampos, widgetsAPredeclarar } from './campos';
+import { marcasAPredeclarar, nombreDeMarca } from './marcas';
 import { HttpError } from '../http/errors';
 
 /**
@@ -238,6 +240,8 @@ async function marcasDelFirmante(
   instanciaId: string,
   participacionId: string,
   identidadId: string,
+  /** El LUGAR de esta persona. Es lo que nombra el widget de cada marca. */
+  posicion: number,
 ): Promise<{ marcas: Marca[]; imagenes: { tipo: string; sha256: string; id: string }[]; motivo: string | null }> {
   const datos = await enSistema(async (trx) => {
     const m = await sql<{ tipo: string; pagina: number; x: string; y: string; ancho: string; alto: string }>`
@@ -300,6 +304,16 @@ async function marcasDelFirmante(
       rect: [x, y, x + Number(m.ancho), y + Number(m.alto)] as [number, number, number, number],
       imagen: bytes.get(m.tipo)!,
       principal: i === iPrincipal,
+      // ⚠ El nombre del lugar que esta marca viene a COMPLETAR. Tiene que salir
+      // de la misma función que lo reservó antes de la primera firma, o la
+      // firma no lo encuentra y lo agrega — y agregar un campo de formulario
+      // después de una firma es lo que rompe todas las anteriores.
+      //
+      // La principal no lo usa: ésa es el campo de firma (`/FT /Sig`) y
+      // agregarla está permitido. Se le pone igual porque cuál es la principal
+      // depende de dónde puso cada uno sus marcas, y no vale la pena que este
+      // nombre exista a veces sí y a veces no.
+      etiqueta: nombreDeMarca({ posicion, tipo: m.tipo as 'firma' | 'rubrica', pagina: m.pagina }),
     };
   });
 
@@ -335,7 +349,7 @@ export async function firmar(token: string, input: FirmaInput) {
       sha256: Buffer; titulo: string; nivel_firma: string; me_toca: boolean;
       anclaje_email: string | null; clave: string; mime: string;
       archivo_vigente_id: string | null; firmante: string | null; emisor: string | null;
-      pais: string | null;
+      pais: string | null; paginas: number | null;
     }>`
       select p.id as participacion_id, p.instancia_id, p.circuito_id,
              p.cuenta_propietaria_id, p.estado, p.papel, p.orden, p.identidad_id,
@@ -358,6 +372,10 @@ export async function firmar(token: string, input: FirmaInput) {
              -- La firma se agrega SOBRE éste; hacerlo sobre el original borraría
              -- las anteriores.
              a.clave_almacenamiento as clave, a.mime,
+             -- Cuántas hojas tiene. Hace falta para reservar un lugar de marca
+             -- por hoja y por firmante antes de la primera firma; puede venir
+             -- en null en archivos viejos y ahí se cuentan a mano.
+             a.paginas,
              i2.archivo_vigente_id,
              ident.nombre_mostrado as firmante, cu.nombre_mostrado as emisor,
              -- El país de la cuenta EMISORA, que es la que asume el documento.
@@ -394,7 +412,8 @@ export async function firmar(token: string, input: FirmaInput) {
   // Dónde va la firma autógrafa de esta persona. Si no cargó imagen, la lista
   // vuelve vacía y se firma sin estampar nada — que es la decisión tomada, no
   // una degradación.
-  const visual = await marcasDelFirmante(ctx.instancia_id, ctx.participacion_id, ctx.identidad_id);
+  const visual = await marcasDelFirmante(
+    ctx.instancia_id, ctx.participacion_id, ctx.identidad_id, ctx.posicion ?? 1);
 
   // Los campos que le tocan a esta persona: se validan los obligatorios y se
   // arma lo que hay que dibujar. **No escribe nada todavía** — el congelado va
@@ -404,13 +423,54 @@ export async function firmar(token: string, input: FirmaInput) {
   // con sus valores inmutables y sin firma: no podría corregir un error de
   // tipeo ni reintentar. Es el mismo motivo por el que la evidencia tampoco se
   // anota antes de sellar.
-  const campos = await withExterno(e.otorgamientoId, e.identidadId, (trx) =>
-    prepararCampos(trx, ctx.instancia_id, ctx.posicion ?? 1));
+  //
+  // ⚠ En la MISMA vuelta se pide, si es la primera firma, la lista de widgets a
+  // pre-declarar. Van juntos a propósito: es el mismo contexto de otorgamiento y
+  // la misma foto del documento. Pedirlos por separado abriría la puerta a que
+  // entre una cosa y la otra cambiara la definición de los campos, y entonces se
+  // pre-declararía un juego y se completaría otro.
+  // Cuántas hojas tiene, para reservar un lugar de marca por hoja. Se prefiere
+  // lo que dice la base y se cuenta a mano sólo si falta: abrir el PDF para
+  // saber algo que ya está escrito es trabajo de más en cada primera firma.
+  const hojas = async () => {
+    if (ctx.paginas != null) return ctx.paginas;
+    try {
+      return (await PDFDocument.load(original, { ignoreEncryption: true })).getPageCount() || 1;
+    } catch {
+      // No se puede reservar lo que no se sabe contar, pero tampoco se va a
+      // impedir la firma por eso: se reservan los campos y las marcas siguen
+      // agregándose, que es como funcionaba antes.
+      console.warn('[predeclarar] no se pudo contar las hojas: no se reservan lugares de marca');
+      return 0;
+    }
+  };
+
+  const preparado = await withExterno(e.otorgamientoId, e.identidadId, async (trx) => ({
+    campos: await prepararCampos(trx, ctx.instancia_id, ctx.posicion ?? 1),
+    // Sólo la primera vez. Si ya hay una firma, el documento ya quedó declarado
+    // —o quedó sin declarar, si se despachó antes de que esto existiera— y no
+    // hay nada que se pueda cambiar sin romper esa firma.
+    //
+    // ⚠ Los campos y las marcas van JUNTOS y en la misma vuelta. Si faltara
+    // cualquiera de las dos familias, esa mitad volvería a agregarse al firmar
+    // y el documento se abriría en rojo igual: el arreglo no admite mitades.
+    widgets: ctx.archivo_vigente_id ? [] : [
+      ...await widgetsAPredeclarar(trx, ctx.instancia_id),
+      ...await marcasAPredeclarar(trx, ctx.instancia_id, await hojas()),
+    ],
+  }));
+  const campos = preparado.campos;
 
   // La normalización sólo hace falta la primera vez: deja el PDF con tabla xref
   // clásica, que es lo que el placeholder sabe leer. Si ya hay una firma, el
   // archivo NO se vuelve a serializar — hacerlo rompería esa firma.
-  const base = ctx.archivo_vigente_id ? original : await normalizar(original);
+  //
+  // ⚠ Y es el único momento en que se pueden declarar los widgets. Lo que no se
+  // deje creado acá, cada firma lo va a AGREGAR, y agregar un campo de
+  // formulario después de una firma es lo que hace que Acrobat diga «el
+  // documento se ha modificado o dañado desde que fue firmado» en todas las
+  // firmas menos la última. Medido: `claude/cambios-posteriores-a-la-firma.md`.
+  const base = ctx.archivo_vigente_id ? original : await normalizar(original, preparado.widgets);
 
   // ── El sello de tiempo. Lo único de todo esto que no admite segunda vuelta.
   //

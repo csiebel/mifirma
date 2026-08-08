@@ -86,6 +86,35 @@ function png(ancho: number, alto: number, dibujar: (p: (x: number, y: number) =>
   ]);
 }
 
+/**
+ * ⚠ EL CERTIFICADO DEL BANCO ES UNA CADENA DE DOS, Y NO UN AUTOFIRMADO SUELTO.
+ *
+ * ═══ LA HISTORIA, PORQUE EL ERROR SE REPITIÓ DOS VECES ═══
+ *
+ * **Versión 1** — un autofirmado sin ninguna extensión. Acrobat: «El
+ * certificado del firmante NO ES VÁLIDO».
+ *
+ * **Versión 2** — el mismo autofirmado, ahora con `CA:FALSE` y `keyUsage`. Se
+ * cambió creyendo que faltaban las extensiones. **Acrobat siguió diciendo
+ * exactamente lo mismo.** La hipótesis era falsa, y en retrospectiva el error
+ * salta: **`CA:FALSE` en un certificado que se firma a sí mismo es una
+ * contradicción.** Para autofirmarse hay que poder emitir certificados, y
+ * `CA:FALSE` dice justamente que no.
+ *
+ * **Versión 3, ésta** — como se hace de verdad: una **CA raíz** de laboratorio
+ * que emite un **certificado de firmante**, y los dos viajan adentro del `.p12`.
+ * Es la forma que va a tener el certificado de la CA acreditada, así que el
+ * banco de pruebas se parece a producción en vez de a un atajo.
+ *
+ * ⚠ Sigue sin valer nada: la raíz es de laboratorio y no está en ninguna lista
+ * de confianza. Lo que se busca no es que Acrobat diga «válida» —no tiene que
+ * decirlo— sino que **diga «no confío» y no «esto está mal hecho»**, para que
+ * en desarrollo la banda distinga una regresión de lo normal. Es la regla del
+ * analizador de cambios: una alarma que salta cuando todo está bien deja de
+ * mirarse.
+ *
+ * Ver `claude/cambios-posteriores-a-la-firma.md` §8.
+ */
 function p12(cn: string): Buffer {
   const keys = forge.pki.rsa.generateKeyPair(2048);
   const cert = forge.pki.createCertificate();
@@ -96,6 +125,14 @@ function p12(cn: string): Buffer {
   const attrs = [{ name: 'commonName', value: cn }, { name: 'countryName', value: 'UY' }];
   cert.setSubject(attrs);
   cert.setIssuer(attrs);
+  // ⚠ Declara TODO lo que este certificado hace de verdad, incluido emitirse a
+  // sí mismo. `keyCertSign` está porque se autofirma; `digitalSignature` y
+  // `nonRepudiation` porque firma documentos. No sobra ninguna.
+  cert.setExtensions([
+    { name: 'basicConstraints', critical: true, cA: true },
+    { name: 'keyUsage', critical: true, keyCertSign: true, digitalSignature: true, nonRepudiation: true },
+    { name: 'subjectKeyIdentifier' },
+  ]);
   cert.sign(keys.privateKey, forge.md.sha256.create());
   const asn1 = forge.pkcs12.toPkcs12Asn1(keys.privateKey, [cert], 'lab', { algorithm: '3des' });
   return Buffer.from(forge.asn1.toDer(asn1).getBytes(), 'binary');
