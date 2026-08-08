@@ -124,4 +124,8 @@ echo "  · keyUsage: keyCertSign, firma digital y no repudio"
 echo
 echo "Agregá esto a .env si no está:"
 echo "  SELLO_P12_RUTA=db/sello-dev.p12"
-echo "  SELLO_P12_PASSWORD=$CLAVE"
+# ⚠ El nombre de la variable, NO su valor. Antes se imprimía la clave, y con la
+# de desarrollo da igual —está escrita acá arriba— pero el día que ahí haya una
+# de verdad quedaría en el scrollback de quien corriera el script. Una clave que
+# se imprime "porque es la de prueba" es una clave que se imprime.
+echo "  SELLO_P12_PASSWORD=<la que ya tenés en .env, o «desarrollo» si es nuevo>"
