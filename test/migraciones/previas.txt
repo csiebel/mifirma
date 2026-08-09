@@ -1,7 +1,17 @@
-# Migraciones que hay que correr antes de la que se está probando, en orden.
-# Son NOMBRES: los archivos se leen de migrations/, no se copian acá.
-051_texto_fijo.sql
-052_quien_completa.sql
-053_envio_a_varios.sql
-054_la_firma_se_acomoda.sql
-055_el_lugar_del_firmante.sql
+# Hasta dónde llega base-minima.sql.
+#
+# ⚠ Esto ya NO es la lista de migraciones previas. Antes lo era, y se
+# desactualizó las dos veces que se pudo: le faltó la 054 en agosto, se
+# arregló, y para cuando llegó la 057 le faltaba la 056. Cada migración nueva
+# era una oportunidad de olvidarse, y el banco daba VERDE corriendo una historia
+# incompleta.
+#
+# Ahora `probar.sh` calcula las previas: corre todo lo que está en migrations/
+# desde este número (inclusive) hasta la que se está probando (exclusive).
+# Agregar una migración no requiere tocar este archivo.
+#
+# La ÚNICA razón para cambiar este número es que base-minima.sql cambie de
+# alcance — o sea, que se lo reescriba para que simule el esquema hasta más
+# adelante. Si eso pasa, se cambia acá y en ningún otro lado.
+
+desde: 051

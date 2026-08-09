@@ -14,7 +14,7 @@
     "set-password": "tsx scripts/set-password.ts",
     "operador": "tsx scripts/operador.ts",
     "correo": "tsx scripts/correo.ts",
-    "migrate": "for f in migrations/0*.sql; do psql \"$MIFIRMA_DB\" -v ON_ERROR_STOP=1 -q -f \"$f\" || break; done"
+    "migrate": "bash db/migrar.sh"
   },
   "dependencies": {
     "@anthropic-ai/sdk": "^0.32.1",

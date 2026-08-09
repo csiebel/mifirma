@@ -46,18 +46,51 @@ psql -q -d postgres -c 'drop role if exists app_rw' 2>/dev/null || true
 psql -q -d postgres -c 'create database mifirma'
 psql -q -d mifirma -v ON_ERROR_STOP=1 -f "$AQUI/base-minima.sql" >/dev/null
 
-# Las migraciones anteriores que hay que correr antes, en orden. La lista vive
-# en `previas.txt` y son NOMBRES: los archivos se leen de `migrations/`, no se
-# copian acá. Una copia de una migración es una migración que se va a
-# desactualizar sola y va a hacer pasar una prueba que la base real no pasa.
-LISTA="$AQUI/previas.txt"
-if [ -f "$LISTA" ]; then
-  while IFS= read -r nombre; do
-    case "$nombre" in ''|'#'*) continue ;; esac
-    echo "── previa: $nombre"
-    psql -q -d mifirma -v ON_ERROR_STOP=1 -f "$AQUI/../../migrations/$nombre" >/dev/null
-  done < "$LISTA"
+# ── LAS MIGRACIONES ANTERIORES ──────────────────────────────────────────────
+#
+# ⚠⚠ ESTO SE CALCULA. Antes era una lista escrita a mano en `previas.txt`, y
+# **se desactualizó las dos veces que se pudo desactualizar**: le faltó la 054
+# en agosto, se arregló, y para cuando llegó la 057 le faltaba la 056. Una lista
+# de «todas las anteriores» que hay que acordarse de tocar cada vez que se
+# agrega una migración no es un invariante: es una convención, y las
+# convenciones se olvidan.
+#
+# Y el modo en que falla es el peor: **el banco da verde**. Corre una historia
+# incompleta, la migración entra contra un esquema que no existe en ningún lado,
+# y la que revienta es la base real.
+#
+# Ahora `previas.txt` guarda UN dato que sí es estable —hasta dónde llega
+# `base-minima.sql`— y el resto sale de `migrations/`: todo lo que está después
+# de esa marca y antes de la que se está probando. Agregar una migración no
+# requiere acordarse de nada.
+MARCA="$AQUI/previas.txt"
+DESDE=""
+[ -f "$MARCA" ] && DESDE="$(sed -n 's/^[[:space:]]*desde:[[:space:]]*\([0-9]\{3\}\).*/\1/p' "$MARCA" | head -1)"
+if [ -z "$DESDE" ]; then
+  echo "ABORTADO: falta la línea 'desde: NNN' en test/migraciones/previas.txt." >&2
+  echo "Es hasta dónde llega base-minima.sql. Sin eso no se sabe qué correr antes." >&2
+  exit 1
 fi
+
+# El número de la que se está probando: se corre todo lo ANTERIOR a ella.
+HASTA="$(basename "$MIG" | sed -n 's/^\([0-9]\{3\}\).*/\1/p')"
+if [ -z "$HASTA" ]; then
+  echo "ABORTADO: '$(basename "$MIG")' no empieza con tres dígitos." >&2
+  exit 1
+fi
+
+CORRIDAS=0
+for previa in "$AQUI/../../migrations/"[0-9][0-9][0-9]_*.sql; do
+  [ -e "$previa" ] || continue
+  n="$(basename "$previa" | cut -c1-3)"
+  # `10#` fuerza base decimal: sin eso, «050» se lee como octal y «008» explota.
+  if [ "$((10#$n))" -ge "$((10#$DESDE))" ] && [ "$((10#$n))" -lt "$((10#$HASTA))" ]; then
+    echo "── previa: $(basename "$previa")"
+    psql -q -d mifirma -v ON_ERROR_STOP=1 -f "$previa" >/dev/null
+    CORRIDAS=$((CORRIDAS + 1))
+  fi
+done
+echo "── ($CORRIDAS previa$([ "$CORRIDAS" -eq 1 ] || echo s), de la $DESDE en adelante)"
 
 echo "── $(basename "$MIG") — primera pasada"
 psql -q -d mifirma -v ON_ERROR_STOP=1 -f "$MIG"
