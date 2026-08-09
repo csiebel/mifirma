@@ -1717,10 +1717,23 @@
       msg('msgModal', '', '');
       // Antes del aviso de campos el botón sólo se deshabilitaba: no decía nada,
       // y despachar tarda lo que tardan los correos.
-      var listo = ocupar($('mEnviar'), 'Enviando…');
+      //
+      // ⚠ Pero ocuparlo con «Enviando…» desde el principio MIENTE mientras se
+      // pregunta. Se vio en pantalla con el aviso de las copias apiladas: el
+      // cartel esperaba que el emisor decidiera «Acomodarlos» o «Enviar igual»,
+      // y el botón de al lado ya decía «Enviando…» sobre un documento que no se
+      // había mandado. Estaba desde el aviso de campos sin adoptar; el segundo
+      // aviso lo hizo visible.
+      //
+      // Se ocupa igual —un segundo clic acá es mandar el documento dos veces—
+      // pero diciendo lo que está haciendo de verdad. Pasa a «Enviando…» recién
+      // cuando ya no hay nada que preguntar.
+      var listo = ocupar($('mEnviar'), 'Revisando…');
       try {
         if (!(await revisarCamposSinUsar())) { listo(); return; }
         if (!(await revisarCopiasApiladas())) { listo(); return; }
+        // `ocupar` guardó el texto original, así que `listo()` lo repone igual.
+        $('mEnviar').textContent = 'Enviando…';
         await guardarConfig();
         var r = await api('/circuitos/' + circuitoId + '/despachar', 'POST');
         cerrarModal();
