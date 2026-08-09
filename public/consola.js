@@ -1627,6 +1627,88 @@
       });
     }
 
+    /**
+     * ⚠ Antes de despachar: ¿quedaron copias apiladas sin acomodar?
+     *
+     * «Uno para cada firmante» apila las copias debajo de la primera y pide que
+     * las arrastres al renglón de cada uno. El botón SABE que no puede acertar
+     * —adivinar dónde va el renglón de cada uno en el documento del cliente no
+     * lo puede hacer nadie— y por eso pide que las muevas. Eso está bien. Lo que
+     * faltaba es la red: nada frenaba al despachar si no las movías.
+     *
+     * Pasó el 8/8, y se ve en el documento: «Claudio T2C» salió impreso ENCIMA
+     * de la etiqueta «Cargo», y «Claudio gmail» flotando más abajo sin rótulo.
+     * Como el de los campos sin adoptar, no tiene arreglo después: el documento
+     * sale firmado, y firmado es inmutable.
+     *
+     * ⚠ La comprobación automática del banco NO ve esto: compara widgets contra
+     * widgets, y acá el valor cae sobre el texto impreso de la hoja. Dio «ningún
+     * rectángulo se pisa» sobre el documento donde el problema se ve a simple
+     * vista. Mirar el texto de la hoja es otra cosa, y es la deuda 11.
+     *
+     * ⚠ Avisa, no bloquea — igual que el aviso de los campos sin adoptar. La
+     * posición apilada podría ser justo donde van, y eso lo decide el emisor. Lo
+     * que no puede pasar es que lo decida sin saber que lo está decidiendo.
+     *
+     * ⚠ Y a diferencia de aquél, salta si quedó AUNQUE SEA UNA. Allá, dejar
+     * siete campos de doce afuera es una decisión mirada. Acá no: si moviste dos
+     * copias y la tercera sigue clavada en el escalón exacto que le puso el
+     * botón, eso es un olvido, no una elección.
+     *
+     * Devuelve true si se puede seguir.
+     */
+    async function revisarCopiasApiladas() {
+      // Quien apila es quien sabe reconocer lo apilado, y eso vive en campos.js.
+      // Si no cargó, no es motivo para frenar un envío.
+      if (typeof window.copiasApiladasSinMover !== 'function') return true;
+
+      var d;
+      try { d = await api('/circuitos/' + circuitoId + '/campos'); }
+      catch (e) { return true; }   // no se pudieron leer los campos: tampoco se frena
+
+      // Los lugares van en el MISMO orden con que la pantalla de campos reparte
+      // las copias: es la misma lista, por la misma función.
+      var quienes = quienesParaCampos();
+      var sinMover = window.copiasApiladasSinMover(
+        d.campos || [], quienes.map(function (p) { return p.posicion; }));
+      if (!sinMover.length) return true;
+
+      var nombres = {};
+      quienes.forEach(function (p) { nombres[p.posicion] = p.nombre || p.email; });
+      var detalle = sinMover.map(function (x) {
+        var quien = nombres[x.copia.posicion_firmante];
+        return '«' + x.copia.etiqueta + '»' + (quien ? ' (' + quien + ')' : '');
+      }).join(', ');
+
+      return new Promise(function (resolver) {
+        msg('msgModal',
+          (sinMover.length === 1
+            ? 'Quedó 1 campo apilado donde lo dejó «uno para cada firmante», sin acomodar: '
+            : 'Quedaron ' + sinMover.length + ' campos apilados donde los dejó ' +
+              '«uno para cada firmante», sin acomodar: ') + detalle + '. ' +
+          'Van a salir impresos uno debajo del otro, encima de lo que diga la hoja en ese ' +
+          'lugar. Después de enviar ya no se pueden mover.',
+          'aviso');
+        var acc = document.createElement('div');
+        acc.style.cssText = 'display:flex;gap:8px;margin-top:10px;flex-wrap:wrap';
+        acc.innerHTML =
+          '<button type="button" class="btn btn-p chico" id="mAcomodar">Acomodarlos</button>' +
+          '<button type="button" class="btn btn-s chico" id="mIgualApilados">Enviar igual</button>';
+        $('msgModal').appendChild(acc);
+
+        $('mAcomodar').addEventListener('click', function () {
+          resolver(false);
+          if (window.abrirCamposDelDocumento) {
+            window.abrirCamposDelDocumento(circuitoId, quienesParaCampos(), c.instancia_id);
+          }
+        });
+        $('mIgualApilados').addEventListener('click', function () {
+          msg('msgModal', '', '');
+          resolver(true);
+        });
+      });
+    }
+
     $('mEnviar').addEventListener('click', async function () {
       if (!parts.length) {
         return msg('msgModal',
@@ -1638,6 +1720,7 @@
       var listo = ocupar($('mEnviar'), 'Enviando…');
       try {
         if (!(await revisarCamposSinUsar())) { listo(); return; }
+        if (!(await revisarCopiasApiladas())) { listo(); return; }
         await guardarConfig();
         var r = await api('/circuitos/' + circuitoId + '/despachar', 'POST');
         cerrarModal();

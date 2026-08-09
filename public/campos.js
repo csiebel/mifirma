@@ -64,6 +64,114 @@
     ['etiqueta', 'Texto fijo (no lo completa nadie)'],
   ];
 
+  // =========================================================================
+  // El apilado de «uno para cada firmante», y cómo se reconoce después
+  //
+  // ⚠ Las dos cosas viven acá A PROPÓSITO. El que apila tiene que ser el mismo
+  // que sabe reconocer lo apilado: si el respiro cambia en un lado y el aviso
+  // del despacho lo tiene copiado en otro archivo, el aviso deja de saltar y
+  // NADA falla a la vista. Es la forma exacta de la deuda 19 (`CASILLA_MARCADA`
+  // en dos archivos) y del error de la 052, donde dos fuentes para lo mismo
+  // terminaron discrepando y ganó la equivocada.
+  // =========================================================================
+
+  /** El respiro entre una copia apilada y la siguiente, en puntos PDF. */
+  var RESPIRO_APILADO = 6;
+
+  /** Cuánto baja cada copia respecto de la anterior. */
+  function pasoApilado(alto) { return (Number(alto) || 20) + RESPIRO_APILADO; }
+
+  /**
+   * Dónde cae la k-ésima copia (k = 1, 2, 3…) debajo de su base.
+   *
+   * En puntos PDF, bajar es RESTAR.
+   */
+  function yApilado(base, k) {
+    return Number(base.y) - k * pasoApilado(base.alto);
+  }
+
+  /**
+   * Las copias que «uno para cada firmante» dejó apiladas y nadie movió.
+   *
+   * ═══ POR QUÉ HACE FALTA ═══
+   *
+   * «Uno para cada firmante» apila las copias debajo de la primera y pide que
+   * las arrastres, porque adivinar dónde va el renglón de cada uno en el
+   * documento del cliente no lo puede hacer nadie. Esa decisión está bien. Lo
+   * que faltaba es la red: si no las moviste, el documento sale con el valor de
+   * uno impreso encima del texto de la hoja. Pasó el 8/8: «Claudio T2C» quedó
+   * arriba de la etiqueta «Cargo».
+   *
+   * Y no tiene arreglo después: el documento sale firmado e inmutable.
+   *
+   * ═══ POR QUÉ ESTO SÍ SE PUEDE DETECTAR ═══
+   *
+   * ⚠ La comprobación del banco compara widgets contra widgets y NO ve esto: el
+   * valor cae encima del texto impreso de la hoja, no encima de otro widget.
+   * Mirar el texto de la hoja es la deuda 11 y necesita `pdftotext -bbox`.
+   *
+   * Acá no hace falta nada de eso, porque no se pregunta «¿pisa algo?» sino
+   * «¿esta copia sigue EXACTAMENTE donde la puso el botón?». Y eso no es una
+   * adivinanza: es la función de arriba, `yApilado`, leída al revés.
+   *
+   * ⚠ Por eso hacen falta los lugares de los firmantes, y en su orden. Se probó
+   * antes la versión fácil —«¿está en algún múltiplo del paso?»— y **el banco la
+   * volteó**: una copia arrastrada a mano cae en un múltiplo exacto una de cada
+   * cincuenta veces, y el aviso saltaba sobre un campo bien puesto. Un aviso que
+   * grita en falso se aprende a ignorar, y el día que tiene razón también.
+   *
+   * Se compara con una tolerancia mínima porque las coordenadas van y vuelven de
+   * Postgres como decimales. Media décima de punto no es haber movido nada.
+   *
+   * ⚠ Si se quitó un firmante después de apilar, los lugares se corren y esto
+   * deja de reconocer las copias de atrás. No se compensa acá A PROPÓSITO: ese
+   * caso ya lo frena el despacho en el servidor, y frenar es más fuerte que
+   * avisar («…un dato que quedó pedido a alguien que ya no está en la lista»).
+   *
+   * @param campos   el juego completo, como lo devuelve GET /circuitos/:id/campos
+   * @param lugares  las `posicion` de los firmantes, en el mismo orden en que
+   *                 las ofrece la pantalla. Sin esto no hay con qué comparar.
+   * @returns [{ copia, base }] — vacío si está todo acomodado
+   */
+  function copiasApiladasSinMover(campos, lugares) {
+    var TOLERANCIA = 0.5;
+    if (!campos || !campos.length || !lugares || !lugares.length) return [];
+
+    var porCodigo = {};
+    campos.forEach(function (f) { porCodigo[f.codigo] = f; });
+
+    return campos.reduce(function (acc, copia) {
+      // El código de una copia es `<base>_f<lugar>`, y su `posicion_firmante` es
+      // ese mismo lugar. Exigir las dos cosas descarta que un campo que el
+      // emisor bautizó «anexo_f2» a mano se lea como copia de «anexo».
+      var m = /^(.+)_f(\d+)$/.exec(copia.codigo || '');
+      if (!m) return acc;
+      var lugar = Number(m[2]);
+      if (Number(copia.posicion_firmante) !== lugar) return acc;
+
+      var base = porCodigo[m[1]];
+      if (!base || base === copia) return acc;
+      if (Number(base.pagina) !== Number(copia.pagina)) return acc;
+      if (Math.abs(Number(base.x) - Number(copia.x)) > TOLERANCIA) return acc;
+
+      // El mismo reparto que hace el botón: todos los firmantes menos el dueño
+      // de la base, en orden. El escalón de esta copia es su puesto en esa fila.
+      var duenoBase = Number(base.posicion_firmante);
+      var k = lugares.filter(function (x) { return Number(x) !== duenoBase; })
+                     .map(Number).indexOf(lugar) + 1;
+      if (k < 1) return acc;
+
+      if (Math.abs(Number(copia.y) - yApilado(base, k)) > TOLERANCIA) return acc;
+
+      acc.push({ copia: copia, base: base });
+      return acc;
+    }, []);
+  }
+
+  // Lo usa el aviso previo al despacho, en consola.js. Se expone la función y no
+  // el número: quien avise no tiene que saber cómo se apila, sólo preguntar.
+  window.copiasApiladasSinMover = copiasApiladasSinMover;
+
   window.abrirCamposDelDocumento = async function (circuitoId, firmantes, instanciaId) {
     var estado = {
       campos: [], detectados: [], sinFormulario: false, sel: -1,
@@ -613,7 +721,6 @@
           ev.stopPropagation();
           var base = estado.campos[+el.dataset.cada];
           var faltan = firmantes.filter(function (p) { return p.posicion !== base.posicion_firmante; });
-          var alto = Number(base.alto) || 20;
 
           faltan.forEach(function (p, k) {
             var copia = {};
@@ -625,10 +732,14 @@
             copia.usos = 0;
             copia.valor = '';
             // ⚠ Apilados hacia ABAJO, separados por su propio alto más un
-            // respiro. En puntos PDF, bajar es restar. Quedan uno debajo del
-            // otro y se acomodan arrastrando: adivinar dónde va el renglón de
-            // cada uno en el documento del cliente no lo puede hacer nadie.
-            copia.y = Number(base.y) - (k + 1) * (alto + 6);
+            // respiro. Quedan uno debajo del otro y se acomodan arrastrando:
+            // adivinar dónde va el renglón de cada uno en el documento del
+            // cliente no lo puede hacer nadie.
+            //
+            // El escalón sale de `yApilado` y no de una cuenta escrita acá,
+            // porque el aviso previo al despacho usa la MISMA para reconocer las
+            // que quedaron sin mover. Ver el bloque del apilado, arriba.
+            copia.y = yApilado(base, k + 1);
             estado.campos.push(copia);
           });
 
