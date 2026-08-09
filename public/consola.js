@@ -1163,7 +1163,10 @@
                     '<br><span style="font-size:11.5px;color:var(--danger)">' +
                     esc(p.aviso_error) + '</span>'
                   : p.aviso_en
-                  ? '<br><span style="font-size:12px;color:var(--mut)">Aviso enviado ' +
+                  ? // ⚠ «aceptado por el correo», no «enviado»: lo que se comprobó es que el
+                  // relay lo tomó. Mismo criterio que el certificado y que el catálogo
+                  // de eventos — los tres textos se cambian juntos. Ver migración 058.
+                  '<br><span style="font-size:12px;color:var(--mut)">Aviso aceptado por el correo ' +
                     esc(cuando(p.aviso_en)) + '</span>'
                   : esperandoA.indexOf(p.id) >= 0
                   // Le toca y nunca salió el aviso: no es que esté esperando,
@@ -1401,6 +1404,16 @@
           : 'Enviar a firmar') + '</button>') +
       '</div>'
     );
+
+    // Tres columnas —quién es, en qué anda, y los botones— no entran en los
+    // 440px del modal chico. Se vio cuando «Aviso enviado» pasó a «Aviso
+    // aceptado por el correo»: el texto más largo partió la columna del medio
+    // en tres renglones, encimada con las píldoras.
+    // ⚠ El texto no es el defecto: el ancho ya estaba justo y esto lo destapó.
+    // Mismo patrón que marcas.js y campos.js, con el tamaño de al lado — 980px
+    // es para una hoja A4 y acá dejaría una banda vacía con un solo firmante.
+    var caja = document.querySelector('#modal .modal');
+    if (caja) caja.classList.add('medio');
 
     $('mCancel').addEventListener('click', function () { cerrarModal(); cargarDocumentos(); });
 

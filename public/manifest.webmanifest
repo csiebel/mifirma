@@ -1,13 +1,13 @@
 {
-  "name": "Payroll New Generation",
-  "short_name": "Payroll",
-  "description": "Consola de liquidación de sueldos y RRHH.",
+  "name": "MiFirma",
+  "short_name": "MiFirma",
+  "description": "Firma electrónica de documentos, con su expediente de evidencias.",
   "lang": "es",
   "start_url": "/app",
   "scope": "/",
   "display": "standalone",
-  "background_color": "#f3f6f9",
-  "theme_color": "#123a5e",
+  "background_color": "#ffffff",
+  "theme_color": "#0B2B4A",
   "icons": [
     { "src": "/icon-192.png", "sizes": "192x192", "type": "image/png", "purpose": "any" },
     { "src": "/icon-512.png", "sizes": "512x512", "type": "image/png", "purpose": "any" },
