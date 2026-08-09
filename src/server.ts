@@ -112,9 +112,63 @@ export function construirServidor(): FastifyInstance {
         "form-action 'self'; " +
         "object-src 'none'",
     );
+
+    // ── ⚠ FUERA DEL BUSCADOR, DE VERDAD ─────────────────────────────────────
+    //
+    // `robots.txt` es un pedido de buena fe: lo respeta el que quiere, y no
+    // impide que una dirección aparezca indexada si alguien la enlaza desde
+    // otro lado. Esta cabecera sí es una instrucción, y la respetan Google y
+    // Bing.
+    //
+    // ⚠ **En `/firmar` es lo que más importa.** Esa dirección lleva el token
+    // del firmante: un enlace de firma indexado es el documento de un cliente
+    // abierto para cualquiera que lo busque. `robots.txt` solo no alcanza.
+    //
+    // El sitio comercial —`/` y lo que se le agregue— NO lleva la cabecera:
+    // eso es contenido y tiene que poder encontrarse.
+    const camino = (_req.url || '/').split('?')[0] || '/';
+    if (/^\/(entrar|app|operador|firmar|publico)(\/|$)/.test(camino) || camino === '/mi.html') {
+      reply.header('X-Robots-Tag', 'noindex, nofollow, noarchive');
+    }
   });
 
   app.get('/health', async () => ({ ok: true }));
+
+  // ── Los tres archivos que el buscador y las redes van a pedir ─────────────
+  //
+  // ⚠ Van con ruta propia porque **acá no hay servidor de estáticos**: cada
+  // archivo de `public/` que se sirve está en una de las listas de más abajo,
+  // por nombre. Dejarlos sólo en la carpeta los deja en 404 — y un `og.png` en
+  // 404 es un enlace compartido sin imagen, que es justo lo que se quería
+  // arreglar.
+  for (const [ruta, tipo] of [
+    ['robots.txt', 'text/plain; charset=utf-8'],
+    ['sitemap.xml', 'application/xml; charset=utf-8'],
+  ] as const) {
+    app.get('/' + ruta, async (_req, reply) => {
+      try {
+        reply
+          .type(tipo)
+          .header('Cache-Control', 'public, max-age=3600')
+          .send(readFileSync(new URL('../public/' + ruta, import.meta.url), 'utf8'));
+      } catch {
+        reply.code(404).send('no encontrado');
+      }
+    });
+  }
+
+  // La tarjeta social. Se cachea largo: la piden los servidores de WhatsApp y
+  // LinkedIn, no el navegador de la persona, y cambia una vez por año.
+  app.get('/og.png', async (_req, reply) => {
+    try {
+      reply
+        .type('image/png')
+        .header('Cache-Control', 'public, max-age=86400')
+        .send(readFileSync(new URL('../public/og.png', import.meta.url)));
+    } catch {
+      reply.code(404).send('og no encontrado');
+    }
+  });
 
   // Sitio comercial (público): presentación + planes + enrolamiento self-service.
   app.get('/', async (_req, reply) => {
@@ -296,6 +350,19 @@ export function construirServidor(): FastifyInstance {
     '/app',
     '/entrar',
     '/health',
+    // ⚠ Los tres del buscador y las redes. Van acá **además** de tener ruta.
+    //
+    // Tener la ruta no alcanza: el hook central exige sesión para todo lo que
+    // no esté en esta lista, así que sin agregarlos daban **401**, no 404 — y
+    // un 401 en `robots.txt` es peor que un 404, porque el buscador lo lee como
+    // «acá hay algo y no me dejan verlo».
+    //
+    // Es la segunda vez en la misma madrugada que un camino nuevo se olvida de
+    // una lista que ya existía: la primera fue el token CSRF de la subida por
+    // multipart. Misma forma, mismo remedio — ver el §2 de `lecciones-9-agosto`.
+    '/robots.txt',
+    '/sitemap.xml',
+    '/og.png',
     '/sitio.js',
     '/entrar.js',
     '/consola.js',

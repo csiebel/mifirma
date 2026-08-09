@@ -3,11 +3,73 @@
 <head>
 <meta charset="utf-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1" />
-<title>MiFirma · Firma electrónica con validez legal</title>
-<meta name="description" content="Subí un PDF, definí quién completa qué y quién firma en qué orden. Firma electrónica con validez legal en Uruguay, Paraguay y Brasil." />
+<!-- ⚠ NI EL TÍTULO NI LA DESCRIPCIÓN DICEN «CON VALIDEZ LEGAL». No es un
+     descuido de redacción: lo prohíbe el §4 de `material-comercial.md` hasta
+     que un abogado local firme el paquete de cada país, y esa sección existe
+     —lo dice ella misma— «para que nadie la escriba por error en la página».
+     Hasta el 9/8 decía «Firma electrónica con validez legal», con la banda
+     roja de Acrobat todavía puesta.
+     «EN Uruguay» dice dónde se opera. «CON VALIDEZ LEGAL EN Uruguay» es una
+     afirmación jurídica. Es la diferencia entera. -->
+<title>MiFirma · Firma electrónica en Uruguay, Paraguay y Brasil</title>
+<meta name="description" content="Subí un PDF, definí quién completa qué y quién firma en qué orden. El documento firmado se verifica con cualquier lector de PDF, sin depender de nosotros." />
 <meta name="theme-color" content="#0B2B4A" />
 <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
 <link rel="apple-touch-icon" href="/apple-touch-icon.png" />
+
+<!-- ══════════════════════════════════════════════════════════════════════
+     LA DIRECCIÓN OFICIAL, LA TARJETA SOCIAL Y QUÉ ES ESTO
+     Nada de acá se ve en la página: es lo que leen el buscador y las redes.
+     ⚠ Los tres archivos que referencia —og.png, robots.txt, sitemap.xml—
+     necesitan RUTA en server.ts. No hay servidor de estáticos: puestos sólo
+     en public/ dan 404, y un og.png en 404 es un enlace sin imagen.
+     ══════════════════════════════════════════════════════════════════════ -->
+<link rel="canonical" href="https://mi-firma.digital/" />
+
+<meta property="og:type" content="website" />
+<meta property="og:site_name" content="MiFirma" />
+<meta property="og:url" content="https://mi-firma.digital/" />
+<meta property="og:title" content="MiFirma · Firma electrónica en Uruguay, Paraguay y Brasil" />
+<meta property="og:description" content="Subí un PDF, definí quién completa qué y quién firma en qué orden. El documento firmado se verifica con cualquier lector de PDF, sin depender de nosotros." />
+<meta property="og:image" content="https://mi-firma.digital/og.png" />
+<meta property="og:image:type" content="image/png" />
+<meta property="og:image:width" content="1200" />
+<meta property="og:image:height" content="630" />
+<meta property="og:image:alt" content="MiFirma — el documento se prueba solo" />
+<meta property="og:locale" content="es_UY" />
+
+<meta name="twitter:card" content="summary_large_image" />
+<meta name="twitter:title" content="MiFirma · Firma electrónica en Uruguay, Paraguay y Brasil" />
+<meta name="twitter:description" content="Subí un PDF, definí quién completa qué y quién firma en qué orden. El documento firmado se verifica con cualquier lector de PDF, sin depender de nosotros." />
+<meta name="twitter:image" content="https://mi-firma.digital/og.png" />
+<meta name="twitter:image:alt" content="MiFirma — el documento se prueba solo" />
+
+<!-- ⚠ A propósito SIN `offers` ni `aggregateRating`: declarar precios o
+     puntuaciones que no existen es motivo de penalización, y la métrica de
+     cobro todavía es un punto abierto. -->
+<script type="application/ld+json">
+{
+  "@context": "https://schema.org",
+  "@type": "SoftwareApplication",
+  "name": "MiFirma",
+  "url": "https://mi-firma.digital/",
+  "applicationCategory": "BusinessApplication",
+  "operatingSystem": "Web",
+  "inLanguage": ["es", "pt", "en"],
+  "description": "Firma electrónica de documentos con expediente de evidencias. Circuitos de firma en serie, en paralelo y por copias, con campos completados por cada participante.",
+  "areaServed": [
+    { "@type": "Country", "name": "Uruguay" },
+    { "@type": "Country", "name": "Paraguay" },
+    { "@type": "Country", "name": "Brasil" }
+  ],
+  "publisher": {
+    "@type": "Organization",
+    "name": "MiFirma",
+    "url": "https://mi-firma.digital/",
+    "logo": "https://mi-firma.digital/logo.svg"
+  }
+}
+</script>
 <link rel="preconnect" href="https://fonts.googleapis.com" />
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
 <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet" />
@@ -254,7 +316,14 @@
 <header class="hero">
   <div class="wrap">
     <div>
-      <h1><span data-t="hero.h1a">Firmá documentos con</span> <em data-t="hero.h1b">validez legal</em> <span data-t="hero.h1c">en tu país.</span></h1>
+      <!-- ⚠ Decía «validez legal en tu país» hasta el 9/8. Lo prohíbe el §4 de
+           `material-comercial.md` hasta que un abogado local firme el paquete
+           de cada país, y estaba acá: en el titular, y traducido a portugués e
+           inglés. La promesa de ahora es lo que el producto SÍ hace hoy —la
+           criptografía, el sellado de tiempo, el expediente— y no afirma nada
+           jurídico. Cuando el abogado firme, se agrega la otra.
+           Mismos tres pedazos y el <em> en el mismo lugar: la maqueta no cambia. -->
+      <h1><span data-t="hero.h1a">Firmá documentos con</span> <em data-t="hero.h1b">prueba de quién firmó</em> <span data-t="hero.h1c">y cuándo.</span></h1>
       <p class="lead" data-t="hero.lead">Subí un PDF, marcá qué tiene que completar cada persona y en qué orden firma cada una. MiFirma se ocupa del resto: los avisos, la firma criptográfica y el expediente que prueba todo lo que pasó.</p>
       <div class="cta">
         <a class="btn btn-p" href="#planes" data-t="hero.cta1">Ver planes</a>
@@ -324,7 +393,7 @@
   <div class="wrap">
     <div class="sechead rev">
       <div class="kicker" data-t="gar.kicker">Lo que no se negocia</div>
-      <h2 data-t="gar.h2">Seguridad, integridad y validez legal.</h2>
+      <h2 data-t="gar.h2">Seguridad, integridad y trazabilidad.</h2>
       <p data-t="gar.p">Tres cosas distintas, y las tres tienen que estar. Una firma que nadie puede verificar dentro de cinco años no sirve, por más linda que sea la pantalla donde se hizo.</p>
     </div>
     <div class="cols">
@@ -340,7 +409,10 @@
       </div>
       <div class="card rev">
         <div class="ico a"><svg viewBox="0 0 24 24"><path d="M12 3.5v17M5 7.5h14"/><path d="M5 7.5l-2.2 6.2a3.1 3.1 0 006.4 0zM19 7.5l-2.2 6.2a3.1 3.1 0 006.4 0z"/><path d="M8.5 20.5h7"/></svg></div>
-        <h3 data-t="gar.3.h">Validez legal en tu país</h3>
+        <!-- El cuerpo de esta tarjeta ya estaba bien: dice que cada país tiene
+             su marco y que la ley local la revisa un abogado local. El título
+             era el que afirmaba de más. -->
+        <h3 data-t="gar.3.h">El marco legal de cada país</h3>
         <p data-t="gar.3.p">No es la misma ley en Montevideo, en Asunción y en São Paulo. Cada país tiene su marco y sus certificadores acreditados, y MiFirma trabaja con los de cada uno. La ley local la revisa un abogado local, no un algoritmo.</p>
       </div>
     </div>
@@ -522,7 +594,7 @@
 <footer>
   <div class="wrap">
     <img src="/logo.svg" alt="MiFirma" />
-    <span data-t="footer.legal">Firma electrónica con validez legal · Uruguay · Paraguay · Brasil</span>
+    <span data-t="footer.legal">Firma electrónica · Uruguay · Paraguay · Brasil</span>
     <span>mi-firma.digital</span>
   </div>
 </footer>

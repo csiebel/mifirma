@@ -1,0 +1,15 @@
+# mi-firma.digital
+
+User-agent: *
+Allow: /
+
+# La aplicación no es contenido: son pantallas con sesión, formularios y
+# enlaces de firma. Nada de esto tiene por qué aparecer en un buscador.
+Disallow: /entrar
+Disallow: /app
+Disallow: /operador
+Disallow: /firmar
+Disallow: /publico/
+Disallow: /mi.html
+
+Sitemap: https://mi-firma.digital/sitemap.xml

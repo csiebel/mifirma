@@ -38,7 +38,11 @@
       'comp.nota':'As plataformas globais resolvem muito bem o fluxo de trabalho: campos, lembretes e auditoria. A diferença não está aí, e sim em como se cobra e em qual certificado se usa para que a assinatura valha onde você opera.',
       'nav.como':'Como funciona','nav.garantias':'Garantias','nav.paises':'Países','nav.planes':'Planos',
       'nav.entrar':'Entrar','nav.probar':'Testar',
-      'hero.h1a':'Assine documentos com','hero.h1b':'validade jurídica','hero.h1c':'no seu país.',
+      // ⚠ Decía «validade jurídica no seu país». Ver el comentario del H1 en
+      // sitio.html: la promesa jurídica sale hasta que un abogado local firme
+      // el paquete de cada país. Los tres idiomas cambian juntos, o el que no
+      // cambió se convierte en la letra chica que nadie leyó.
+      'hero.h1a':'Assine documentos com','hero.h1b':'prova de quem assinou','hero.h1c':'e quando.',
       'hero.lead':'Envie um PDF, marque o que cada pessoa precisa preencher e em que ordem cada uma assina. O MiFirma cuida do resto: os avisos, a assinatura criptográfica e o dossiê que comprova tudo o que aconteceu.',
       'hero.cta1':'Ver planos','hero.cta2':'Como funciona',
       'hero.nota':'Sem instalar nada. Quem assina não precisa criar conta.',
@@ -48,11 +52,11 @@
       'maq.firmo':'Assinou','maq.firmo2':'Assinou','maq.espera':'É a vez','maq.evidencia':'Dossiê',
       'maq.ev1':'Documento aberto','maq.ev2':'Identidade comprovada','maq.ev3':'Assinatura aplicada',
       'tira.et':'Certificados de assinatura avançada de',
-      'gar.kicker':'O que não se negocia','gar.h2':'Segurança, integridade e validade jurídica.',
+      'gar.kicker':'O que não se negocia','gar.h2':'Segurança, integridade e rastreabilidade.',
       'gar.p':'São três coisas diferentes, e as três precisam existir. Uma assinatura que ninguém consegue verificar daqui a cinco anos não serve, por mais bonita que seja a tela onde foi feita.',
       'gar.1.h':'Segurança','gar.1.p':'Cada documento é criptografado e o acesso é decidido no banco de dados, não na aplicação. Um erro de programação não basta para alguém ver o que não lhe cabe. Nunca guardamos chaves privadas de assinatura, nem as nossas.',
       'gar.2.h':'Integridade','gar.2.p':'Depois de assinado, o documento não pode ser alterado sem que isso apareça. Cada assinatura fica encadeada à anterior e carimbada com a hora de uma autoridade externa: a data não depende do nosso relógio nem da nossa palavra.',
-      'gar.3.h':'Validade jurídica no seu país','gar.3.p':'A lei não é a mesma em Montevidéu, em Assunção e em São Paulo. Cada país tem seu marco e seus certificadores credenciados, e o MiFirma trabalha com os de cada um. A lei local quem revisa é um advogado local, não um algoritmo.',
+      'gar.3.h':'O marco legal de cada país','gar.3.p':'A lei não é a mesma em Montevidéu, em Assunção e em São Paulo. Cada país tem seu marco e seus certificadores credenciados, e o MiFirma trabalha com os de cada um. A lei local quem revisa é um advogado local, não um algoritmo.',
       'campos.kicker':'Preencher antes de assinar','campos.h2':'A maioria dos documentos não se assina: primeiro se preenche.',
       'campos.p':'Uma nota promissória precisa do valor. Um aluguel, da data de entrega. Um consentimento, do número do documento de quem assina. Enviar um PDF vazio e pedir que preencham à mão antes de digitalizar é exatamente o trabalho que viemos tirar de você.',
       'campos.1.h':'Cada um vê o seu.','campos.1.p':'Os campos são atribuídos por signatário. Ninguém preenche — nem vê — o que é do outro.',
@@ -80,7 +84,7 @@
       'planes.p':'Na sua moeda e com nota fiscal local. Sem mínimo de usuários nem licenças sobrando.',
       'cierre.h2':'Comece com um documento.','cierre.p':'Crie sua conta, envie um PDF e mande assinar. Você vai ver o dossiê completo do primeiro.',
       'cierre.cta1':'Criar conta','cierre.cta2':'Ver planos',
-      'footer.legal':'Assinatura eletrônica com validade jurídica · Uruguai · Paraguai · Brasil',
+      'footer.legal':'Assinatura eletrônica · Uruguai · Paraguai · Brasil',
       'planes.consultar':'Consultar','planes.mes':'por mês','planes.vacio':'Ainda não há planos publicados para este país.',
       'planes.elegir':'Começar','planes.destacado':'Mais escolhido','pais.cert':'Certificados de '
     },
@@ -109,7 +113,7 @@
       'comp.nota':'Global platforms solve the workflow very well: fields, reminders and audit trail. The difference isn’t there — it’s in how you’re charged and which certificate makes the signature hold where you operate.',
       'nav.como':'How it works','nav.garantias':'Guarantees','nav.paises':'Countries','nav.planes':'Pricing',
       'nav.entrar':'Sign in','nav.probar':'Try it',
-      'hero.h1a':'Sign documents with','hero.h1b':'legal validity','hero.h1c':'in your country.',
+      'hero.h1a':'Sign documents with','hero.h1b':'proof of who signed','hero.h1c':'and when.',
       'hero.lead':'Upload a PDF, mark what each person has to fill in and the order they sign in. MiFirma handles the rest: the reminders, the cryptographic signature and the evidence file that proves everything that happened.',
       'hero.cta1':'See pricing','hero.cta2':'How it works',
       'hero.nota':'Nothing to install. Signers don’t need an account.',
@@ -119,11 +123,11 @@
       'maq.firmo':'Signed','maq.firmo2':'Signed','maq.espera':'Their turn','maq.evidencia':'Evidence file',
       'maq.ev1':'Document opened','maq.ev2':'Identity proven','maq.ev3':'Signature applied',
       'tira.et':'Advanced signature certificates from',
-      'gar.kicker':'Non-negotiable','gar.h2':'Security, integrity and legal validity.',
+      'gar.kicker':'Non-negotiable','gar.h2':'Security, integrity and traceability.',
       'gar.p':'Three different things, and all three have to be there. A signature nobody can verify five years from now is worthless, however nice the screen it was made on.',
       'gar.1.h':'Security','gar.1.p':'Every document is encrypted and access is decided in the database, not in the application. A coding mistake isn’t enough for someone to see what isn’t theirs. We never store signing private keys — not even our own.',
       'gar.2.h':'Integrity','gar.2.p':'Once signed, the document cannot be altered without it showing. Each signature is chained to the previous one and stamped with the time from an external authority, so the date doesn’t depend on our clock or our word.',
-      'gar.3.h':'Legal validity in your country','gar.3.p':'The law isn’t the same in Montevideo, Asunción and São Paulo. Each country has its own framework and accredited certifiers, and MiFirma works with each one’s. Local law is reviewed by a local lawyer, not by an algorithm.',
+      'gar.3.h':'Each country’s legal framework','gar.3.p':'The law isn’t the same in Montevideo, Asunción and São Paulo. Each country has its own framework and accredited certifiers, and MiFirma works with each one’s. Local law is reviewed by a local lawyer, not by an algorithm.',
       'campos.kicker':'Fill in before signing','campos.h2':'Most documents aren’t signed first — they’re filled in first.',
       'campos.p':'A promissory note needs the amount. A lease needs the handover date. A consent form needs the signer’s ID number. Sending an empty PDF and asking people to fill it in by hand before scanning it is exactly the work we came to take off your plate.',
       'campos.1.h':'Each sees their own.','campos.1.p':'Fields are assigned per signer. Nobody fills in — or sees — what belongs to someone else.',
@@ -151,7 +155,7 @@
       'planes.p':'In your currency, with local invoicing. No user minimums, no licences going to waste.',
       'cierre.h2':'Start with one document.','cierre.p':'Create your account, upload a PDF and send it out. You’ll see the full evidence file of the very first one.',
       'cierre.cta1':'Create account','cierre.cta2':'See pricing',
-      'footer.legal':'Electronic signature with legal validity · Uruguay · Paraguay · Brazil',
+      'footer.legal':'Electronic signature · Uruguay · Paraguay · Brazil',
       'planes.consultar':'Ask us','planes.mes':'per month','planes.vacio':'No plans published for this country yet.',
       'planes.elegir':'Get started','planes.destacado':'Most chosen','pais.cert':'Certificates from '
     }
