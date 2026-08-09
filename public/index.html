@@ -310,7 +310,19 @@
   .modal h2{font-size:19px;margin:0 0 6px}
   .modal p.sub{color:var(--mut);font-size:14px;margin:0 0 18px}
   label.campo{display:block;font-size:13px;font-weight:600;margin:14px 0 6px}
-  input,select{width:100%;font:inherit;padding:10px 12px;border:1px solid var(--line);border-radius:var(--r);background:var(--paper);color:var(--ink)}
+  /* ⚠ `textarea` VA ACÁ, con los otros.
+     Faltaba, y sin ancho el cuadro sale del tamaño que el navegador le da por
+     omisión —unos veinte caracteres—. Lo que se ve no es un cuadro angosto: es
+     el BOTÓN de al lado pegado a su costado, porque al quedar lugar libre en el
+     renglón el botón se acomoda ahí. Reportado así: «el botón queda pegado a la
+     lista». El botón nunca estuvo mal; su `margin-top` no hace nada mientras los
+     dos compartan renglón.
+     Pasaba en los dos cuadros de la consola —«…o pegá la lista entera» y «Por
+     qué lo cancelás»— y en ningún otro lado: `firmar.html` y `operador.html` ya
+     tenían `textarea` en su regla. Era esta pantalla la que quedó distinta.
+     `resize:vertical` porque a lo ancho se salía del modal. */
+  input,select,textarea{width:100%;font:inherit;padding:10px 12px;border:1px solid var(--line);border-radius:var(--r);background:var(--paper);color:var(--ink)}
+  textarea{resize:vertical}
   /* ⚠ UNA CASILLA NO ES UN CAMPO DE TEXTO.
      La regla de arriba está pensada para un renglón de formulario y le da a la
      casilla 100% de ancho y 10 px de padding. Una casilla así ocupa el renglón
@@ -321,7 +333,7 @@
      consola. Va una vez acá, para que no haya una cuarta. */
   input[type=checkbox],input[type=radio]{width:auto;height:auto;padding:0;
     accent-color:var(--acc-700);cursor:pointer}
-  input:focus,select:focus{outline:2px solid var(--brand-600);outline-offset:-1px}
+  input:focus,select:focus,textarea:focus{outline:2px solid var(--brand-600);outline-offset:-1px}
   .modal .acc{margin-top:22px;justify-content:flex-end}
 
   /* ── «Está trabajando» ────────────────────────────────────────────────────

@@ -267,7 +267,13 @@
    * El blob se descarga acá y se guarda con un ancla temporal: así el nombre
    * del archivo es el que manda el servidor y no la última parte de la URL.
    */
-  async function bajarArchivo(url, boton) {
+  // ⚠ `dondeElError` existe porque el visor tapa la pantalla. El error se
+  // escribía siempre en `msgDocs`, que vive en la lista de documentos: con un
+  // modal abierto encima, una descarga que falla no dice NADA y el botón vuelve
+  // solo a su texto, que se lee como «no pasó nada». Quien llama desde adentro
+  // de un modal pasa el suyo.
+  async function bajarArchivo(url, boton, dondeElError) {
+    var donde = dondeElError || 'msgDocs';
     var antes = boton ? boton.textContent : '';
     if (boton) { boton.disabled = true; boton.textContent = 'Un momento…'; }
     try {
@@ -290,9 +296,9 @@
       a.click();
       a.remove();
       setTimeout(function () { URL.revokeObjectURL(a.href); }, 30000);
-      msg('msgDocs', '', '');
+      msg(donde, '', '');
     } catch (e) {
-      msg('msgDocs', e.message, 'err');
+      msg(donde, e.message, 'err');
     } finally {
       if (boton) { boton.disabled = false; boton.textContent = antes; }
     }
@@ -785,14 +791,33 @@
       'text-overflow:ellipsis;white-space:nowrap">' + esc(titulo || 'Documento') + '</b>' +
       '<span style="font-size:12.5px;color:var(--mut)">Abrirlo queda registrado en el expediente</span></div>' +
       '<div class="acc">' +
+      // ⚠ Descargar y «Abrir aparte» NO son lo mismo, aunque apunten a la misma
+      // dirección. La ruta manda el PDF con `Content-Disposition: inline` —y
+      // tiene que ser inline, porque es lo que permite que el marco de acá abajo
+      // lo muestre—, así que «Abrir aparte» lo abre en otra pestaña y ahí se
+      // queda: para tenerlo en el disco hay que encontrar el botón de guardar
+      // del lector de PDF del navegador, que cambia según el navegador.
+      //
+      // `bajarArchivo` lo pide, lee el nombre del Content-Disposition y lo
+      // guarda. Es la misma que ya usaban «Certificado» y la copia firmada de
+      // cada firmante: **poder bajarlo se podía; lo que faltaba era el botón
+      // donde la persona lo busca.** Pedido así: «en ver el documento firmado en
+      // FIRMADOS me gustaría que el documento se pueda descargar».
+      '<button class="btn btn-s chico" id="mBajar">Descargar</button>' +
       '<a class="btn btn-s chico" style="text-decoration:none" href="' + esc(url) +
       '" target="_blank" rel="noopener">Abrir aparte</a>' +
       '<button class="btn btn-p chico" id="mCerrar">Cerrar</button>' +
       '</div></div>' +
+      // El error de la descarga va acá y no en la lista de atrás, que este modal
+      // tapa. Vacío no ocupa alto: el marco de abajo sigue quedándose con todo.
+      '<div id="msgVisor" style="padding:0 14px"></div>' +
       '<iframe src="' + esc(url) + '" title="' + esc(titulo || 'Documento') + '"></iframe>' +
       '</div></div>';
 
     $('fondo').addEventListener('mousedown', function (e) { if (e.target.id === 'fondo') cerrarModal(); });
+    $('mBajar').addEventListener('click', function () {
+      bajarArchivo(url, $('mBajar'), 'msgVisor');
+    });
     $('mCerrar').addEventListener('click', cerrarModal);
     $('mCerrar').focus();
   }
