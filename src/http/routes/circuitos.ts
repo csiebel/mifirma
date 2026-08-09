@@ -12,8 +12,11 @@ import {
   cancelar,
   reenviarAvisos,
   enlaceDeFirma,
+  asegurarQuePuedePreparar,
 } from '../../services/circuito';
 import { listarCampos, definirCampos, detectarCampos, guardarValorDelEmisor } from '../../services/campos';
+import { leerPlanilla, esPlanillaExcel } from '../../services/planilla_de_correos';
+import { HttpError } from '../errors';
 
 /**
  * Preparación y despacho de un circuito de firma.
@@ -89,6 +92,64 @@ export function registrarRutasCircuitos(app: FastifyInstance) {
     const b = z.object({ lista: z.string().min(1).max(20000) }).parse(req.body);
     const { cuentaId, identidadId } = req.identidad;
     return agregarDestinatarios(cuentaId, identidadId, id, b.lista);
+  });
+
+  /**
+   * La misma lista, pero adentro de un archivo.
+   *
+   * ⚠ **Esta ruta NO agrega a nadie.** Lee el archivo y devuelve TEXTO, que la
+   * pantalla pone en el cuadro para que el emisor lo mire; agregar sigue siendo
+   * el POST de arriba, con las mismas validaciones. La explicación larga de por
+   * qué está en `services/planilla_de_correos.ts`, y el resumen es que una
+   * planilla trae encabezados, filas vacías y un «Total» al final, y enterarse
+   * de eso cuando ya son cuarenta destinatarios de un documento despachado es
+   * tarde: los destinatarios de un circuito despachado no se sacan.
+   *
+   * Va con `:id` y exige poder preparar el circuito, aunque no toque la base.
+   * Una ruta abierta que descomprime un zip que sube cualquiera es una bomba de
+   * descompresión esperando; ésta pide, además, que el circuito sea tuyo y esté
+   * en borrador.
+   */
+  app.post('/circuitos/:id/destinatarios/archivo', async (req) => {
+    const { id } = z.object({ id: z.string().uuid() }).parse(req.params);
+    const { cuentaId, identidadId } = req.identidad;
+
+    // Que el circuito sea suyo y esté en borrador se comprueba con la misma
+    // función que usa agregar, y ANTES de leer un solo byte del archivo.
+    await asegurarQuePuedePreparar(cuentaId, identidadId, id);
+
+    const parte = await (req as any).file();
+    if (!parte) throw new HttpError(400, 'No llegó ningún archivo.');
+
+    const nombre = String(parte.filename || '');
+    if (!/\.(xlsx|xlsm|xltx|csv|tsv|txt)$/i.test(nombre)) {
+      throw new HttpError(
+        400,
+        'El archivo tiene que ser una planilla de Excel (.xlsx) o un texto ' +
+          'separado por comas (.csv). Desde Excel: Archivo → Guardar como → CSV.',
+      );
+    }
+
+    // ⚠ Tope propio, mucho más chico que los 30 MB de los PDF. Una lista de
+    // correos no pesa un mega ni con dos mil filas, y un .xlsx es un zip: sin un
+    // tope acá, cinco megas comprimidos se vuelven gigas al abrirlos.
+    const datos: Buffer = await parte.toBuffer();
+    if (datos.length > 2 * 1024 * 1024) {
+      throw new HttpError(400, 'El archivo es demasiado grande. Una lista de correos no llega a 2 MB.');
+    }
+
+    try {
+      return await leerPlanilla(datos, nombre);
+    } catch (e: any) {
+      // El error de una biblioteca de planillas no le dice nada a nadie
+      // («readFiles(...).then is not a function» fue uno real). Se traduce.
+      throw new HttpError(
+        400,
+        esPlanillaExcel(nombre)
+          ? 'No pude leer esa planilla. Probá volver a guardarla desde Excel como .xlsx, o como CSV.'
+          : 'No pude leer ese archivo como texto separado por comas.',
+      );
+    }
   });
 
   /**

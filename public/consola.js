@@ -1362,6 +1362,17 @@
         '<label class="campo" for="mLista">…o pegá la lista entera</label>' +
         '<textarea id="mLista" rows="5" placeholder="ana@empresa.com&#10;juan@empresa.com&#10;maria@otra.com"></textarea>' +
         '<button class="btn btn-s" id="mPegar" style="margin-top:10px">Agregar todos</button>' +
+        // ⚠ El archivo NO agrega a nadie: llena el cuadro de arriba. Una planilla
+        // trae encabezado, filas vacías y un «Total» al final, y enterarse de lo
+        // que se leyó mal cuando ya son cuarenta destinatarios de un documento
+        // despachado es tarde — no se sacan. Así se ve qué se entendió antes de
+        // que sea nada, y el aviso de «esto no parece un correo» sigue saliendo
+        // sobre el texto que la persona tiene delante, que es donde lo corrige.
+        '<span style="display:inline-block;margin:10px 0 0 8px">' +
+        '<input type="file" id="mArchivo" accept=".xlsx,.xlsm,.csv,.tsv,.txt" ' +
+        'style="display:none">' +
+        '<button class="btn btn-s" id="mSubirLista">…o subilo de un archivo</button>' +
+        '</span>' +
         '<p class="pista">Uno por línea, o separados por comas. Si alguno está mal escrito ' +
         'no entra ninguno y te digo cuál es, para que lo corrijas sobre el mismo texto.<br>' +
         (copias
@@ -1567,6 +1578,116 @@
         abrirCircuito(circuitoId);
       } catch (e) { msg('msgModal', e.message, 'err'); $('mAgregar').disabled = false; }
     });
+
+    // ═══ LA LISTA QUE VIENE DE UN ARCHIVO ═══
+    //
+    // El <input type=file> está escondido y lo dispara un botón: el control
+    // nativo dice «Sin archivos seleccionados» en un tipo de letra que no es el
+    // nuestro y no se puede cambiar, y al lado de «Agregar todos» parecía un
+    // error de la página.
+    //
+    // ⚠ Lo que vuelve va al CUADRO, no a la lista de firmantes. Ver el comentario
+    // de arriba y `services/planilla_de_correos.ts`.
+    if ($('mSubirLista') && $('mArchivo')) {
+      $('mSubirLista').addEventListener('click', function () { $('mArchivo').click(); });
+
+      $('mArchivo').addEventListener('change', async function () {
+        var f = $('mArchivo').files && $('mArchivo').files[0];
+        if (!f) return;
+        var b = $('mSubirLista');
+        var listo = ocupar(b, 'Leyendo…');
+        msg('msgModal', '', '');
+        try {
+          var fd = new FormData();
+          fd.append('archivo', f);
+          // ⚠ Sin `api()`, porque eso manda JSON y esto va por multipart: el
+          // navegador tiene que poner el Content-Type con su frontera, y
+          // escribirlo a mano lo rompe.
+          //
+          // Pero salirse de `api()` es salirse de TODO lo que hace, y lo primero
+          // que hace es mandar el token CSRF. Sin eso, el servidor contesta
+          // «Falta o no coincide el token CSRF» y parece que el archivo está
+          // mal. Se probó en pantalla y falló exactamente así.
+          //
+          // > Regla: cuando algo se saltea el camino común «sólo por una cosa»,
+          // > hay que mirar qué MÁS hacía ese camino. Casi nunca hacía una sola.
+          //
+          // ⚠ Y el ejemplo estaba a trescientas líneas de acá: `subirDocumento`
+          // manda un PDF por FormData y pone el token igual, con este mismo
+          // patrón. Había una subida por multipart andando en el archivo y no se
+          // la miró antes de escribir la segunda.
+          var cab = {};
+          var tok = csrf();
+          if (tok) cab['X-CSRF-Token'] = tok;
+          var r = await conBarra(fetch('/circuitos/' + circuitoId + '/destinatarios/archivo', {
+            method: 'POST', body: fd, credentials: 'same-origin', headers: cab,
+          }));
+          // Lo mismo que hace `api()`: sin sesión no hay cartel rojo, hay login.
+          if (r.status === 401) { location.href = '/entrar'; return; }
+          var d = await r.json().catch(function () { return {}; });
+          if (!r.ok) throw new Error(d.error || ('HTTP ' + r.status));
+
+          if (!d.personas) {
+            return msg('msgModal',
+              'No encontré ningún correo en ese archivo. Fijate que alguna columna ' +
+              'tenga las direcciones' + (d.hoja ? ' en la hoja «' + d.hoja + '»' : '') + '.', 'err');
+          }
+
+          // ⚠ Se AGREGA a lo que ya había escrito, no se pisa. Alguien que pegó
+          // cinco a mano y después sube el resto no tiene por qué perder los
+          // cinco, y sobrescribir sin avisar es la clase de cosa que se descubre
+          // cuando ya no está.
+          var previo = $('mLista').value.trim();
+          $('mLista').value = (previo ? previo + '\n' : '') + d.texto;
+
+          // ═══ LO QUE SE SALTEÓ SE MUESTRA, NO SE CUENTA ═══
+          //
+          // ⚠ La primera versión decía «saltée 2 filas sin correo (el encabezado
+          // suele ser una)». Esa frase invita a ignorar el número, y en una
+          // planilla de cuarenta filas eso esconde lo único que importa: una
+          // persona con el correo mal tipeado NO aparece como correo malo —su
+          // fila no tiene ninguna celda que parezca un correo, así que se
+          // descarta entera— y queda sumada al mismo contador que el encabezado.
+          //
+          // Lo destapó la planilla de prueba de Claudio, con
+          // `claudio.siebel@gmail` sin `.com`: «Claudio Gmail» desapareció y el
+          // único rastro fue un 1 en el contador.
+          //
+          // Ahora se listan con su número de fila y lo que decían. El encabezado
+          // se reconoce de un vistazo y el que falta salta a la vista.
+          var partes = ['Leí ' + d.personas + (d.personas === 1 ? ' persona' : ' personas')];
+          if (d.hoja) partes.push('de la hoja «' + d.hoja + '»');
+          var texto = partes.join(' ') + '. ';
+
+          var salt = d.salteadas || [];
+          if (salt.length) {
+            // Se muestran hasta cinco: más que eso es una planilla con otra
+            // forma, y una lista larga tampoco se lee.
+            var muestra = salt.slice(0, 5).map(function (s) {
+              return 'la ' + s.fila + ' («' + s.texto + '»)';
+            });
+            texto += 'No pude sacar un correo de ' +
+              (salt.length === 1 ? 'esta fila: ' : 'estas ' + salt.length + ' filas: ') +
+              muestra.join(', ') +
+              (salt.length > 5 ? ' y ' + (salt.length - 5) + ' más' : '') + '. ' +
+              'Si alguna de ésas es una persona, el correo está mal escrito. ';
+          }
+          if (d.de_mas) {
+            texto += 'Y ' + d.de_mas + ' quedaron afuera por ser demasiadas. ';
+          }
+          msg('msgModal', texto + 'Revisalo y apretá «Agregar todos».',
+            salt.length || d.de_mas ? 'aviso' : 'ok');
+        } catch (e) {
+          msg('msgModal', e.message, 'err');
+        } finally {
+          listo();
+          // Se limpia para que elegir el MISMO archivo otra vez vuelva a
+          // disparar el evento: sin esto, corregir la planilla y volver a
+          // subirla no hace nada y parece que el botón se rompió.
+          $('mArchivo').value = '';
+        }
+      });
+    }
 
     if ($('mPegar')) {
       $('mPegar').addEventListener('click', async function () {

@@ -499,7 +499,7 @@ export async function agregarDestinatarios(
   circuitoId: string,
   crudo: string,
 ) {
-  const { correos: limpios, malos, repetidos } = partirLista(crudo);
+  const { correos: limpios, personas, malos, repetidos } = partirLista(crudo);
 
   // ⚠ Se avisa ANTES de escribir nada, y con el texto todavía en la pantalla:
   // el emisor corrige el renglón que está mal sobre lo que ya tiene escrito, en
@@ -524,6 +524,51 @@ export async function agregarDestinatarios(
     exigir(autz, 'circuito', 'crear', 'No tenés permiso para preparar circuitos de firma.');
     const c = await exigirBorrador(trx, circuitoId, cuentaId);
 
+    // ═══ LOS QUE YA ESTÁN EN EL DOCUMENTO ═══
+    //
+    // ⚠ Se pregunta ACÁ, antes de escribir, y se dicen TODOS de una vez. Es el
+    // mismo criterio que ya se aplica arriba a los correos mal escritos y a los
+    // repetidos dentro de la lista, y faltaba para este caso.
+    //
+    // Sin esto, el choque lo detectaba la restricción de la base a mitad del
+    // bucle y salía como «Esa persona ya está en este circuito con ese papel»
+    // —**sin decir cuál**—. Sobre una lista de cuarenta personas eso no se puede
+    // arreglar: hay que ir probando de a una. Reportado en pantalla el 9/8, con
+    // tres.
+    //
+    // La transacción hace que no entre nadie, así que el documento no queda a
+    // medias; lo que faltaba era poder saber qué corregir.
+    //
+    // ⚠ En modo copias NO se hace. Ahí la unicidad es por instancia —`unique
+    // (instancia_id, identidad_id, papel)`— y cada copia es una instancia, así
+    // que la misma persona en dos filas es algo que la base sí permite. Un
+    // control de aplicación más estricto que la base es un control que un día
+    // prohíbe algo legítimo, y nadie entiende por qué.
+    if (c.modo !== 'copias') {
+      const ya = await sql<{ email: string }>`
+        select distinct i.email_mostrado as email
+          from participacion p
+          join identidad i on i.id = p.identidad_id
+         where p.circuito_id = ${circuitoId}::uuid and p.papel = 'firmante'
+      `.execute(trx);
+      const presentes = new Set(
+        ya.rows.map((r) => (r.email || '').trim().toLowerCase()).filter(Boolean),
+      );
+      const repetidosEnDoc = personas
+        .filter((p) => presentes.has(p.correo.toLowerCase()))
+        .map((p) => p.correo);
+      if (repetidosEnDoc.length) {
+        throw new HttpError(
+          409,
+          (repetidosEnDoc.length === 1
+            ? `${repetidosEnDoc[0]} ya está en este documento.`
+            : `Ya están en este documento: ${repetidosEnDoc.slice(0, 5).join(', ')}` +
+              (repetidosEnDoc.length > 5 ? ` y ${repetidosEnDoc.length - 5} más` : '') + '.') +
+            ' Sacalos de la lista y volvé a intentar; los demás no se agregaron.',
+        );
+      }
+    }
+
     // En serie cada uno va detrás del anterior, y los que se peguen ahora
     // arrancan después de los que ya estaban. En paralelo y en copias no hay
     // turno: todos en 1.
@@ -538,12 +583,32 @@ export async function agregarDestinatarios(
     }
 
     const hechos: { email: string; participacion_id: string | undefined }[] = [];
-    for (const email of limpios) {
-      const r = await sumarFirmante(trx, cuentaId, identidadId, circuitoId, c, {
-        email,
-        orden: c.modo === 'serie' ? siguiente++ : 1,
-      });
-      hechos.push({ email, participacion_id: r.participacion_id });
+    // ⚠ Se recorre `personas` y no `correos`, que son la misma lista en el mismo
+    // orden: la primera trae además el nombre, cuando el renglón lo tenía. Antes
+    // esto pegaba sólo la dirección y **el nombre se tiraba**: pegar veinte
+    // personas dejaba veinte filas identificadas por su correo, y el que firmaba
+    // recibía un mensaje que no lo saludaba por su nombre aunque el emisor lo
+    // hubiera escrito. `correos` se mantiene para lo que ya lo usaba.
+    for (const p of personas) {
+      try {
+        const r = await sumarFirmante(trx, cuentaId, identidadId, circuitoId, c, {
+          email: p.correo,
+          nombre: p.nombre,
+          orden: c.modo === 'serie' ? siguiente++ : 1,
+        });
+        hechos.push({ email: p.correo, participacion_id: r.participacion_id });
+      } catch (e: any) {
+        // ⚠ El error de un renglón tiene que decir DE QUÉ RENGLÓN es. Agregar de
+        // a uno se explica solo —hay un correo en la pantalla y es ése—; en una
+        // lista de cuarenta, «esa persona ya está» manda a probar de a una.
+        //
+        // El chequeo de arriba tapa el caso conocido; esto cubre los que no
+        // conocemos todavía, que son los que van a aparecer con un cliente real.
+        if (e instanceof HttpError) {
+          throw new HttpError(e.statusCode, `${p.correo}: ${e.message}`);
+        }
+        throw e;
+      }
     }
 
     return { ok: true, copias: hechos.length, destinatarios: hechos };
@@ -1856,6 +1921,30 @@ async function enSistema<T>(fn: (trx: any) => Promise<T>): Promise<T> {
   return db.transaction().execute(async (trx) => {
     await fijarContexto(trx, { actor: 'sistema' });
     return fn(trx);
+  });
+}
+
+/**
+ * Las mismas dos preguntas que hace agregar destinatarios —¿podés preparar
+ * circuitos? ¿éste es tuyo y todavía es un borrador?— sin agregar nada.
+ *
+ * ⚠ Existe para la ruta que LEE una planilla. Esa ruta no toca la base, pero
+ * descomprime un archivo que sube alguien: sin este control sería una puerta
+ * abierta a mandar un zip de cinco megas que al abrirse ocupa gigas. Se pregunta
+ * ANTES de leer un solo byte.
+ *
+ * Se apoya en `exigirBorrador`, que es la misma de siempre: si mañana cambia
+ * quién puede preparar un circuito, cambia en un solo lugar.
+ */
+export async function asegurarQuePuedePreparar(
+  cuentaId: string,
+  identidadId: string,
+  circuitoId: string,
+) {
+  return withUsuario(cuentaId, identidadId, async (trx, autz) => {
+    exigir(autz, 'circuito', 'crear', 'No tenés permiso para preparar circuitos de firma.');
+    await exigirBorrador(trx, circuitoId, cuentaId);
+    return { ok: true };
   });
 }
 
