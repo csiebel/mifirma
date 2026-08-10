@@ -827,7 +827,15 @@
         // El clic queda en el CENTRO de la marca: es lo que la mano espera.
         var r = hoja.getBoundingClientRect();
         var anchoPx = t.ancho * estado.escala, altoPx = t.alto * estado.escala;
-        var xPx = Math.max(0, Math.min(vp.width - anchoPx, ev.clientX - r.left - anchoPx / 2));
+        // ⚠ El borde IZQUIERDO en el clic, no el centro — medido el 10/8 en la base:
+        // TODOS los campos con x clavada en 0 (ROTAX, pasaportes: 190×20, la y sana)
+        // nacieron de un clic sobre las etiquetas del lado izquierdo de la hoja.
+        // Centrar un elemento de 190 pt hace fatal la franja de 95 pt del borde —
+        // justo donde viven las etiquetas— y el recorte lo clavaba en 0 sin decir
+        // nada. Con el borde izquierdo en el dedo, tocás donde ARRANCA el dato y el
+        // recorte izquierdo es inalcanzable. La vertical sigue centrada: su franja
+        // era de 10 pt e inofensiva.
+        var xPx = Math.max(0, Math.min(vp.width - anchoPx, ev.clientX - r.left));
         var yPx = Math.max(0, Math.min(vp.height - altoPx, ev.clientY - r.top - altoPx / 2));
         var p = aPdf(pagina, xPx, yPx, anchoPx, altoPx);
 

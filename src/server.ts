@@ -372,6 +372,7 @@ export function construirServidor(): FastifyInstance {
     '/campos.js',
     '/rubrica.js',
     '/visor.js',
+    '/cajas.js',
     '/vendor/pdf.min.mjs',
     '/vendor/pdf.worker.min.mjs',
     // El firmante externo: su autorización es el otorgamiento que lleva el
