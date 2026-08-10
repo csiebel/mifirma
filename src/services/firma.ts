@@ -456,7 +456,7 @@ export async function firmar(token: string, input: FirmaInput) {
     // y el documento se abriría en rojo igual: el arreglo no admite mitades.
     widgets: ctx.archivo_vigente_id ? [] : [
       ...await widgetsAPredeclarar(trx, ctx.instancia_id),
-      ...await marcasAPredeclarar(trx, ctx.instancia_id, await hojas()),
+      ...await marcasAPredeclarar(trx, ctx.instancia_id, await hojas(), ctx.posicion ?? null),
     ],
   }));
   const campos = preparado.campos;

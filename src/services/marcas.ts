@@ -107,6 +107,27 @@ export async function marcasAPredeclarar(
   trx: any,
   instanciaId: string,
   paginas: number,
+  /**
+   * ⚠ El lugar del firmante que está POR FIRMAR AHORA — se excluye (10/8, deuda 18).
+   *
+   * Pre-declarar existe para que las firmas POSTERIORES no tengan que AGREGAR
+   * widgets — agregar después de una firma es el rojo de Acrobat. Pero el que
+   * firma primero no tiene ese problema: sus marcas nacen DENTRO de su propio
+   * incremento, por el camino viejo que `huecoVisible` mantiene vivo a
+   * propósito («los dos caminos conviven»), y nada anterior se puede romper
+   * porque no hay nada anterior. Reservarle lugares a él era pagar ~2 widgets
+   * por hoja que nadie iba a usar: 148 campos y ~47 KB de más en el manual de
+   * 74 hojas, medidos el 9/8 («0 de 148 usados»).
+   *
+   * De paso, un envío en COPIAS —una persona por documento— queda sin reservas
+   * del todo, y un documento de UN solo firmante también: los casos más
+   * comunes son los que más ahorran.
+   *
+   * ⚠ Medido en Acrobat el 10/8 con gemelos (claude/contrato-grande.md, anexo):
+   * marcas frescas del primer firmante + lugares completados por el segundo =
+   * las mismas revisiones limpias que el juego completo.
+   */
+  posicionQueFirmaAhora: number | null,
 ): Promise<WidgetPredeclarado[]> {
   const r = await sql<{ posicion: number | null }>`
     select p.posicion
@@ -126,6 +147,8 @@ export async function marcasAPredeclarar(
       console.warn('[predeclarar] hay una participación de firmante sin posición: no se le reservan marcas');
       continue;
     }
+    // El que firma ahora no reserva: ver el comentario del parámetro.
+    if (posicionQueFirmaAhora != null && p.posicion === posicionQueFirmaAhora) continue;
     for (let pagina = 0; pagina < paginas; pagina++) {
       for (const tipo of TIPOS) {
         const nombre = nombreDeMarca({ posicion: p.posicion, tipo, pagina });
