@@ -171,3 +171,169 @@ export function guardar(nombre: string, pdf: Buffer): string {
   writeFileSync(p, pdf);
   return p;
 }
+
+/* ═══════════════════════════════════════════════════════════════════════════
+   LA TERCERA COMPROBACIÓN (deuda 11) — rectángulos contra la hoja, contra
+   los demás rectángulos y contra el texto impreso.
+
+   Las tres comprobaciones de `prueba-acrobat.md` §9 «se contestan solas sobre
+   cualquier documento firmado». Las dos primeras (nombres duplicados, nombres
+   con undefined) ya viven en otras pruebas; ésta es la tercera: un widget que
+   se sale de la hoja, que pisa a otro, o que cae encima del texto impreso del
+   cliente.
+
+   ⚠ Se mide con qpdf y pdftotext, NO con nuestro verificador ni con pdf-lib —
+   la regla de la cabecera de este archivo. `src/firma/tapado.ts` hace algo
+   parecido para el producto; acá se reimplementa a propósito: el banco es la
+   segunda opinión, y una segunda opinión con el mismo ojo no es una segunda
+   opinión.
+
+   ⚠ pdftotext -bbox da la y desde ARRIBA; los /Rect del PDF, desde abajo.
+   Sin el espejo (alto − y) la comprobación compara peras con la sombra de
+   las peras. Ya mordió una vez el 10/8 en tapado.ts.
+
+   ⚠ El punto ciego de los escaneados NO se calla: una hoja con widgets y sin
+   texto extraíble queda «no comprobable», nunca verde. La mitad de lo que
+   sube un cliente es escaneado.
+   ═══════════════════════════════════════════════════════════════════════════ */
+
+export interface WidgetMedido {
+  pagina: number;                          // base 0
+  nombre: string;                          // /T propio o del /Parent; '?' si no hay
+  rect: [number, number, number, number];  // normalizado: x1<x2, y1<y2
+}
+
+export interface VeredictoRectangulos {
+  widgets: WidgetMedido[];
+  fueraDeHoja: WidgetMedido[];
+  pisadas: Array<[WidgetMedido, WidgetMedido]>;
+  sobreTexto: Array<{ widget: WidgetMedido; palabrasDebajo: number }>;
+  /** Hojas CON widgets y SIN texto extraíble: el punto ciego, dicho. */
+  noComprobables: Array<{ pagina: number; motivo: string }>;
+}
+
+/** Los widgets de cada hoja según qpdf, con la hoja medida. */
+export function widgetsSegunQpdf(archivo: string): {
+  hojas: Array<{ ancho: number; alto: number }>;
+  widgets: WidgetMedido[];
+} {
+  const crudo = correr('qpdf', ['--json=latest', '--json-key=pages', '--json-key=qpdf', archivo]);
+  // ⚠ `correr()` pega stderr DESPUÉS de stdout cuando qpdf sale con código 3
+  // (advertencia simple, p. ej. sobre un PDF con incrementos de firma). El
+  // JSON termina en la última llave; lo que sigue son las advertencias.
+  const j = JSON.parse(crudo.slice(crudo.indexOf('{'), crudo.lastIndexOf('}') + 1));
+  const objetos: Record<string, any> = j.qpdf[1];
+  const valorDe = (ref: string) => objetos['obj:' + ref]?.value;
+
+  const sinPrefijo = (s: unknown) =>
+    typeof s === 'string' ? s.replace(/^u:/, '').replace(/^b:/, '') : '?';
+
+  // El /MediaBox puede vivir en el /Pages padre: se hereda caminando /Parent.
+  const mediaBox = (dic: any): number[] | null => {
+    for (let d = dic, i = 0; d && i < 32; d = d['/Parent'] ? valorDe(d['/Parent']) : null, i++) {
+      if (Array.isArray(d['/MediaBox'])) return d['/MediaBox'];
+    }
+    return null;
+  };
+
+  const hojas: Array<{ ancho: number; alto: number }> = [];
+  const widgets: WidgetMedido[] = [];
+
+  (j.pages as Array<{ object: string }>).forEach((p, pagina) => {
+    const dic = valorDe(p.object);
+    const mb = mediaBox(dic) ?? [0, 0, 0, 0];
+    hojas.push({ ancho: mb[2] - mb[0], alto: mb[3] - mb[1] });
+
+    const annots: string[] = Array.isArray(dic?.['/Annots'])
+      ? dic['/Annots']
+      : (typeof dic?.['/Annots'] === 'string' ? valorDe(dic['/Annots']) ?? [] : []);
+    for (const ref of annots) {
+      const a = typeof ref === 'string' ? valorDe(ref) : ref;
+      if (!a || a['/Subtype'] !== '/Widget') continue;
+      const r = a['/Rect'];
+      if (!Array.isArray(r) || r.length !== 4) continue;
+      const nombre = a['/T'] ?? (a['/Parent'] ? valorDe(a['/Parent'])?.['/T'] : undefined);
+      widgets.push({
+        pagina,
+        nombre: sinPrefijo(nombre),
+        rect: [Math.min(r[0], r[2]), Math.min(r[1], r[3]), Math.max(r[0], r[2]), Math.max(r[1], r[3])],
+      });
+    }
+  });
+  return { hojas, widgets };
+}
+
+/** Las palabras de cada hoja según pdftotext -bbox, con la y ya espejada. */
+function palabrasSegunPoppler(archivo: string): Array<Array<[number, number, number, number]>> {
+  const xml = correr('pdftotext', ['-bbox', archivo, '-']);
+  const hojas: Array<Array<[number, number, number, number]>> = [];
+  const rePagina = /<page width="([\d.]+)" height="([\d.]+)">([\s\S]*?)<\/page>/g;
+  for (let mp = rePagina.exec(xml); mp; mp = rePagina.exec(xml)) {
+    const alto = Number(mp[2]);
+    const palabras: Array<[number, number, number, number]> = [];
+    const reW = /<word xMin="([-\d.]+)" yMin="([-\d.]+)" xMax="([-\d.]+)" yMax="([-\d.]+)">/g;
+    for (let m = reW.exec(mp[3]!); m; m = reW.exec(mp[3]!)) {
+      palabras.push([Number(m[1]), alto - Number(m[4]), Number(m[3]), alto - Number(m[2])]);
+    }
+    hojas.push(palabras);
+  }
+  return hojas;
+}
+
+const areaCruce = (a: [number, number, number, number], b: [number, number, number, number]) =>
+  Math.max(0, Math.min(a[2], b[2]) - Math.max(a[0], b[0])) *
+  Math.max(0, Math.min(a[3], b[3]) - Math.max(a[1], b[1]));
+
+/**
+ * La tercera comprobación entera sobre un archivo firmado.
+ *
+ * - `fueraDeHoja`: el rectángulo asoma fuera de la hoja (medio punto de
+ *   tolerancia por el redondeo). El x = 0 exacto de los campos clavados
+ *   habría caído acá si además asomara; el borde mismo es válido.
+ * - `pisadas`: dos widgets visibles con más de 1 pt² en común. Los
+ *   rectángulos cero de las reservas no pisan nada por construcción.
+ * - `sobreTexto`: pisa una palabra impresa si le cubre al menos la mitad
+ *   (el mismo criterio que el verificador usa para las anotaciones).
+ */
+export function rectangulos(archivo: string): VeredictoRectangulos {
+  const { hojas, widgets } = widgetsSegunQpdf(archivo);
+  const palabras = palabrasSegunPoppler(archivo);
+  const EPS = 0.5;
+
+  const fueraDeHoja = widgets.filter((w) => {
+    const h = hojas[w.pagina]!;
+    return w.rect[0] < -EPS || w.rect[1] < -EPS ||
+           w.rect[2] > h.ancho + EPS || w.rect[3] > h.alto + EPS;
+  });
+
+  const pisadas: Array<[WidgetMedido, WidgetMedido]> = [];
+  for (let i = 0; i < widgets.length; i++) {
+    for (let k = i + 1; k < widgets.length; k++) {
+      const a = widgets[i]!, b = widgets[k]!;
+      if (a.pagina !== b.pagina) continue;
+      if (areaCruce(a.rect, b.rect) > 1) pisadas.push([a, b]);
+    }
+  }
+
+  const sobreTexto: Array<{ widget: WidgetMedido; palabrasDebajo: number }> = [];
+  const noComprobables: Array<{ pagina: number; motivo: string }> = [];
+  const hojasSinTexto = new Set<number>();
+  widgets.forEach((w) => { if (!(palabras[w.pagina] ?? []).length) hojasSinTexto.add(w.pagina); });
+  hojasSinTexto.forEach((p) => noComprobables.push({
+    pagina: p,
+    motivo: 'la hoja no tiene texto extraíble (¿escaneada?): no se puede comprobar qué hay debajo',
+  }));
+
+  for (const w of widgets) {
+    const lista = palabras[w.pagina] ?? [];
+    if (!lista.length) continue;   // ya quedó como no comprobable
+    let tapadas = 0;
+    for (const p of lista) {
+      const areaPalabra = (p[2] - p[0]) * (p[3] - p[1]);
+      if (areaPalabra > 0 && areaCruce(w.rect, p) >= areaPalabra * 0.5) tapadas++;
+    }
+    if (tapadas > 0) sobreTexto.push({ widget: w, palabrasDebajo: tapadas });
+  }
+
+  return { widgets, fueraDeHoja, pisadas, sobreTexto, noComprobables };
+}
