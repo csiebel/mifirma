@@ -5,6 +5,7 @@ import { almacen, nuevaClave } from '../almacenamiento/almacen';
 import { anotar } from './evidencia';
 import { PDFDocument } from 'pdf-lib';
 import { verificar } from '../firma/pades';
+import { anotacionesSobreTexto, type VeredictoTapado } from '../firma/tapado';
 import { contarCambio } from '../firma/cambios';
 import { registrar } from './auditoria';
 import { HttpError } from '../http/errors';
@@ -760,12 +761,20 @@ export async function verificarFirmas(cuentaId: string, identidadId: string, ins
   // firma siguiente sólo se puede decidir conociendo a todas las demás.
   const v = verificar(contenido);
 
+  // ⚠ El escalón del 10/8 (deuda 43): ¿alguna anotación agregada después de
+  // una firma TAPA texto firmado? Best-effort a propósito: si `pdftotext` no
+  // está en este servidor, el veredicto LO DICE («no comprobable») en vez de
+  // callarse — la regla del 2/8: nunca un verde por silencio.
+  let tapado: VeredictoTapado | null = null;
+  try { tapado = await anotacionesSobreTexto(contenido, v.cambios); } catch { tapado = null; }
+
   return {
     titulo: datos.titulo,
     cerrado: datos.firmado,
     origen: datos.origen,
     tamano: contenido.length,
     ...v,
+    tapado,
     // El relato se arma acá y no en el navegador: es la misma decisión que
     // toma el analizador, y tenerla en dos lugares es tenerla en uno solo mal.
     cambios: v.cambios.map((c) => ({ ...c, relato: contarCambio(c) })),

@@ -2029,6 +2029,42 @@
           'Las firmas verifican igual —no se tocaron sus bytes— pero la hoja que vio el ' +
           'primer firmante ya no dice lo mismo. No lo uses como prueba sin mirar el detalle.</div>';
       }
+
+      // ⚠ El escalón del 10/8 (deuda 43): las anotaciones agregadas después de
+      // una firma, comparadas contra las PALABRAS de su hoja. Tres veredictos y
+      // ninguno se calla: tapa (rojo), libre, o «no comprobable» — que es lo
+      // que se dice de una hoja escaneada, en vez de un verde falso. En un
+      // documento nuestro normal no aparece nada: el pipeline propio no agrega
+      // anotaciones sueltas.
+      if (j.tapado && (j.tapado.anotaciones || []).length) {
+        var tapan = j.tapado.anotaciones.filter(function (a) { return a.veredicto === 'tapa_texto'; });
+        var dudosas = j.tapado.anotaciones.filter(function (a) { return a.veredicto === 'no_comprobable'; });
+        if (tapan.length) {
+          cambios += '<div class="msg err" style="margin-top:12px"><b>⚠ ' +
+            (tapan.length === 1
+              ? 'Una anotación agregada después de una firma TAPA texto firmado.'
+              : tapan.length + ' anotaciones agregadas después de una firma TAPAN texto firmado.') +
+            '</b><br>' +
+            tapan.map(function (a) {
+              return 'Hoja ' + (a.pagina + 1) + ': ' + a.palabrasDebajo +
+                ' palabra(s) firmadas quedan debajo (escrita después de la firma ' + a.despuesDeFirma + ').';
+            }).join(' ') +
+            (dudosas.length ? ' Sobre ' + dudosas.length + ' más no se pudo comprobar.' : '') +
+            ' No lo uses como prueba sin mirar esa hoja.</div>';
+        } else if (dudosas.length) {
+          cambios += '<div style="margin-top:12px;font-size:12.5px;color:var(--mut)">' +
+            'Se agregaron anotaciones después de una firma y sobre ' + dudosas.length +
+            ' no se pudo comprobar si tapan texto' +
+            (dudosas[0].motivo ? ' (' + esc(dudosas[0].motivo) + ')' : '') + '.</div>';
+        } else {
+          cambios += '<div style="margin-top:12px;font-size:12.5px;color:var(--mut)">' +
+            'Las anotaciones agregadas después de las firmas no tapan texto firmado.</div>';
+        }
+      } else if (j.tapado && j.tapado.comprobado === false) {
+        cambios += '<div style="margin-top:12px;font-size:12px;color:var(--mut)">' +
+          'No se pudo comprobar si hay anotaciones que tapen texto' +
+          (j.tapado.motivo ? ' (' + esc(j.tapado.motivo) + ')' : '') + '.</div>';
+      }
       if ((j.cambios || []).length) {
         cambios += '<div style="margin-top:14px">' +
           '<div style="font-size:11.5px;text-transform:uppercase;letter-spacing:.07em;' +

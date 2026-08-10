@@ -1,0 +1,10 @@
+# Railway construye con Nixpacks; esto agrega paquetes del sistema a la imagen.
+#
+# poppler trae `pdftotext`, que usa la comprobación de anotaciones sobre texto
+# firmado (src/firma/tapado.ts). Sin él el producto anda igual, pero ese
+# veredicto sale «no comprobable (pdftotext no está instalado)» — honesto, y
+# menos de lo que se puede afirmar teniéndolo.
+#
+# El "..." conserva los paquetes que Nixpacks pone por defecto para Node.
+[phases.setup]
+nixPkgs = ["...", "poppler_utils"]

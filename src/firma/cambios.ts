@@ -50,6 +50,9 @@ export interface ObjetoEscrito {
   clase: ClaseObjeto;
   /** El objeto ya existía antes de este incremento: es un reemplazo. */
   reemplaza: boolean;
+  /** Sólo para anotaciones: su rectángulo [x1,y1,x2,y2], si se pudo leer.
+   *  Lo consume `tapado.ts` para decidir si tapa texto firmado (deuda 43). */
+  rect?: [number, number, number, number];
   /** Sólo para páginas: qué referencias cambiaron respecto de la versión previa. */
   cambio?: string[];
 }
@@ -141,6 +144,15 @@ function refsDe(dic: string, clave: string): string[] {
   return zona.match(/\d+\s+\d+\s+R/g) || [];
 }
 
+/** El /Rect de una anotación, normalizado (x1<x2, y1<y2). */
+function rectDe(dic: string): [number, number, number, number] | null {
+  const m = /\/Rect\s*\[\s*([-\d.]+)\s+([-\d.]+)\s+([-\d.]+)\s+([-\d.]+)\s*\]/.exec(dic);
+  if (!m) return null;
+  const [a, b, c, d] = [Number(m[1]), Number(m[2]), Number(m[3]), Number(m[4])];
+  if ([a, b, c, d].some((n) => !Number.isFinite(n))) return null;
+  return [Math.min(a, c), Math.min(b, d), Math.max(a, c), Math.max(b, d)];
+}
+
 function clasificar(dic: string): ClaseObjeto {
   if (/\/Type\s*\/Sig\b/.test(dic)) return 'firma';
   if (/\/Type\s*\/Catalog\b/.test(dic)) return 'catalogo';
@@ -212,7 +224,14 @@ export function cambiosEntreFirmas(pdf: Buffer, cortes: number[]): CambioEntreFi
       // hecha, reescrito.
       if (o.reemplaza && (clase === 'flujo' || clase === 'apariencia')) contenidoAlterado = true;
 
-      if (clase === 'anotacion') anotaciones++;
+      if (clase === 'anotacion') {
+        anotaciones++;
+        // El rectángulo viaja para que `tapado.ts` pueda compararlo contra las
+        // palabras de la hoja. Si no se deja leer, el veredicto de allá lo va a
+        // decir («sin rectángulo legible») — nunca un verde por silencio.
+        const r = rectDe(e.dic);
+        if (r) o.rect = r;
+      }
 
       objetos.push(o);
       previo.set(e.numero, e.dic);
