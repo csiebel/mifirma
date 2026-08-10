@@ -13,8 +13,8 @@
 import { before, test } from 'node:test';
 import assert from 'node:assert/strict';
 import { SignPdf } from '@signpdf/signpdf';
-import { huecoVisible, type Marca } from '../../src/firma/apariencia';
-import { verificar } from '../../src/firma/pades';
+import { huecoVisible, type Marca, type WidgetPredeclarado } from '../../src/firma/apariencia';
+import { normalizar, verificar } from '../../src/firma/pades';
 import { contrato, firma, firmanteLab, prepararFixtures, rubrica } from './fixtures';
 import { guardar } from './inspeccion';
 
@@ -42,16 +42,35 @@ before(async () => {
 });
 
 test(`${HOJAS} hojas rubricadas por dos firmantes`, async () => {
-  const marcas = (y: number): Marca[] => [
-    ...Array.from({ length: HOJAS }, (_, pg): Marca => (
-      { pagina: pg, rect: [470, y, 525, y + 40], imagen: rubrica() })),
-    { pagina: HOJAS - 1, rect: [70, y + 120, 240, y + 175], imagen: firma(), principal: true },
+  // ═══ El pipeline REAL de hoy, no el del 8/8 (deuda 19) ═══
+  //
+  // Antes este test firmaba la base cruda, sin `normalizar()` ni pre-declarado:
+  // medía el costo por hoja de un camino que ya no existe. Hoy el producto
+  // normaliza, y con la reserva magra pre-declara los lugares de los que firman
+  // DESPUÉS del primero: acá, la rúbrica por hoja y la firma del lugar 2. El
+  // primero no reserva — sus marcas nacen frescas en su incremento — así que
+  // sus etiquetas no están en la lista, a propósito, y el techo de KB por hoja
+  // vigila el sobrecosto REAL: imágenes deduplicadas + widgets pre-declarados.
+  const nom = (lugar: number, pg: number) => `marca_rubrica_h${pg + 1}__mf${lugar}`;
+  const nomFirma = (lugar: number) => `marca_firma_h${HOJAS}__mf${lugar}`;
+  const TODAS: WidgetPredeclarado[] = [
+    ...Array.from({ length: HOJAS }, (_, pg): WidgetPredeclarado => (
+      { nombre: nom(2, pg), pagina: pg, rect: [0, 0, 0, 0], clase: 'marca' })),
+    { nombre: nomFirma(2), pagina: HOJAS - 1, rect: [0, 0, 0, 0], clase: 'marca' },
   ];
 
-  let pdf = BASE;
-  for (const [quien, nombre, y] of [['a', 'Ana Pérez', 55], ['b', 'Beto Silva', 100]] as const) {
+  const marcas = (y: number, lugar: number): Marca[] => [
+    ...Array.from({ length: HOJAS }, (_, pg): Marca => (
+      { pagina: pg, rect: [470, y, 525, y + 40], imagen: rubrica(), etiqueta: nom(lugar, pg) })),
+    { pagina: HOJAS - 1, rect: [70, y + 120, 240, y + 175], imagen: firma(), principal: true,
+      etiqueta: nomFirma(lugar) },
+  ];
+
+  let pdf = await normalizar(BASE, TODAS);
+  for (const [quien, nombre, y, lugar] of
+       [['a', 'Ana Pérez', 55, 1], ['b', 'Beto Silva', 100, 2]] as const) {
     pdf = await signpdf.sign(
-      huecoVisible({ pdf, marcas: marcas(y), razon: `Firmado por ${nombre}`, nombre,
+      huecoVisible({ pdf, marcas: marcas(y, lugar), razon: `Firmado por ${nombre}`, nombre,
                      lugar: 'Montevideo', largoFirma: 32768 }),
       firmanteLab(quien).signer(),
     );
