@@ -73,7 +73,12 @@
      no responde al puntero — que no se pueda tocar lo dice la política, esto
      sólo evita el intento. */
   .vis-marca{position:absolute;display:grid;place-items:center;border-radius:5px;z-index:3}
-  .vis-marca img{max-width:100%;max-height:100%;display:block;pointer-events:none}
+  /* Clavada con posicion ABSOLUTA: adentro de la rejilla, WebKit resuelve
+     la altura porcentual de la imagen como auto y el dibujo se sale del
+     recuadro (10/8, paso en dos intentos: max-% y luego height:100%).
+     Contra el recuadro posicionado, con alto puesto en px, no hay nada
+     que interpretar. */
+  .vis-marca img{position:absolute;left:0;top:0;width:100%;height:100%;object-fit:contain;pointer-events:none}
   .vis-marca .vis-et{font-size:11px;font-weight:600;line-height:1.1;text-align:center;
                      padding:0 3px;user-select:none;pointer-events:none}
   .vis-marca.mia{border:1.5px solid var(--acc-700);background:rgba(10,162,176,.12);
@@ -103,7 +108,9 @@
   /* El zoom. Fijo abajo a la derecha, arriba de la barra de acciones: si
      scrolleara con la hoja desaparecería justo cuando se está mirando de cerca
      un renglón del final. */
-  .vis-zoom{position:fixed;right:16px;bottom:86px;z-index:20;display:flex;gap:2px;
+  /* A la IZQUIERDA: a la derecha vive el panel y sus botones - el control
+     los tapaba (10/8, deuda 41). */
+  .vis-zoom{position:fixed;left:16px;bottom:86px;z-index:20;display:flex;gap:2px;
             background:rgba(15,30,44,.92);border:1px solid rgba(255,255,255,.16);
             border-radius:10px;padding:4px;box-shadow:0 4px 16px rgba(0,0,0,.45)}
   .vis-zoom button{border:0;background:transparent;color:#e2e8f0;cursor:pointer;
@@ -111,7 +118,7 @@
                    border-radius:7px;min-width:34px;margin:0;width:auto}
   .vis-zoom button:hover{background:rgba(255,255,255,.14);color:#fff}
   .vis-zoom .vis-zoom-n{font-size:12px;min-width:54px;letter-spacing:.2px}
-  @media (max-width:640px){.vis-zoom{bottom:98px;right:10px}}
+  @media (max-width:640px){.vis-zoom{bottom:98px;left:10px}}
 
   .vis-quitar{position:absolute;right:-9px;top:-9px;width:20px;height:20px;border-radius:50%;
               border:0;background:var(--danger);color:#fff;font-size:14px;line-height:1;
