@@ -113,6 +113,51 @@ export async function normalizar(
     throw roto();
   }
 
+  // ═══ ⚠ LA NUMERACIÓN AGUJEREADA SE COMPACTA ACÁ — medido el 9/8/2026 ═══
+  //
+  // Un PDF que ya vivió revisiones en su programa de origen llega con la
+  // numeración de objetos LLENA DE HUECOS, y pdf-lib la CONSERVA al guardar: la
+  // tabla xref de la base sale partida en decenas de subsecciones. El documento
+  // se ve perfecto — pero el COMPARADOR de revisiones de Acrobat no banca una
+  // base así: al validar la firma 1 de un documento con dos o más firmas dice
+  // «el documento se ha modificado o dañado», sin itemizar nada, sobre firmas
+  // perfectamente íntegras.
+  //
+  // Medido con una sola variable sobre el manual real de 74 hojas, la noche del
+  // 9/8 (claude/contrato-grande.md): mismo pipeline, base con 39 subsecciones →
+  // rojo; la MISMA base compactada (1 subsección) → verde — con el MISMO
+  // pre-declarado de 376 subsecciones en los dos. La fragmentación del
+  // incremento no molesta; la de la BASE, sí. Antes de eso cayeron, medidas,
+  // tres hipótesis: las subsecciones del pre-declarado, la cantidad de widgets,
+  // y el tamaño (2 hojas infladas a 14 MB: verde).
+  //
+  // Copiar las hojas a un documento nuevo renumera todo contiguo desde 1.
+  //
+  // ⚠ SÓLO cuando NO hay AcroForm del cliente: copyPages copia las hojas con
+  // sus anotaciones pero NO el diccionario AcroForm del catálogo, y un
+  // formulario sin su AcroForm deja de ser formulario. Un documento CON
+  // formulario y CON huecos sale hoy como salía siempre (caso sin medir: si
+  // aparece, primero medirlo, después tocar).
+  //
+  // ⚠ Costo aceptado por Claudio el 9/8: el documento compactado pierde los
+  // marcadores del índice lateral y lo demás del catálogo que no cuelga de las
+  // hojas, si lo traía. Las anotaciones de las hojas (los Links) viajan.
+  const hayFormulario = !!doc.catalog.lookupMaybe(PDFName.of('AcroForm'), PDFDict);
+  const huecos = doc.context.largestObjectNumber - doc.context.enumerateIndirectObjects().length;
+  if (!hayFormulario && huecos > 0) {
+    try {
+      const compacto = await PDFDocument.create();
+      const hojas = await compacto.copyPages(doc, doc.getPageIndices());
+      for (const h of hojas) compacto.addPage(h);
+      console.info(`[pades] numeración con ${huecos} hueco(s) y sin formulario: la base se compacta antes de firmar`);
+      doc = compacto;
+    } catch {
+      // Si la copia falla se sigue con el documento tal cual: es exactamente lo
+      // de siempre, cartel feo incluido. Perder la firma por una mejora de
+      // presentación sería peor que el cartel.
+    }
+  }
+
   // ═══ ⚠ EL FORMULARIO DEL CLIENTE SE CONGELA ACÁ, Y A PROPÓSITO ═══
   //
   // La mitad de lo que sube un cliente —un formulario de banco, del BPS, de la
