@@ -1,4 +1,8 @@
 import { createHash } from 'node:crypto';
+import { execFile } from 'node:child_process';
+import { mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 import { PDFDocument, PDFDict, PDFName } from 'pdf-lib';
 import { SignPdf } from '@signpdf/signpdf';
 import forge from 'node-forge';
@@ -133,11 +137,14 @@ export async function normalizar(
   //
   // Copiar las hojas a un documento nuevo renumera todo contiguo desde 1.
   //
-  // ⚠ SÓLO cuando NO hay AcroForm del cliente: copyPages copia las hojas con
+  // ⚠ copyPages SÓLO cuando NO hay AcroForm del cliente: copia las hojas con
   // sus anotaciones pero NO el diccionario AcroForm del catálogo, y un
-  // formulario sin su AcroForm deja de ser formulario. Un documento CON
-  // formulario y CON huecos sale hoy como salía siempre (caso sin medir: si
-  // aparece, primero medirlo, después tocar).
+  // formulario sin su AcroForm deja de ser formulario. El caso CON formulario
+  // y CON huecos se midió el 10/8 con tres gemelos del mismo manual más un
+  // campo del cliente (claude/contrato-grande.md): agujereada+formulario →
+  // «modificado o dañado»; la MISMA base pasada por qpdf → limpia y con el
+  // campo vivo. Esa rama va entonces por qpdf, que reescribe renumerando y
+  // conserva el catálogo entero.
   //
   // ⚠ Costo aceptado por Claudio el 9/8: el documento compactado pierde los
   // marcadores del índice lateral y lo demás del catálogo que no cuelga de las
@@ -155,6 +162,36 @@ export async function normalizar(
       // Si la copia falla se sigue con el documento tal cual: es exactamente lo
       // de siempre, cartel feo incluido. Perder la firma por una mejora de
       // presentación sería peor que el cartel.
+    }
+  } else if (hayFormulario && huecos > 0) {
+    // La rama medida el 10/8: formulario + huecos. La red es doble: si qpdf no
+    // está o falla, se sigue tal cual (lo de siempre, cartel feo incluido); y
+    // si devuelve otra cantidad de hojas o un catálogo sin formulario, se
+    // descarta. Nunca se pierde una firma por esto.
+    try {
+      const dir = await mkdtemp(join(tmpdir(), 'mifirma-qpdf-'));
+      try {
+        const entrada = join(dir, 'entrada.pdf');
+        const salida = join(dir, 'salida.pdf');
+        await writeFile(entrada, pdf);
+        await new Promise<void>((resolver, rechazar) =>
+          execFile('qpdf', [entrada, salida], (e: any) =>
+            // ⚠ qpdf sale con código 3 ante una simple advertencia, con la
+            // salida escrita igual — la misma mordida que `correr()` del banco.
+            (!e || e.code === 3 ? resolver() : rechazar(e))));
+        const redoc = await PDFDocument.load(await readFile(salida), { ignoreEncryption: true });
+        const sigueElFormulario = !!redoc.catalog.lookupMaybe(PDFName.of('AcroForm'), PDFDict);
+        if (redoc.getPageCount() === doc.getPageCount() && sigueElFormulario) {
+          console.info(`[pades] numeración con ${huecos} hueco(s) y formulario del cliente: la base pasó por qpdf`);
+          doc = redoc;
+        } else {
+          console.warn('[pades] qpdf devolvió otra cosa (hojas o formulario): la base sigue tal cual');
+        }
+      } finally {
+        await rm(dir, { recursive: true, force: true });
+      }
+    } catch {
+      console.warn('[pades] qpdf no disponible o falló: la base sigue agujereada, como hasta hoy');
     }
   }
 

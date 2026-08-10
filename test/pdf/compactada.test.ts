@@ -8,12 +8,14 @@
  * huecos sale de pdf-lib con la xref partida en subsecciones, y el comparador
  * de revisiones de Acrobat responde «el documento se ha modificado o dañado»
  * sobre firmas íntegras. La misma base compactada: verde. Acá se fija que
- * `normalizar()` compacte cuando corresponde y NO toque cuando no.
+ * `normalizar()` compacte cuando corresponde, pase por qpdf cuando hay
+ * formulario (medido el 10/8: los gemelos F1/F2/F3), y no toque la sana.
  */
 import { strict as assert } from 'node:assert';
 import { test } from 'node:test';
 import { PDFDocument, PDFName, PDFRef, PDFString, StandardFonts, rgb } from 'pdf-lib';
 import { normalizar } from '../../src/firma/pades';
+import { sinPoppler } from './fixtures';
 
 /** Subsecciones de la ÚLTIMA tabla xref clásica del archivo. */
 function subsecciones(pdf: Buffer): number {
@@ -57,7 +59,7 @@ test('una base sana sale como salía: una subsección, sin compactar de más', a
   assert.equal(subsecciones(norm), 1);
 });
 
-test('una base agujereada CON formulario no se compacta: el formulario manda', async () => {
+test('una base agujereada CON formulario pasa por qpdf: sin huecos y con el campo vivo', { skip: sinPoppler() }, async () => {
   const doc = await baseLisa();
   const f = doc.getForm().createTextField('cliente_razon');
   f.addToPage(doc.getPage(0), { x: 60, y: 600, width: 220, height: 24 });
@@ -66,9 +68,13 @@ test('una base agujereada CON formulario no se compacta: el formulario manda', a
   guardado.context.assign(ref, PDFString.of('relleno'));
   guardado.catalog.set(PDFName.of('MiFirmaLabHueco'), ref);
   const cruda = Buffer.from(await guardado.save({ useObjectStreams: false }));
+  assert.ok(subsecciones(cruda) > 1, 'el fixture perdió el hueco: no hay qué medir');
 
   const norm = await normalizar(cruda, []);
+  assert.equal(subsecciones(norm), 1,
+    'con formulario y huecos, qpdf tenía que dejar la xref en una subsección');
   const relecto = await PDFDocument.load(norm);
   assert.equal(relecto.getForm().getFields().length, 1,
-    'el campo del cliente tenía que sobrevivir: un formulario no se compacta');
+    'el campo del cliente tenía que sobrevivir al paso por qpdf');
+  assert.equal(relecto.getForm().getFields()[0]!.getName(), 'cliente_razon');
 });

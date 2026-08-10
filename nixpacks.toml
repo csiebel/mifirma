@@ -5,6 +5,11 @@
 # veredicto sale «no comprobable (pdftotext no está instalado)» — honesto, y
 # menos de lo que se puede afirmar teniéndolo.
 #
+# qpdf lo usa normalizar() (src/firma/pades.ts) para renumerar una base
+# agujereada que trae formulario del cliente, sin perderlo. Sin qpdf el
+# producto anda igual: esa base sigue tal cual, con el cartel feo de
+# Acrobat en documentos grandes — como hasta el 10/8.
+#
 # El "..." conserva los paquetes que Nixpacks pone por defecto para Node.
 [phases.setup]
-nixPkgs = ["...", "poppler_utils"]
+nixPkgs = ["...", "poppler_utils", "qpdf"]
