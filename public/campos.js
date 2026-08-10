@@ -57,7 +57,8 @@
     ['moneda', 'Importe'],
     ['casilla', 'Sí / No'],
     ['opcion', 'Lista de opciones'],
-    // ⚠ No lo completa nadie: es texto que escribís vos y se estampa en la hoja.
+    // ⚠ No lo completa nadie: es texto que escribís vos y va fijo en la hoja
+    //   (como campo de sólo lectura con su valor — ya no se estampa tinta).
     // Sirve para decir QUÉ se está aceptando al lado de una casilla, que sobre
     // un PDF sin formulario se estampaba como una X sola sin nada que la
     // explique — un documento firmado con una marca que no prueba nada.
@@ -504,7 +505,7 @@
         (c.completa_emisor
           ? '<div class="cp-valor">' +
             '<label class="campo" style="margin:0">' +
-            (c.tipo === 'etiqueta' ? 'El texto que se estampa' : 'Lo que va a decir') +
+            (c.tipo === 'etiqueta' ? 'El texto fijo que va en la hoja' : 'Lo que va a decir') +
             '</label>' +
             valorHtml(c, i) +
             '</div>'
