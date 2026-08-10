@@ -42,7 +42,16 @@ import { dibujar, type DatosCertificado } from './certificado_pdf';
  * vender.
  */
 
-const VERSION_PLANTILLA = 1;
+// ⚠ SUBIRLA CADA VEZ QUE CAMBIE LO QUE EL CERTIFICADO DICE, no sólo su forma.
+// Sale impresa al pie de cada certificado, y el certificado es INMUTABLE: es lo
+// único que permite agarrar uno viejo y saber con qué modelo salió. Si el texto
+// cambia y el número no, quedan dos papeles que dicen «v1» y afirman cosas
+// distintas sobre el mismo hecho, sin forma de distinguirlos nunca más.
+//
+// v2 (9/8/2026): «Aviso enviado» pasó a «Aviso aceptado por el servidor de
+// correo» —el relay acepta y después no entrega— y se rotularon los ocho tipos
+// de evento que salían en código crudo.
+const VERSION_PLANTILLA = 2;
 
 // ---------------------------------------------------------------------------
 // Los datos

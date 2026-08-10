@@ -470,6 +470,23 @@ export async function firmar(token: string, input: FirmaInput) {
   // formulario después de una firma es lo que hace que Acrobat diga «el
   // documento se ha modificado o dañado desde que fue firmado» en todas las
   // firmas menos la última. Medido: `claude/cambios-posteriores-a-la-firma.md`.
+  // ⚠ Si el documento BASE ya traía firmas electrónicas, no se puede seguir:
+  // `normalizar()` reescribe el archivo y las invalidaría. La comprobación
+  // final lo rechazaría igual — pero tres pasos más tarde, con el sello de
+  // tiempo ya gastado y un mensaje que no explica. La subida ya no deja entrar
+  // estos documentos; esta guarda cubre los circuitos armados antes de esa red.
+  // Sólo en la PRIMERA firma: después, las firmas del archivo son las nuestras.
+  if (!ctx.archivo_vigente_id) {
+    let previas = 0;
+    try { previas = verificar(original).firmas.length; } catch { /* no firmado */ }
+    if (previas > 0) {
+      throw new HttpError(409,
+        'Este documento ya traía ' + (previas === 1 ? 'una firma electrónica' : previas + ' firmas electrónicas') +
+        ' antes de entrar a MiFirma, y firmarlo acá las invalidaría. ' +
+        'El emisor tiene que subir el documento original, sin firmar, y armar el envío de nuevo.');
+    }
+  }
+
   const base = ctx.archivo_vigente_id ? original : await normalizar(original, preparado.widgets);
 
   // ── El sello de tiempo. Lo único de todo esto que no admite segunda vuelta.
@@ -540,7 +557,16 @@ export async function firmar(token: string, input: FirmaInput) {
   // que ninguna firma cubra. Sobre un archivo que acabamos de producir nosotros
   // mismos, cualquier byte suelto es un error nuestro.
   if (!firmas.length || !comprobacion.integro) {
-    throw new HttpError(500, 'La firma generada no verifica. No se guardó nada.');
+    // ⚠ Tres causas distintas merecen tres textos. Con un solo cartel para las
+    // tres, el 9/8 se gastó una noche adivinando cuál era. La desagregación es
+    // para el expediente del soporte; la primera frase, para la persona.
+    const rotas = firmas.filter((f) => !f.verifica).length;
+    const detalle = !firmas.length
+      ? 'el verificador no encontró ninguna firma en el archivo producido'
+      : rotas > 0
+        ? rotas + ' de ' + firmas.length + ' firmas no verifican — si el documento traía firmas de antes, el procesamiento las invalidó'
+        : 'quedaron ' + comprobacion.bytes_sin_firmar + ' bytes fuera de toda firma';
+    throw new HttpError(500, 'La firma generada no verifica (' + detalle + '). No se guardó nada.');
   }
 
   const sha256Firmado = createHash('sha256').update(firmado).digest();

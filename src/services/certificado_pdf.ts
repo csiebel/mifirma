@@ -92,14 +92,33 @@ export interface DatosCertificado {
 // El PDF
 // ---------------------------------------------------------------------------
 
+// ⚠ ESTA LISTA TIENE QUE CUBRIR TODO `tipo_evento`, NO LOS EVENTOS QUE UNO SE
+// ACUERDA. `certificado.ts` trae TODOS los eventos de la instancia y los pasa
+// por acá sin filtrar: un código sin rótulo sale CRUDO —`documento.campo_completado`—
+// en el certificado de un cliente. El 9/8 faltaban ocho, y tres eran visibles en
+// un certificado ya emitido, que es inmutable y queda así para siempre.
+//
+// Para saber si falta alguno, con el túnel abierto:
+//   select codigo from tipo_evento where codigo not in ( ...los de acá... );
+//
+// ⚠ Y ES UNA COPIA: el catálogo `tipo_evento` tiene estos mismos textos en tres
+// idiomas y el certificado no los lee. Por eso no puede salir en portugués.
 const ETIQUETA: Record<string, string> = {
   'documento.subido': 'Documento subido',
+  'documento.copiado': 'Se creó su copia del documento',
   'circuito.despachado': 'Enviado a firmar',
-  'notificacion.enviada': 'Aviso enviado',
+  // ⚠ Dice lo que se comprobó: el relay ACEPTÓ el mensaje. Que haya llegado es
+  // otra cosa, y su evento es `notificacion.entregada`, que todavía no escribe
+  // nadie. Ver migración 058 — y ⚠ el mismo texto vive en `tipo_evento`.
+  'notificacion.enviada': 'Aviso aceptado por el servidor de correo',
+  'notificacion.entregada': 'Aviso entregado al destinatario',
   'notificacion.fallida': 'El aviso NO salió',
   'documento.abierto': 'Abrió el enlace',
   'documento.visto': 'Vio el documento',
+  'documento.campo_completado': 'Completó un dato',
+  'documento.campos_congelados': 'Se cerraron los datos antes de firmar',
   'identidad.probada': 'Probó su identidad',
+  'firma.caracter_declarado': 'Declaró con qué carácter firma',
   'consentimiento.dado': 'Consintió firmar',
   'firma.aplicada': 'Firmó',
   'firma.sellada': 'Sello de tiempo',
@@ -108,8 +127,11 @@ const ETIQUETA: Record<string, string> = {
   'firma.marca_agregada': 'Colocó su marca',
   'firma.marca_quitada': 'Quitó una marca suya',
   'firma.marca_movida': 'Movió su marca',
+  'firma.marca_redimensionada': 'Cambió el tamaño de su marca',
   'firma.rechazada': 'Rechazó firmar',
   'circuito.completo': 'Circuito completo',
+  'circuito.cancelado': 'Se canceló el circuito',
+  'circuito.vencido': 'Venció el plazo',
   'documento.descargado': 'Descargó el documento',
   'certificado.emitido': 'Certificado emitido',
 };

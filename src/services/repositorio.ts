@@ -110,6 +110,28 @@ export async function subirDocumento(cuentaId: string, identidadId: string, inpu
   const titulo = (input.titulo || input.nombreArchivo || '').trim().slice(0, 200);
   if (!titulo) throw new HttpError(400, 'Falta el título del documento.');
 
+  // ⚠ Un PDF que YA trae firmas electrónicas no entra como documento base.
+  //
+  // Preparar la primera firma reescribe el archivo entero (`normalizar()`), y
+  // eso INVALIDA las firmas que el documento traiga: el circuito completo
+  // moriría recién al firmar el primero, con «la firma generada no verifica» —
+  // con razón, porque habríamos destruido firmas ajenas. Mejor decirlo acá,
+  // al que subió, que dejar que lo descubra el firmante.
+  //
+  // Medido el 9/8: un documento que MiFirma firmó el 2/8 se volvió a subir
+  // como base y costó una noche de diagnóstico. claude/formulario-del-cliente.md.
+  //
+  // El try: un PDF que el verificador no sabe leer no es un PDF ya firmado.
+  // Ante la duda pasa, igual que siempre — esta red es para el caso probado.
+  let firmasPrevias = 0;
+  try { firmasPrevias = verificar(input.contenido).firmas.length; } catch { /* no firmado */ }
+  if (firmasPrevias > 0) {
+    throw new HttpError(400,
+      firmasPrevias === 1
+        ? 'Este documento ya tiene una firma electrónica. Para mandarlo a firmar, subí el documento original sin firmar: procesar éste invalidaría la firma que ya tiene.'
+        : 'Este documento ya tiene ' + firmasPrevias + ' firmas electrónicas. Para mandarlo a firmar, subí el documento original sin firmar: procesar éste invalidaría las firmas que ya tiene.');
+  }
+
   // Antes de guardar nada: si no se puede abrir, no se sube.
   const paginas = await contarPaginas(input.contenido);
 
