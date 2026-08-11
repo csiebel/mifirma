@@ -134,7 +134,7 @@ export function registrarRutasAuth(app: FastifyInstance) {
     async (req) => {
       const b = cuerpoRegistro.parse(req.body);
       // ⚠ ANTES DE TOCAR NADA. Sin esto, cada golpe crea una identidad latente y
-      // manda un correo. El 11/8/2026 esta línea faltó en la primera pasada —el
+      // manda un correo. El 10/8/2026 esta línea faltó en la primera pasada —el
       // cartelito quedó sólo en el recupero— y el defecto no lo vio la pantalla,
       // que dibujaba el cartelito igual: lo cazó un curl sin token que igual
       // contestó `{"ok":true}`.

@@ -73,7 +73,7 @@ export async function verificarCaptcha(token: string | null | undefined, ip?: st
   const cuerpo = new URLSearchParams();
   cuerpo.set('secret', process.env.TURNSTILE_SECRET!.trim());
   cuerpo.set('response', t);
-  // La IP es la real desde el arreglo de `server.ts` del 11/8: antes de eso la
+  // La IP es la real desde el arreglo de `server.ts` del 10/8: antes de eso la
   // elegía quien llamaba, y mandársela a Cloudflare habría sido mentirle.
   if (ip) cuerpo.set('remoteip', ip);
 

@@ -49,7 +49,7 @@ export function construirServidor(): FastifyInstance {
   // ⚠⚠ LA IP REAL DEL CLIENTE — y por qué se arregla acá arriba y no en cada llamador.
   //
   // `trustProxy: true` (arriba) hace que `req.ip` salga del PRIMER valor de la
-  // cabecera `X-Forwarded-For`, que la manda el cliente. Medido el 11/8/2026 con
+  // cabecera `X-Forwarded-For`, que la manda el cliente. Medido el 10/8/2026 con
   // Fastify 5: con `X-Forwarded-For: 9.9.9.9`, `req.ip` vale `9.9.9.9`. O sea que
   // todo tope por IP era decorativo —cada pedido estrenaba cubeta cambiando un
   // número— y la IP que queda escrita en el expediente (`evidencia.ip`) la elegía
@@ -87,7 +87,7 @@ export function construirServidor(): FastifyInstance {
   // ⚠⚠ Y LAS RUTAS SE DECLARAN ADENTRO DE `app.after` (al final de esta función). Este
   // `register` NO carga el plugin en el acto: lo encola. Una ruta declarada antes de que
   // cargue no recibe el tope — ni el global de acá, ni el suyo propio de `config.rateLimit`.
-  // Así estuvo desde que se escribió. Medido el 11/8/2026 contra el servidor: siete pedidos
+  // Así estuvo desde que se escribió. Medido el 10/8/2026 contra el servidor: siete pedidos
   // seguidos a `/auth/registro` (tope 5/hora) pasaron los siete, y ninguna respuesta trajo
   // cabeceras `x-ratelimit-*`. Si alguna vez estas trece líneas salen del `after`, el tope
   // vuelve a desaparecer en silencio y nada lo avisa.
@@ -104,7 +104,7 @@ export function construirServidor(): FastifyInstance {
     // ⚠ Un `HttpError`, NO un objeto pelado. El plugin LANZA lo que devuelve esta función
     // (`@fastify/rate-limit`, index.js:375), así que cae en `setErrorHandler`. Un objeto sin
     // `statusCode` se lee como 500 y sale tapado con «ocurrió un error en el servidor» —
-    // medido el 11/8/2026, el primer día que el tope frenó algo. Nunca se había ejecutado:
+    // medido el 10/8/2026, el primer día que el tope frenó algo. Nunca se había ejecutado:
     // el plugin no estaba enganchado a ninguna ruta, así que esta línea era letra muerta
     // desde que se escribió. Con `HttpError` sale 429 y con el texto de acá, que es apto
     // para el usuario.
@@ -618,7 +618,7 @@ export function construirServidor(): FastifyInstance {
   // ⚠⚠ ADENTRO DE `app.after`, Y NO SUELTAS. Ver la nota larga en el `register` del
   // rate-limit: `app.register` encola el plugin, no lo carga; una ruta declarada antes de
   // que cargue queda SIN tope, sin que nada lo avise. `app.after` es exactamente «cuando
-  // los plugins encolados ya cargaron». Comprobado el 11/8/2026: con las rutas sueltas
+  // los plugins encolados ya cargaron». Comprobado el 10/8/2026: con las rutas sueltas
   // pasan 25 de 25 pedidos contra un tope de 20/minuto; adentro del `after`, 20 y 5 frenados.
   app.after(() => {
     registrarRutasAuth(app);

@@ -70,7 +70,8 @@ do $rol$ begin
   -- `has_table_privilege('app_operador', …)`, y eso no devuelve falso cuando el
   -- rol no existe: revienta. Sin esta línea, cualquier migración nueva que traiga
   -- el centinela muere en el banco por una razón que no tiene nada que ver con
-  -- lo que la migración hace. Agregado el 11/8/2026, con la 059.
+  -- lo que la migración hace. Agregado el 10/8/2026, mientras se probaba una
+  -- migración que después se descartó: el arreglo del banco vale igual.
   if not exists (select 1 from pg_roles where rolname = 'app_operador') then
     create role app_operador;
   end if;
@@ -90,9 +91,10 @@ create table cuenta (
 );
 
 -- El alta en dos pasos (migración 036) y el token que viaja por correo. Están acá
--- en esqueleto porque la 059 le agrega una columna a `registro_pendiente`, y una
--- migración que le agrega algo a una tabla que el banco no tiene falla por no
--- encontrarla, no por lo que hace. Agregado el 11/8/2026, con la 059.
+-- en esqueleto porque una migración que le toque una columna a una de estas dos
+-- tablas falla por no encontrarla, no por lo que la migración hace — y el banco
+-- daría rojo por el motivo equivocado. Agregado el 10/8/2026, probando una
+-- migración que después se descartó: el arreglo del banco vale igual.
 create table token_acceso (
   id uuid primary key default gen_random_uuid(),
   identidad_id uuid references identidad(id),
