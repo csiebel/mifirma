@@ -149,7 +149,13 @@ export function construirServidor(): FastifyInstance {
     reply.header(
       'Content-Security-Policy',
       "default-src 'self'; " +
-        "script-src 'self' 'unsafe-inline'; " +
+        // ⚠ `challenges.cloudflare.com` es el cartelito de «no soy un robot»
+        // (Turnstile). Va en DOS directivas y hacen falta las dos: `script-src`
+        // para el archivo que se carga, y `frame-src` porque el cartelito se
+        // dibuja adentro de un iframe suyo. Con una sola, el widget no aparece y
+        // la consola del navegador es el único lugar donde se entera alguien.
+        "script-src 'self' 'unsafe-inline' https://challenges.cloudflare.com; " +
+        "frame-src https://challenges.cloudflare.com; " +
         "style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; " +
         "font-src 'self' https://fonts.gstatic.com data:; " +
         "img-src 'self' data: blob:; " +
@@ -479,6 +485,9 @@ export function construirServidor(): FastifyInstance {
     '/publico/industrias',
     '/publico/salud',
     '/publico/paises',
+    // La clave pública del cartelito de «no soy un robot». Sin esta línea da 401
+    // y la pantalla no lo dibuja nunca.
+    '/publico/captcha',
     '/ayudas',
     '/i18n',
   ]);

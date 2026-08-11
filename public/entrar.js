@@ -213,6 +213,52 @@
     }catch(e){ return ''; }
   }
 
+  // ---------------- El cartelito de «no soy un robot» ----------------
+  //
+  // Turnstile de Cloudflare, dibujado a mano y no solo, porque la clave pública
+  // la manda el servidor: si el cartelito está apagado —desarrollo—, no viene
+  // clave, no se dibuja nada y los dos formularios andan como siempre.
+  //
+  // ⚠ El token se GASTA al usarlo: sirve una vez. Por eso después de cada envío
+  // —salga bien o mal— se reinicia el widget; si no, el segundo intento manda un
+  // token quemado y el servidor lo rechaza con un mensaje que no ayuda en nada.
+  var CAP = { clave: null, ids: {} };
+
+  function dibujarCaptchas(){
+    if (!CAP.clave || !window.turnstile) return;
+    ['capCrear','capReset'].forEach(function(donde){
+      var caja = $(donde);
+      if (!caja || CAP.ids[donde] !== undefined) return;
+      CAP.ids[donde] = window.turnstile.render('#' + donde, { sitekey: CAP.clave });
+    });
+  }
+
+  /** El token del cartelito, o '' si está apagado. */
+  function tokenCaptcha(donde){
+    if (!CAP.clave || !window.turnstile || CAP.ids[donde] === undefined) return '';
+    return window.turnstile.getResponse(CAP.ids[donde]) || '';
+  }
+
+  function reiniciarCaptcha(donde){
+    if (CAP.ids[donde] !== undefined && window.turnstile) window.turnstile.reset(CAP.ids[donde]);
+  }
+
+  async function prepararCaptcha(){
+    var j;
+    try{ var r = await fetch('/publico/captcha'); j = r.ok ? await r.json() : null; }catch(e){ j = null; }
+    if (!j || !j.site_key) return;
+    CAP.clave = j.site_key;
+    // El script de Cloudflare es `async defer`: puede no haber llegado todavía.
+    if (window.turnstile) dibujarCaptchas();
+    else {
+      var esperas = 0;
+      var t = setInterval(function(){
+        if (window.turnstile){ clearInterval(t); dibujarCaptchas(); }
+        else if (++esperas > 40) clearInterval(t); // 10 segundos y se deja de esperar
+      }, 250);
+    }
+  }
+
   async function api(path, method, body){
     var opt = { method: method||'GET', credentials:'same-origin', headers:{} };
     if (body){ opt.headers['Content-Type']='application/json'; opt.body=JSON.stringify(body); }
@@ -366,6 +412,7 @@
     msg('msgCrear','',''); ocupado('btnCrear', true);
     try{
       await api('/auth/registro','POST',{
+        captcha: tokenCaptcha('capCrear') || undefined,
         tipo: TIPO,
         nombre: nombre,
         pais: $('cPais').value,
@@ -379,12 +426,14 @@
       // también tiene que serlo: "te mandamos un correo", nunca "ya tenías
       // cuenta". Ver services/auth_registro.ts. La contraseña se elige al
       // abrir el enlace, o sea la elige quien probó leer esa casilla.
+      reiniciarCaptcha('capCrear');
       msg('msgCrear', t('crear.revisa').replace('{email}', admin.email), 'ok');
       // Se le devuelve el texto al botón y recién ahí se lo deja quieto: si no,
       // queda diciendo «Esperá…» para siempre y parece colgado.
       ocupado('btnCrear', false);
       $('btnCrear').disabled = true;
     }catch(e){
+      reiniciarCaptcha('capCrear');
       msg('msgCrear', e.message, 'err');
       ocupado('btnCrear', false);
     }
@@ -396,13 +445,13 @@
     if (!email) return msg('msgReset', t('err.correo'), 'err');
     ocupado('btnReset', true);
     try{
-      await api('/auth/reset/solicitar','POST',{ email:email });
+      await api('/auth/reset/solicitar','POST',{ email:email, captcha: tokenCaptcha('capReset') || undefined });
       // Respuesta idéntica exista o no la cuenta: decir "ese correo no está
       // registrado" convertiría este formulario en una herramienta para
       // averiguar quién usa MiFirma.
       msg('msgReset', t('reset.ok'), 'ok');
     }catch(e){ msg('msgReset', e.message, 'err'); }
-    finally{ ocupado('btnReset', false); }
+    finally{ reiniciarCaptcha('capReset'); ocupado('btnReset', false); }
   }
 
   async function guardarPassword(){
@@ -472,6 +521,7 @@
     b.addEventListener('click', function(){ elegirTipo(b.dataset.tipo); });
   });
   pintarTipo();
+  prepararCaptcha();
   if (!leerHash()) ver('vLogin');
   window.addEventListener('hashchange', function(){ if (!leerHash()) ver('vLogin'); });
 })();

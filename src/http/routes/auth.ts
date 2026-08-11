@@ -10,6 +10,7 @@ import {
 import { solicitarReset, confirmarReset } from '../../services/auth_reset';
 import { solicitarRegistro, verRegistro, confirmarRegistro } from '../../services/auth_registro';
 import { clearCookieSesion } from '../cookies_sesion';
+import { verificarCaptcha } from '../../services/captcha';
 import { HttpError } from '../errors';
 
 /**
@@ -84,8 +85,13 @@ export function registrarRutasAuth(app: FastifyInstance) {
   });
 
   // ---- Recupero ----
+  // ⚠ Con cartelito de «no soy un robot», igual que el alta: es el otro formulario
+  // público que manda un correo a la casilla de alguien. El tope por identidad —3
+  // por hora— ya impide ensañarse con UNA persona; el cartelito es contra el que
+  // recorre miles de direcciones distintas.
   app.post('/auth/reset/solicitar', async (req) => {
-    const b = z.object({ email: z.string().min(1) }).parse(req.body);
+    const b = z.object({ email: z.string().min(1), captcha: z.string().optional() }).parse(req.body);
+    await verificarCaptcha(b.captcha, req.ip);
     return solicitarReset(b.email);
   });
 
@@ -104,6 +110,11 @@ export function registrarRutasAuth(app: FastifyInstance) {
   // Tope por IP más estricto que el del resto: sin esto, pedir altas en masa es
   // gratis y cada una manda un correo a la casilla de alguien.
   const cuerpoRegistro = z.object({
+    // ⚠ Opcional para Zod, obligatorio de verdad: si el cartelito está encendido,
+    // `verificarCaptcha` rechaza el pedido sin token. Marcarlo requerido acá haría
+    // que en desarrollo, con el cartelito apagado, el alta contestara «Datos
+    // inválidos» en vez de funcionar.
+    captcha: z.string().optional(),
     nombre: z.string().min(1).max(120),
     tipo: z.enum(['empresa', 'persona']).optional(),
     pais: z.enum(['UY', 'PY', 'BR']),
@@ -122,6 +133,12 @@ export function registrarRutasAuth(app: FastifyInstance) {
     { config: { rateLimit: { max: 5, timeWindow: '1 hour' } } },
     async (req) => {
       const b = cuerpoRegistro.parse(req.body);
+      // ⚠ ANTES DE TOCAR NADA. Sin esto, cada golpe crea una identidad latente y
+      // manda un correo. El 11/8/2026 esta línea faltó en la primera pasada —el
+      // cartelito quedó sólo en el recupero— y el defecto no lo vio la pantalla,
+      // que dibujaba el cartelito igual: lo cazó un curl sin token que igual
+      // contestó `{"ok":true}`.
+      await verificarCaptcha(b.captcha, req.ip);
       return solicitarRegistro(
         {
           nombre: b.nombre,

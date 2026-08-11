@@ -3,6 +3,7 @@ import { z } from 'zod';
 import { sql } from 'kysely';
 import { db } from '../../db/pool';
 import { fijarContexto } from '../../db/contexto';
+import { claveDelSitio } from '../../services/captcha';
 
 /**
  * Endpoints públicos, sin token: los consume el sitio comercial.
@@ -170,6 +171,25 @@ export function registrarRutasPublico(app: FastifyInstance) {
       });
     }
     return { planes: [...porPlan.values()] };
+  });
+
+  /**
+   * La clave PÚBLICA del cartelito de «no soy un robot», o null si está apagado.
+   *
+   * Es pública por diseño —va escrita en el HTML de cualquier sitio que use
+   * Turnstile— y no sirve para nada sin el secreto, que no sale de acá jamás.
+   *
+   * Existe para que la pantalla no tenga que adivinar si el cartelito está
+   * encendido: si viene null, no lo dibuja. Y esconderlo no abre nada — quien
+   * decide es `verificarCaptcha` del lado del servidor.
+   *
+   * ⚠ Va también en `PUBLICAS` de `server.ts`. Tener la ruta no alcanza: el hook
+   * central exige sesión para todo lo que no esté en esa lista, y sin agregarla
+   * daría 401 en vez de responder. Es la tercera vez que el proyecto tropieza con
+   * lo mismo; que quede escrito acá al lado de la ruta.
+   */
+  app.get('/publico/captcha', async () => {
+    return { site_key: claveDelSitio() };
   });
 
   // Salud del servicio, para el monitoreo. No dice nada del contenido.

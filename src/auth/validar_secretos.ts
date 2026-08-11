@@ -71,6 +71,19 @@ function huellaDeLaClave(): string {
   return createHash('sha256').update(createHash('sha256').update(s).digest()).digest('hex').slice(0, 12);
 }
 
+/**
+ * ¿Esto es una instalación de verdad, o la máquina de alguien?
+ *
+ * Se mira `APP_BASE_URL`: en desarrollo apunta a localhost, y en Railway al
+ * dominio. No se usa `NODE_ENV` porque Railway no lo fija solo, y un control de
+ * seguridad que depende de una variable que nadie pone es un control apagado.
+ */
+function esInstalacionPublica(): boolean {
+  const u = (process.env.APP_BASE_URL || '').trim();
+  if (!u) return false;
+  return !/^https?:\/\/(localhost|127\.0\.0\.1|\[::1\])(:|\/|$)/i.test(u);
+}
+
 export function validarSecretos(): void {
   const errores: string[] = [
     ...evaluarSecreto('AUTH_DEV_SECRET', process.env.AUTH_DEV_SECRET, true),
@@ -78,6 +91,30 @@ export function validarSecretos(): void {
     ...evaluarSecreto('ESTUDIO_JWT_SECRET', process.env.ESTUDIO_JWT_SECRET, false),
     ...evaluarSecreto('GATEWAY_ENC_KEY', process.env.GATEWAY_ENC_KEY, false),
   ];
+
+  // ⚠ EL CARTELITO DE «NO SOY UN ROBOT» NO PUEDE FALTAR EN UNA INSTALACIÓN PÚBLICA.
+  //
+  // `services/captcha.ts` se saltea la verificación cuando no hay secreto — que es
+  // lo que hace falta en la máquina de uno, sin Cloudflare adelante. Ese salteo es
+  // exactamente la clase de cosa que en producción no se nota: el formulario sigue
+  // andando, sólo que sin guardia, y nadie se entera hasta la factura de correos.
+  //
+  // Así que acá se vuelve estructural: con `APP_BASE_URL` apuntando a un dominio,
+  // sin `TURNSTILE_SECRET` la app NO LEVANTA. Mismo criterio que el resto de este
+  // archivo — un arranque fallido y ruidoso es mejor que un cerco silencioso.
+  //
+  // Las claves de prueba de Cloudflare, que siempre dan por buena la verificación,
+  // sirven para desarrollo y las publica ella misma:
+  //   TURNSTILE_SITE_KEY=1x00000000000000000000AA
+  //   TURNSTILE_SECRET=1x0000000000000000000000000000000AA
+  if (esInstalacionPublica()) {
+    if (!process.env.TURNSTILE_SECRET?.trim()) {
+      errores.push('TURNSTILE_SECRET no está configurada, y APP_BASE_URL no es localhost.');
+    }
+    if (!process.env.TURNSTILE_SITE_KEY?.trim()) {
+      errores.push('TURNSTILE_SITE_KEY no está configurada, y APP_BASE_URL no es localhost.');
+    }
+  }
   if (errores.length > 0) {
     console.error('[seguridad] No se puede arrancar: configuración de secretos insegura.');
     for (const e of errores) console.error(`  - ${e}`);
