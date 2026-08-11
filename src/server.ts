@@ -46,11 +46,51 @@ function avisarAuthPorHeader(req: FastifyRequest, realm: string, path: string): 
 export function construirServidor(): FastifyInstance {
   const app = Fastify({ logger: true, bodyLimit: 5 * 1024 * 1024, trustProxy: true }); // 5 MB: margen para subidas de imágenes en base64 (banners, fotos)
 
+  // ⚠⚠ LA IP REAL DEL CLIENTE — y por qué se arregla acá arriba y no en cada llamador.
+  //
+  // `trustProxy: true` (arriba) hace que `req.ip` salga del PRIMER valor de la
+  // cabecera `X-Forwarded-For`, que la manda el cliente. Medido el 11/8/2026 con
+  // Fastify 5: con `X-Forwarded-For: 9.9.9.9`, `req.ip` vale `9.9.9.9`. O sea que
+  // todo tope por IP era decorativo —cada pedido estrenaba cubeta cambiando un
+  // número— y la IP que queda escrita en el expediente (`evidencia.ip`) la elegía
+  // quien firma. En un producto de firma, esa columna es prueba.
+  //
+  // Cloudflare REESCRIBE `CF-Connecting-IP` en cada pedido, pise lo que pise el
+  // cliente. Así que acá se pisa la XFF con ella antes de que nadie lea `req.ip`;
+  // y si no viene, se borra la XFF y `req.ip` cae a la IP del socket.
+  //
+  // ⚠ Esto vale mientras TODO el tráfico entre por Cloudflare. Hoy vale porque el
+  // 9/8 se borró el dominio público de Railway. Si algún día vuelve a existir un
+  // camino directo al origen, esta cabecera se vuelve falsificable de nuevo.
+  //
+  // ⚠ El hook va PRIMERO a propósito: los hooks corren en el orden en que se dan
+  // de alta, y el del rate-limit lo agrega su plugin al cargar, o sea después.
+  //
+  // ⚠ Y se corrige acá y no en cada llamador también a propósito: así `req.ip`
+  // queda bien en los 22 lugares que lo usan —incluidos los ocho del expediente
+  // de firma— sin tocar un solo archivo del dominio de firma, que está sellado.
+  //
+  // ⚠ Se toca SÓLO `x-forwarded-for`. `x-forwarded-proto` no se toca: de ahí sale
+  // `req.protocol`, y con él el flag `Secure` de las cookies de sesión.
+  app.addHook('onRequest', async (req) => {
+    const cf = req.headers['cf-connecting-ip'];
+    if (typeof cf === 'string' && cf.trim()) req.headers['x-forwarded-for'] = cf.trim();
+    else delete req.headers['x-forwarded-for'];
+  });
+
   // Rate-limit por IP: defensa en profundidad contra fuerza bruta y abuso. Dos cubetas por
   // IP — una estricta para autenticación/alta, otra holgada para el uso normal de la app
   // (que hace muchas llamadas). Store en memoria: con varias instancias el límite es por
-  // instancia, suficiente para el MVP. trustProxy (arriba) hace que req.ip sea la IP real
-  // del cliente detrás del proxy de Railway, no la del proxy.
+  // instancia, suficiente para el MVP. La IP con la que cuenta es la que deja el hook de
+  // arriba, no la que manda el cliente.
+  //
+  // ⚠⚠ Y LAS RUTAS SE DECLARAN ADENTRO DE `app.after` (al final de esta función). Este
+  // `register` NO carga el plugin en el acto: lo encola. Una ruta declarada antes de que
+  // cargue no recibe el tope — ni el global de acá, ni el suyo propio de `config.rateLimit`.
+  // Así estuvo desde que se escribió. Medido el 11/8/2026 contra el servidor: siete pedidos
+  // seguidos a `/auth/registro` (tope 5/hora) pasaron los siete, y ninguna respuesta trajo
+  // cabeceras `x-ratelimit-*`. Si alguna vez estas trece líneas salen del `after`, el tope
+  // vuelve a desaparecer en silencio y nada lo avisa.
   const PREFIJOS_AUTH = ['/auth/', '/enrolar', '/operador/login', '/estudio/login', '/estudio/registro', '/estudio/reset', '/oferente/login', '/oferente/registro', '/oferente/reset'];
   const esAuth = (url: string) => {
     const path = (url || '').split('?')[0];
@@ -61,7 +101,15 @@ export function construirServidor(): FastifyInstance {
     timeWindow: '1 minute',
     max: (req: any) => (esAuth(req.url) ? 20 : 600),
     keyGenerator: (req: any) => (req.ip || 'sin-ip') + '|' + (esAuth(req.url) ? 'auth' : 'gen'),
-    errorResponseBuilder: () => ({ error: 'Demasiadas solicitudes. Esperá un momento y reintentá.' }),
+    // ⚠ Un `HttpError`, NO un objeto pelado. El plugin LANZA lo que devuelve esta función
+    // (`@fastify/rate-limit`, index.js:375), así que cae en `setErrorHandler`. Un objeto sin
+    // `statusCode` se lee como 500 y sale tapado con «ocurrió un error en el servidor» —
+    // medido el 11/8/2026, el primer día que el tope frenó algo. Nunca se había ejecutado:
+    // el plugin no estaba enganchado a ninguna ruta, así que esta línea era letra muerta
+    // desde que se escribió. Con `HttpError` sale 429 y con el texto de acá, que es apto
+    // para el usuario.
+    errorResponseBuilder: () =>
+      new HttpError(429, 'Demasiadas solicitudes. Esperá un momento y reintentá.'),
   });
 
   // Cookies de sesión httpOnly (Fase A migración a cookies; ver docs/plan-auth-httponly-cookies.md).
@@ -558,19 +606,26 @@ export function construirServidor(): FastifyInstance {
     return payload;
   });
 
-  registrarRutasAuth(app);
-  registrarRutasChat(app);
-  registrarRutasUsuarios(app);
-  registrarRutasRoles(app);
-  registrarRutasCarpetas(app);
-  registrarRutasOperador(app);
-  registrarRutasPublico(app);
-  registrarRutasPagosWebhook(app);
-  registrarRutasAyuda(app);
-  registrarRutasDocumentos(app);
-  registrarRutasRepositorio(app);
-  registrarRutasCircuitos(app);
-  registrarRutasFirma(app);
+  // ⚠⚠ ADENTRO DE `app.after`, Y NO SUELTAS. Ver la nota larga en el `register` del
+  // rate-limit: `app.register` encola el plugin, no lo carga; una ruta declarada antes de
+  // que cargue queda SIN tope, sin que nada lo avise. `app.after` es exactamente «cuando
+  // los plugins encolados ya cargaron». Comprobado el 11/8/2026: con las rutas sueltas
+  // pasan 25 de 25 pedidos contra un tope de 20/minuto; adentro del `after`, 20 y 5 frenados.
+  app.after(() => {
+    registrarRutasAuth(app);
+    registrarRutasChat(app);
+    registrarRutasUsuarios(app);
+    registrarRutasRoles(app);
+    registrarRutasCarpetas(app);
+    registrarRutasOperador(app);
+    registrarRutasPublico(app);
+    registrarRutasPagosWebhook(app);
+    registrarRutasAyuda(app);
+    registrarRutasDocumentos(app);
+    registrarRutasRepositorio(app);
+    registrarRutasCircuitos(app);
+    registrarRutasFirma(app);
+  });
 
   /**
    * ¿Este error es "no llegué a la base", o es un error de verdad?
