@@ -1,6 +1,7 @@
 import { randomBytes } from 'node:crypto';
 import { mkdir, readFile, writeFile, unlink } from 'node:fs/promises';
 import { dirname, join, resolve } from 'node:path';
+import { HttpError } from '../http/errors';
 
 /**
  * Dónde viven los bytes de los documentos.
@@ -32,6 +33,12 @@ import { dirname, join, resolve } from 'node:path';
 export interface Almacen {
   /** Escribe el contenido bajo `clave`. Si ya existe, lo pisa. */
   guardar(clave: string, contenido: Buffer): Promise<void>;
+  /**
+   * Devuelve los bytes.
+   *
+   * ⚠ Distingue DOS fallas que no son la misma (deuda 16): «el archivo no está
+   * en este almacén» y «está pero no lo pude leer». Ver `noEsta()`.
+   */
   leer(clave: string): Promise<Buffer>;
   /** Best-effort: se usa para limpiar cuando la transacción falla después de escribir. */
   borrar(clave: string): Promise<void>;
@@ -42,6 +49,49 @@ export interface Almacen {
 /** 32 bytes aleatorios en base64url. Sin estructura, sin fecha, sin nombre. */
 export function nuevaClave(): string {
   return randomBytes(32).toString('base64url');
+}
+
+/**
+ * ⚠⚠ «NO ESTÁ» Y «NO PUDE LEERLO» NO SON LO MISMO — deuda 16.
+ *
+ * Hasta hoy los dos casos subían como un error crudo de Node y salían por la
+ * misma puerta: «Ocurrió un error en el servidor». La consecuencia real, medida
+ * el 10/8: el visor mostraba una hoja en blanco y **no había forma de saber si
+ * el documento estaba roto, si el disco había fallado, o si simplemente los
+ * bytes vivían en otro almacén** — que era el caso, y es la topología conocida
+ * de «una base, dos almacenes» (§2 del estado). Se perdieron dos diagnósticos
+ * ahí.
+ *
+ * Ahora se separan, y cada uno dice lo suyo:
+ *
+ *  · **No está (`ENOENT`)** → 404. La base tiene la fila y el almacén no tiene
+ *    los bytes. En desarrollo, casi siempre es un documento que firmó el otro
+ *    entorno; en producción sería un archivo perdido, que es grave y hay que
+ *    poder verlo como lo que es. El mensaje nombra la REGIÓN del almacén, que
+ *    es el dato que resuelve la duda en un segundo.
+ *  · **Cualquier otra cosa** (permisos, disco, red) → 503. El archivo puede
+ *    estar perfecto; lo que falló es llegar a él, y eso se reintenta.
+ *
+ * ⚠ Se traduce ACÁ y no en cada llamador: son doce lugares los que leen del
+ * almacén —incluidos los del dominio de firma, que no se tocan— y un error
+ * traducido en un solo punto llega bien a todos. Es el mismo criterio con el
+ * que se arregló `req.ip` en `server.ts`.
+ */
+function traducirFalla(e: unknown, region: string): never {
+  const codigo = (e as { code?: string } | null)?.code;
+  if (codigo === 'ENOENT') {
+    throw new HttpError(
+      404,
+      `El archivo no está en el almacén «${region}». La ficha del documento existe, ` +
+      'pero sus bytes no están acá — puede ser un documento generado por otro entorno.',
+    );
+  }
+  console.error('[almacen] no se pudo leer del almacén', region, '-', e);
+  throw new HttpError(
+    503,
+    'No se pudo leer el archivo del almacenamiento. El documento no se perdió: ' +
+    'volvé a intentarlo en un momento.',
+  );
 }
 
 /**
@@ -72,7 +122,14 @@ class AlmacenLocal implements Almacen {
   }
 
   async leer(clave: string): Promise<Buffer> {
-    return readFile(this.ruta(clave));
+    try {
+      return await readFile(this.ruta(clave));
+    } catch (e) {
+      // ⚠ El `await` de arriba no es decorativo: sin él la promesa se devuelve
+      // sin pasar por este `catch` y el rechazo sale crudo, que es exactamente
+      // lo que esta deuda vino a arreglar.
+      return traducirFalla(e, this.region);
+    }
   }
 
   async borrar(clave: string): Promise<void> {

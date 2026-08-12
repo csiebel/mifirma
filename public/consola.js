@@ -256,6 +256,65 @@
   }
 
   /**
+   * Un resultado que se SUMA a los anteriores en vez de pisarlos — deuda 33.
+   *
+   * ⚠ POR QUÉ NO ALCANZA CON `msg`. `msg` reemplaza, y para un formulario eso
+   * está bien: hay un error a la vez y el nuevo manda. Pero subir documentos es
+   * una acción que se REPITE, y ahí reemplazar destruye información: se suben
+   * dos archivos uno tras otro y el resultado del primero desaparece sin que
+   * nadie lo haya leído. Visto el 10/8 con dos «Decla CXINE» idénticos: quedó
+   * la duda de si el primero había entrado, y la única forma de saberlo era
+   * buscarlo en la lista.
+   *
+   * Cada resultado nombra su archivo —«Contrato.pdf: subido»— porque un
+   * «subido» suelto no dice cuál, que es la mitad del problema.
+   *
+   * ⚠ Con tope de 5. Sin tope, una tanda de treinta archivos empuja la tabla
+   * fuera de la pantalla y el remedio es peor: lo que importa es lo último y
+   * que nada se haya perdido en silencio.
+   */
+  var TOPE_RESULTADOS = 5;
+  function msgSuma(id, texto, clase) {
+    var el = $(id);
+    if (!el || !texto) return;
+    quitarProgreso(el);
+    var linea = document.createElement('div');
+    linea.className = 'msg ' + clase;
+    linea.textContent = texto;
+    el.appendChild(linea);
+    // El tope cuenta sólo resultados; el renglón de progreso ya se fue arriba.
+    while (el.children.length > TOPE_RESULTADOS) el.removeChild(el.firstChild);
+    try { linea.scrollIntoView({ block: 'nearest', behavior: 'smooth' }); } catch (e) {}
+  }
+
+  /**
+   * El renglón de «Subiendo 3 de 10…»: estado pasajero, no resultado.
+   *
+   * ⚠ Va aparte de `msgSuma` porque es lo que rompía la acumulación: escribirlo
+   * con `msg` limpiaba el contenedor entero, así que la primera línea de
+   * progreso de una tanda nueva se llevaba puestos los resultados de la
+   * anterior — la deuda 33 otra vez, por la puerta de al lado. Este ocupa su
+   * propio nodo, se reemplaza a sí mismo, y desaparece cuando llega el
+   * resultado.
+   */
+  function quitarProgreso(el) {
+    var p = el.querySelector('.msg-progreso');
+    if (p) el.removeChild(p);
+  }
+
+  function msgProgreso(id, texto) {
+    var el = $(id);
+    if (!el) return;
+    var p = el.querySelector('.msg-progreso');
+    if (!p) {
+      p = document.createElement('div');
+      p.className = 'msg msg-progreso';
+      el.appendChild(p);
+    }
+    p.textContent = texto;
+  }
+
+  /**
    * Baja un archivo y, si el servidor dice que no, lo DICE en la consola.
    *
    * ⚠ Con `window.open` el error del servidor se abre en una pestaña nueva como
@@ -479,7 +538,7 @@
   }
   window.cambiarAlcance = cambiarAlcance;
 
-  async function cargarDocumentos() {
+  async function cargarDocumentos(conservarMensajes) {
     var carpetaId = CARPETA && CARPETA.id;
     // Sin carpeta y sin vista no hay nada que pedir: es el estado de arranque
     // antes de que llegue el árbol.
@@ -490,7 +549,13 @@
     var cab = $('subcarpetas') && $('subcarpetas').closest('label');
     if (cab) cab.style.display = carpetaId ? '' : 'none';
     pintarVistas();
-    msg('msgDocs', '', '');
+    // ⚠ La limpieza es para cuando CAMBIA lo que se está mirando: un «subido»
+    // de otra carpeta abajo de esta lista confunde. Las subidas piden conservar
+    // (deuda 33): recargan la lista EN EL LUGAR y su resultado se suma al de la
+    // subida anterior. Limpiar acá incondicionalmente era, medido el 12/8, lo
+    // que hacía que el renglón de la segunda subida tapara al de la primera:
+    // cada subida recarga, y la recarga barría lo que la subida anterior dejó.
+    if (!conservarMensajes) msg('msgDocs', '', '');
     $('tDocumentos').innerHTML = '<tr><td colspan="5" class="vacio">Un momento…</td></tr>';
     try {
       var j = await api('/documentos?' +
@@ -782,6 +847,8 @@
    * librería de render: la del navegador ya está, está probada y es la misma que
    * el firmante va a usar para leer lo que firma.
    */
+  var urlBlobVisor = null; // el blob del documento abierto; se libera al abrir el siguiente
+
   function abrirVisor(instanciaId, titulo) {
     var url = '/documentos/' + instanciaId + '/archivo';
     $('modal').innerHTML =
@@ -811,7 +878,7 @@
       // El error de la descarga va acá y no en la lista de atrás, que este modal
       // tapa. Vacío no ocupa alto: el marco de abajo sigue quedándose con todo.
       '<div id="msgVisor" style="padding:0 14px"></div>' +
-      '<iframe src="' + esc(url) + '" title="' + esc(titulo || 'Documento') + '"></iframe>' +
+      '<iframe title="' + esc(titulo || 'Documento') + '"></iframe>' +
       '</div></div>';
 
     $('fondo').addEventListener('mousedown', function (e) { if (e.target.id === 'fondo') cerrarModal(); });
@@ -820,6 +887,38 @@
     });
     $('mCerrar').addEventListener('click', cerrarModal);
     $('mCerrar').focus();
+
+    // ⚠ El PDF entra por fetch, NO poniendo la dirección en el `src` del iframe.
+    //
+    // Cuando los bytes no están (deuda 16) la respuesta es un JSON cuyo texto
+    // está escrito para leerse — «el archivo no está en el almacén “local”…» —
+    // pero al iframe eso no le sirve: espera un PDF, le llega otra cosa y el
+    // navegador dibuja un ícono roto (medido el 12/8 en Chrome). La hoja en
+    // blanco de siempre con otro disfraz, y el mensaje que esa deuda vino a dar
+    // quedaba sin leer. Pedido con fetch, el error se muestra en `msgVisor` y el
+    // PDF se le pasa al iframe como blob. Sigue siendo UN pedido al servidor:
+    // el expediente registra una sola apertura, igual que antes.
+    var marco = $('modal').querySelector('iframe');
+    conBarra(fetch(url, { credentials: 'same-origin' })).then(async function (r) {
+      // Si mientras tanto se cerró el modal (o se abrió otro documento), este
+      // iframe ya no está en la página y no hay nada que pintar.
+      if (!marco || !marco.isConnected) return;
+      if (!r.ok) {
+        var txt = await r.text();
+        var d;
+        try { d = JSON.parse(txt); } catch (e) { d = null; }
+        msg('msgVisor', (d && d.error) || ('No se pudo abrir el documento (HTTP ' + r.status + ').'), 'err');
+        return;
+      }
+      // Un blob por visor: se libera el anterior para no acumular memoria si
+      // se abren muchos documentos seguidos.
+      if (urlBlobVisor) { try { URL.revokeObjectURL(urlBlobVisor); } catch (e) {} }
+      urlBlobVisor = URL.createObjectURL(await r.blob());
+      marco.src = urlBlobVisor;
+    }).catch(function () {
+      if (!marco || !marco.isConnected) return;
+      msg('msgVisor', 'No se pudo abrir el documento. Revisá la conexión y reintentá.', 'err');
+    });
   }
 
   /**
@@ -882,10 +981,18 @@
       try {
         var data = await subirUno(f, destino, $('mTitulo').value.trim());
         cerrarModal();
-        await cargarDocumentos();
-        if (data.duplicado) {
-          msg('msgDocs', 'Ese archivo ya estaba subido: se reusó el mismo contenido.', 'ok');
-        }
+        await cargarDocumentos(true); // conservar los renglones de subidas anteriores
+        // ⚠ SIEMPRE se informa, y con el nombre del archivo — deuda 33.
+        //
+        // Antes sólo hablaba el caso duplicado: una subida normal no decía
+        // nada, y la única confirmación era encontrarlo a ojo en la lista. Con
+        // dos archivos seguidos eso era peor todavía, porque el mensaje del
+        // duplicado tapaba al del anterior. Ahora cada subida deja su renglón.
+        msgSuma('msgDocs',
+          data.duplicado
+            ? '«' + f.name + '»: ese archivo ya estaba subido, se reusó el mismo contenido.'
+            : '«' + f.name + '»: subido.',
+          'ok');
       } catch (e) {
         msg('msgModal', e.message, 'err');
         listoBtn();
@@ -952,7 +1059,7 @@
     var fallidos = [];
     var duplicados = 0;
     for (var i = 0; i < archivos.length; i++) {
-      msg('msgDocs', 'Subiendo ' + (i + 1) + ' de ' + archivos.length + ': ' + archivos[i].name + '…', '');
+      msgProgreso('msgDocs', 'Subiendo ' + (i + 1) + ' de ' + archivos.length + ': ' + archivos[i].name + '…');
       try {
         var d = await subirUno(archivos[i], carpetaId, '');
         if (d.duplicado) duplicados++;
@@ -960,7 +1067,7 @@
         fallidos.push(archivos[i].name + ': ' + e.message);
       }
     }
-    await cargarDocumentos();
+    await cargarDocumentos(true); // conservar los renglones de tandas anteriores
 
     var partes = [];
     var ok = archivos.length - fallidos.length;
@@ -968,7 +1075,9 @@
     if (duplicados) partes.push(duplicados + ' ya estaba(n) y se reusó el contenido');
     if (noPdf.length) partes.push(noPdf.length + ' archivo(s) que no son PDF se ignoraron');
     if (fallidos.length) partes.push('falló: ' + fallidos.join(' · '));
-    msg('msgDocs', partes.join('. ') + '.', fallidos.length ? 'err' : 'ok');
+    // El resumen se SUMA a los de las tandas anteriores; `msgSuma` se lleva
+    // puesto el renglón de progreso al entrar — deuda 33.
+    msgSuma('msgDocs', partes.join('. ') + '.', fallidos.length ? 'err' : 'ok');
   }
 
   /**

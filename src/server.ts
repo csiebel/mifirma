@@ -163,8 +163,16 @@ export function construirServidor(): FastifyInstance {
         // cartel, Safari en blanco y callado. Se descubrió recién al día
         // siguiente, probando otra cosa. Una directiva explícita reemplaza al
         // fallback entero: hay que volver a decir lo que antes se heredaba.
+        //
+        // ⚠ `blob:` en `frame-src` es el visor (deuda 16, 12/8): la consola pide
+        // el PDF con fetch —para poder LEER el error cuando los bytes no están,
+        // en vez del ícono roto— y se lo da al iframe como blob. Un blob sólo
+        // puede crearlo un script nuestro con datos que ya tiene, así que no
+        // abre la puerta a embeber nada ajeno; `'self'` no lo cubre porque el
+        // esquema `blob:` no cuenta como el propio origen. Igual que `img-src`,
+        // que ya lo traía por las vistas previas.
         "script-src 'self' 'unsafe-inline' https://challenges.cloudflare.com; " +
-        "frame-src 'self' https://challenges.cloudflare.com; " +
+        "frame-src 'self' blob: https://challenges.cloudflare.com; " +
         "style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; " +
         "font-src 'self' https://fonts.gstatic.com data:; " +
         "img-src 'self' data: blob:; " +
