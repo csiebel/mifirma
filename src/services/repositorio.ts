@@ -193,13 +193,29 @@ export async function subirDocumento(cuentaId: string, identidadId: string, inpu
       const circuitoId = randomUUID();
       const instanciaId = randomUUID();
 
+      // ⚠ EL IDIOMA DEL CIRCUITO LO RESUELVE EL MARCO LEGAL, no la cuenta.
+      //
+      // Decidido por Claudio el 12/8 (deuda 15): «marco legal con override». El
+      // certificado de finalización sale en este idioma, y quien lo va a leer
+      // en un litigio es un juez del país cuya ley rige — un circuito de Brasil
+      // produce certificado en portugués aunque la cuenta emisora opere en
+      // español. La columna guarda el idioma YA RESUELTO y congelado, como
+      // todo lo demás del circuito: el override del emisor, el día que exista
+      // la pantalla, PISA esta columna antes del despacho y gana solo.
+      //
+      // ⚠ No usar `cuenta.idioma` acá: ése es el idioma de la INTERFAZ de la
+      // cuenta, y mezclarlos haría que una cuenta que se mira en inglés emita
+      // certificados en inglés bajo ley uruguaya.
+      const IDIOMA_DEL_MARCO: Record<string, string> = { BR: 'pt', UY: 'es', PY: 'es' };
+      const idiomaCircuito = IDIOMA_DEL_MARCO[cuenta.pais ?? ''] ?? 'es';
+
       await sql`
         insert into circuito (id, cuenta_propietaria_id, creado_por_identidad_id,
                               archivo_base_id, titulo, modo, estado,
                               pais_marco, nivel_firma, idioma)
         values (${circuitoId}::uuid, ${cuentaId}::uuid, ${identidadId}::uuid,
                 ${archivoId}::uuid, ${titulo}, 'serie', 'borrador',
-                ${cuenta.pais}, 'simple', ${cuenta.idioma ?? 'es'})
+                ${cuenta.pais}, 'simple', ${idiomaCircuito})
       `.execute(trx);
 
       // Serie y paralelo son una sola instancia; copias son N. Un documento

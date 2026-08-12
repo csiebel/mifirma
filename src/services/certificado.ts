@@ -51,7 +51,15 @@ import { dibujar, type DatosCertificado } from './certificado_pdf';
 // v2 (9/8/2026): «Aviso enviado» pasó a «Aviso aceptado por el servidor de
 // correo» —el relay acepta y después no entrega— y se rotularon los ocho tipos
 // de evento que salían en código crudo.
-const VERSION_PLANTILLA = 2;
+//
+// v3 (12/8/2026, deuda 15): el certificado sale en el idioma del circuito —el
+// del marco legal, con override del emisor cuando exista la pantalla—. Los
+// rótulos de los eventos dejan de ser una copia local en castellano: se
+// resuelven acá desde `tipo_evento`, que está en tres idiomas desde la 020 y
+// es el catálogo que mantiene el operador. En castellano también cambia la
+// presentación de dos valores que salían en código crudo: el estado del
+// circuito («Completo») y el nivel de garantía.
+const VERSION_PLANTILLA = 3;
 
 // ---------------------------------------------------------------------------
 // Los datos
@@ -68,6 +76,7 @@ async function reunir(trx: any, instanciaId: string): Promise<DatosCertificado> 
   const c = await sql<{
     circuito_id: string; numero: number; instancias: string; titulo: string;
     modo: string; nivel_firma: string; pais: string | null; emisor: string;
+    idioma: string | null;
     creado_en: Date; enviado_en: Date | null; cerrado_en: Date | null; estado: string;
     sha256_base: Buffer; sha256_firmado: Buffer | null; paginas: number | null;
     bytes: string | null; clave_firmado: string | null;
@@ -75,7 +84,7 @@ async function reunir(trx: any, instanciaId: string): Promise<DatosCertificado> 
   }>`
     select c.id as circuito_id, i.numero,
            (select count(*) from instancia x where x.circuito_id = c.id)::text as instancias,
-           c.titulo, c.modo, c.nivel_firma, c.pais_marco as pais,
+           c.titulo, c.modo, c.nivel_firma, c.pais_marco as pais, c.idioma,
            cu.nombre_mostrado as emisor, c.creado_en, c.enviado_en, c.cerrado_en, c.estado,
            ab.sha256 as sha256_base, af.sha256 as sha256_firmado,
            coalesce(af.paginas, ab.paginas) as paginas,
@@ -166,9 +175,37 @@ async function reunir(trx: any, instanciaId: string): Promise<DatosCertificado> 
 
   const iso = (d: Date | null | undefined) => (d ? new Date(d).toISOString() : null);
 
+  // ── El idioma del certificado y los rótulos de los eventos.
+  //
+  // El idioma es el del circuito: lo resolvió el marco legal al crearlo, y lo
+  // pisará el emisor el día que exista la pantalla (decisión del 12/8, deuda
+  // 15). Se guarda ADENTRO de los datos del certificado, porque el certificado
+  // es inmutable: reimprimirlo en tres años tiene que dar el mismo idioma.
+  //
+  // Los rótulos salen del catálogo `tipo_evento`, que está en tres idiomas
+  // desde la 020 y es lo que el operador ve y mantiene. Antes el dibujo tenía
+  // una copia local sólo en castellano — «por eso no puede salir en portugués»,
+  // decía su propio comentario. La copia queda como red para reimprimir
+  // certificados viejos; la fuente es ésta.
+  const idioma = f.idioma === 'pt' || f.idioma === 'en' ? f.idioma : 'es';
+  const cat = await sql<{ codigo: string; descripcion_i18n: any }>`
+    select codigo, descripcion_i18n from tipo_evento
+  `.execute(trx);
+  const rotulos: Record<string, string> = {};
+  for (const t of cat.rows) {
+    const d = typeof t.descripcion_i18n === 'string'
+      ? JSON.parse(t.descripcion_i18n) : t.descripcion_i18n;
+    // El es es el idioma nativo del catálogo: si a un código le falta la
+    // traducción, mejor su castellano que el código crudo — la herida del 9/8.
+    const r = d?.[idioma] ?? d?.es;
+    if (typeof r === 'string' && r) rotulos[t.codigo] = r;
+  }
+
   return {
     version_plantilla: VERSION_PLANTILLA,
     emitido_en: new Date().toISOString(),
+    idioma,
+    rotulos,
     circuito: {
       id: f.circuito_id, instancia_id: instanciaId, numero: f.numero,
       instancias: Number(f.instancias), titulo: f.titulo, modo: f.modo,

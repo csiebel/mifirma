@@ -155,3 +155,82 @@ test('el certificado feo GRITA lo que salió mal', async (t) => {
   assert.ok(/cambió lo que muestran/.test(texto), 'no dice que el contenido cambió');
   assert.ok(/cadena|evidencia/.test(texto), 'no dice nada de la cadena de evidencia');
 });
+
+/**
+ * Los idiomas del certificado (deuda 15, v3).
+ *
+ * ═══ QUÉ DECIDE ═══
+ *
+ * 1. Con `idioma: 'pt'` o `'en'` el certificado entero sale en ese idioma, con
+ *    los rótulos de los eventos tomados de `rotulos` (lo que `certificado.ts`
+ *    resuelve desde el catálogo `tipo_evento`).
+ * 2. EL CONTROL: sin `idioma` —que es exactamente la forma de los datos
+ *    guardados de todo certificado emitido antes de la v3— sale en castellano,
+ *    con la red local de rótulos. Si este caso falla, una reimpresión de un
+ *    certificado viejo cambiaría de idioma, y un artefacto inmutable que dice
+ *    otra cosa al reimprimirlo no es inmutable.
+ * 3. En inglés la fecha lleva el MES EN LETRAS: «03/04/2026» es 3 de abril en
+ *    español y 4 de marzo en inglés, y esa ambigüedad en un certificado es
+ *    inaceptable (multiidioma-y-textos.md §5).
+ */
+const ROTULOS_PT: Record<string, string> = {
+  'notificacion.enviada': 'Notificação enviada',
+  'documento.abierto': 'O documento foi aberto',
+  'documento.visto': 'O documento foi percorrido por completo',
+  'identidad.probada': 'Identidade comprovada',
+  'consentimiento.dado': 'Consentiu em assinar',
+  'firma.aplicada': 'Assinou',
+  'firma.sellada': 'Carimbo do tempo',
+};
+
+test('en portugués: el certificado entero habla portugués', async (t) => {
+  const datos: DatosCertificado = { ...JSON.parse(JSON.stringify(BASE)), idioma: 'pt', rotulos: ROTULOS_PT };
+  const pdf = await dibujar(datos);
+  const archivo = guardar('certificado_pt.pdf', pdf);
+
+  if (sinPoppler()) return t.skip(String(sinPoppler()));
+  const texto = extraer(archivo).toLocaleLowerCase('pt');
+  for (const debe of ['Certificado de conclusão', 'O documento', 'Impressões digitais',
+                      'Signatário', 'Assinou', 'Carimbo do tempo', 'Dossiê de evidências',
+                      'Como verificar tudo isto sem a MiFirma']) {
+    assert.ok(texto.includes(debe.toLocaleLowerCase('pt')), `falta «${debe}» en el certificado pt`);
+  }
+  // Nada del marco fijo puede quedar en castellano.
+  for (const noDebe of ['certificado de finalización', 'huellas del archivo', 'expediente de evidencia']) {
+    assert.ok(!texto.includes(noDebe), `quedó castellano en el certificado pt: «${noDebe}»`);
+  }
+  // La ã y la ç sobrevivieron al saneador WinAnsi.
+  assert.ok(!texto.includes('conclus?o'), 'el saneador WinAnsi se comió la ã');
+});
+
+test('en inglés: habla inglés y la fecha lleva el mes en letras', async (t) => {
+  const datos: DatosCertificado = { ...JSON.parse(JSON.stringify(BASE)), idioma: 'en', rotulos: {} };
+  const pdf = await dibujar(datos);
+  const archivo = guardar('certificado_en.pdf', pdf);
+
+  if (sinPoppler()) return t.skip(String(sinPoppler()));
+  const texto = extraer(archivo);
+  for (const debe of ['Certificate of completion', 'File fingerprints', 'Signer',
+                      'Evidence file', 'How to verify all of this without MiFirma']) {
+    assert.ok(texto.toLowerCase().includes(debe.toLowerCase()), `falta «${debe}» en el certificado en`);
+  }
+  // La fecha de cierre del circuito es el 1/8/2026: en inglés tiene que salir
+  // «01 Aug 2026», nunca «01/08/2026», que un lector estadounidense lee enero.
+  assert.ok(texto.includes('Aug 2026'), 'la fecha en inglés no lleva el mes en letras');
+  assert.ok(!/\d{2}\/\d{2}\/\d{4}/.test(texto), 'quedó una fecha ambigua dd/mm/yyyy en el certificado en');
+});
+
+test('EL CONTROL: sin idioma —los datos de un certificado viejo— sale en castellano', async (t) => {
+  // Exactamente BASE, que no trae ni `idioma` ni `rotulos`: es la forma de los
+  // datos guardados de cualquier certificado emitido antes de la v3.
+  const pdf = await dibujar(BASE);
+  const archivo = guardar('certificado_reimpresion_vieja.pdf', pdf);
+
+  if (sinPoppler()) return t.skip(String(sinPoppler()));
+  const texto = extraer(archivo).toLocaleLowerCase('es');
+  for (const debe of ['Certificado de finalización', 'Huellas del archivo',
+                      'Expediente de evidencia', 'Sello de tiempo', 'Firmó']) {
+    assert.ok(texto.includes(debe.toLocaleLowerCase('es')),
+              `falta «${debe}» en la reimpresión de un certificado viejo`);
+  }
+});
