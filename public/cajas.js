@@ -342,7 +342,39 @@
       }
 
       function pintar() {
-        caja.querySelectorAll('.cj-caja').forEach(function (n) { n.remove(); });
+        caja.querySelectorAll('.cj-caja, .cj-espejo').forEach(function (n) { n.remove(); });
+
+        // Los ESPEJOS primero, así quedan abajo de las cajas de verdad.
+        //
+        // Un espejo es otro lugar donde el formulario repite el mismo dato
+        // (migración 059): el valor se va a dibujar ahí también, así que el
+        // emisor TIENE que verlo — si no, al firmar «aparece en lugares que yo
+        // no puse». Se dibuja punteado, sin tiradores y sin mouse: queda fijo
+        // donde el formulario lo puso, no lo decidió el emisor.
+        campos.forEach(function (c) {
+          (c.espejos || []).forEach(function (e) {
+            var hoja = caja.querySelector('.cj-hoja[data-pagina="' + e.pagina + '"]');
+            if (!hoja || !estado.viewports[e.pagina]) return;
+            var p = aPantalla(e.pagina, e);
+            var col = COLOR[deQuien(c)];
+            var el = document.createElement('div');
+            el.className = 'cj-espejo';
+            el.title = c.etiqueta + ' — el formulario repite este dato acá; se completa solo';
+            el.style.cssText =
+              'position:absolute;left:' + p.x + 'px;top:' + p.y + 'px;' +
+              'width:' + p.ancho + 'px;height:' + p.alto + 'px;' +
+              'border:1.5px dashed ' + col.borde + ';border-radius:4px;opacity:.55;' +
+              'pointer-events:none;display:grid;place-items:center;overflow:hidden;' +
+              'font-size:' + Math.round(Math.max(8, Math.min(11, p.alto * 0.5))) + 'px;' +
+              'color:' + col.borde + ';user-select:none;z-index:2';
+            var et = document.createElement('span');
+            et.style.cssText = 'padding:0 3px;white-space:nowrap;overflow:hidden;' +
+              'text-overflow:ellipsis;max-width:100%';
+            et.textContent = c.etiqueta;
+            el.appendChild(et);
+            hoja.appendChild(el);
+          });
+        });
 
         campos.forEach(function (c, i) {
           var hoja = caja.querySelector('.cj-hoja[data-pagina="' + c.pagina + '"]');

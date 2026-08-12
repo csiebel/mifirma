@@ -222,6 +222,15 @@ export function registrarRutasCircuitos(app: FastifyInstance) {
         x: z.number(), y: z.number(),
         ancho: z.number().positive(), alto: z.number().positive(),
         orden: z.number().int().optional(),
+        // Los demás lugares donde el formulario repite el dato (espejos, 059).
+        // El tope es el mismo que el check de la base: si divergieran, la
+        // pantalla ofrecería algo que la base rechaza con un 500 de Postgres en
+        // vez de una frase que se entienda.
+        espejos: z.array(z.object({
+          pagina: z.number().int().min(0).max(2000),
+          x: z.number(), y: z.number(),
+          ancho: z.number().positive(), alto: z.number().positive(),
+        })).max(30).optional().nullable(),
       })).max(200),
     }).parse(req.body);
     const { cuentaId, identidadId } = req.identidad;

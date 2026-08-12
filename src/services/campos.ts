@@ -231,6 +231,27 @@ export async function guardarValor(token: string, campoId: string, valor: string
 // El emisor, desde la consola
 // ---------------------------------------------------------------------------
 
+/**
+ * Un ESPEJO: otro lugar del documento donde el formulario repite el mismo dato.
+ *
+ * El lugar principal del campo va en sus columnas de siempre; los espejos son
+ * los recuadros ADICIONALES que trae el AcroForm del cliente —el nombre del
+ * paciente arriba de cada hoja, el número de expediente en cada página—. El
+ * valor se dibuja una vez por espejo, con la misma letra. Quedan fijos donde
+ * el formulario los puso: no se editan. Migración 059, deuda 26.
+ */
+export interface Espejo {
+  pagina: number;
+  x: number; y: number; ancho: number; alto: number;
+}
+
+/**
+ * ⚠ El mismo tope que el check `campo_espejos_con_forma` de la base (059). Si
+ * los dos números divergieran, la pantalla ofrecería algo que la base rechaza
+ * con un 500 de Postgres en vez de una frase.
+ */
+export const MAX_ESPEJOS = 30;
+
 export interface DefinicionCampo {
   codigo: string;
   etiqueta: string;
@@ -249,6 +270,8 @@ export interface DefinicionCampo {
   pagina: number;
   x: number; y: number; ancho: number; alto: number;
   orden?: number;
+  /** Los demás lugares donde se repite el dato. Sólo texto/párrafo. Migración 059. */
+  espejos?: Espejo[] | null;
 }
 
 export async function listarCampos(cuentaId: string, identidadId: string, circuitoId: string) {
@@ -403,6 +426,18 @@ export async function definirCampos(
     else if (c.posicion_firmante == null) {
       throw new HttpError(400, `Decidí a qué firmante se le pide «${c.codigo}».`);
     }
+
+    // ⚠ Espejos SÓLO para texto y párrafo, y se corrige en vez de rechazarse:
+    // en un campo de opciones cada widget del PDF es una opción distinta, no el
+    // mismo dato repetido — espejar ahí estamparía el valor elegido arriba de
+    // todas las opciones. `detectarCampos` no los ofrece para esos tipos; si
+    // llegan igual (el tipo se cambió en el editor después de adoptar), se
+    // descartan acá en silencio, que es lo que el emisor esperaría al cambiar
+    // el tipo.
+    if (c.tipo !== 'texto' && c.tipo !== 'parrafo') c.espejos = [];
+    if ((c.espejos?.length ?? 0) > MAX_ESPEJOS) {
+      throw new HttpError(400, `«${c.codigo}» repite el dato en demasiados lugares (máximo ${MAX_ESPEJOS}).`);
+    }
   }
 
   return withUsuario(cuentaId, identidadId, async (trx: any, autz: any) => {
@@ -440,7 +475,7 @@ export async function definirCampos(
       await sql`
         insert into campo (circuito_id, cuenta_propietaria_id, codigo, etiqueta_i18n,
                            tipo, opciones, completa_emisor, quien_completa, posicion_firmante,
-                           cuerpo, color, obligatorio, pagina, x, y, ancho, alto, orden)
+                           cuerpo, color, obligatorio, pagina, x, y, ancho, alto, orden, espejos)
         values (${circuitoId}::uuid, ${cuentaId}::uuid, ${c.codigo.trim()},
                 ${JSON.stringify({ es: c.etiqueta.trim() })}::jsonb,
                 ${c.tipo}, ${c.opciones ? JSON.stringify(c.opciones) : null}::jsonb,
@@ -451,7 +486,8 @@ export async function definirCampos(
                 -- cada pantalla manda su forma, la base rebota una y no la otra.
                 ${c.color ? String(c.color).toLowerCase() : null},
                 ${!!c.obligatorio},
-                ${c.pagina}, ${c.x}, ${c.y}, ${c.ancho}, ${c.alto}, ${c.orden ?? i})
+                ${c.pagina}, ${c.x}, ${c.y}, ${c.ancho}, ${c.alto}, ${c.orden ?? i},
+                ${JSON.stringify(c.espejos ?? [])}::jsonb)
       `.execute(trx);
     }
 
@@ -556,6 +592,24 @@ export function nombreDelWidget(campo: CampoNombrable): string {
   return `${campo.codigo}__mf${sufijo}`;
 }
 
+/**
+ * El `/T` del widget de un ESPEJO: el lugar i-ésimo (base 0) donde el
+ * formulario repite el dato. Migración 059.
+ *
+ * ⚠ MISMA REGLA QUE `nombreDelWidget`, Y POR EL MISMO MOTIVO: este nombre se
+ * calcula dos veces —al pre-declarar y al completar—, y si las dos formas
+ * difieren en un carácter la firma no encuentra el widget, lo AGREGA, y
+ * Acrobat vuelve a decir «modificado o dañado». Por eso vive acá al lado y en
+ * ningún otro lado.
+ *
+ * El sufijo cuelga del nombre del widget principal: si el principal es único
+ * en el documento (lo garantizan `unique (circuito_id, codigo)` más el sufijo
+ * de modo), sus espejos también lo son.
+ */
+export function nombreDelEspejo(campo: CampoNombrable, indice: number): string {
+  return `${nombreDelWidget(campo)}_e${indice + 1}`;
+}
+
 export async function prepararCampos(
   trx: any,
   instanciaId: string,
@@ -565,7 +619,7 @@ export async function prepararCampos(
   const r = await sql<any>`
     select c.id, c.codigo, c.etiqueta_i18n, c.obligatorio, c.tipo, c.completa_emisor,
            c.quien_completa, c.posicion_firmante, c.cuerpo, c.color,
-           c.pagina, c.x, c.y, c.ancho, c.alto,
+           c.pagina, c.x, c.y, c.ancho, c.alto, c.espejos,
            v.valor, v.congelado_en
       from campo c
       join instancia i on i.id = ${instanciaId}::uuid and i.circuito_id = c.circuito_id
@@ -672,6 +726,34 @@ export async function prepararCampos(
       // y por lo tanto no se puede pre-declarar. Ver `nombreDelWidget`.
       etiqueta: nombreDelWidget(f),
     });
+
+    // Los ESPEJOS: el mismo valor, una marca por cada lugar donde el formulario
+    // lo repite. La misma letra y la misma tinta que el principal; si `cuerpo`
+    // no está fijado, cada marca se ajusta a SU recuadro — un espejo más chico
+    // dibuja más chico, igual que haría el formulario original.
+    //
+    // ⚠ Van adentro del mismo `if` de valor y congelado que el principal: un
+    // campo sin valor no dibuja nada en ningún lado, y uno congelado no se
+    // redibuja — los espejos heredan las dos reglas sin código propio.
+    //
+    // Se CONGELA UNA sola vez (abajo): el valor es uno; los espejos son
+    // geometría, no valores.
+    const espejos: Espejo[] = Array.isArray(f.espejos) ? f.espejos : [];
+    for (const [iEspejo, e] of espejos.entries()) {
+      marcas.push({
+        pagina: Number(e.pagina),
+        rect: [Number(e.x), Number(e.y), Number(e.x) + Number(e.ancho), Number(e.y) + Number(e.alto)],
+        texto: dibujo,
+        modo: 'campo',
+        cuerpo: f.cuerpo == null ? undefined : Number(f.cuerpo),
+        color: colorARgb(f.color),
+        // ⚠ El nombre sale de `nombreDelEspejo`, el MISMO que usa
+        // `widgetsAPredeclarar`. Si difieren en un carácter, la firma agrega el
+        // widget en vez de completarlo y Acrobat castiga. Ver `nombreDelWidget`.
+        etiqueta: nombreDelEspejo(f, iEspejo),
+      });
+    }
+
     congelar.push({
       id: f.id,
       codigo: f.codigo,
@@ -730,7 +812,7 @@ export async function widgetsAPredeclarar(
 ): Promise<WidgetPredeclarado[]> {
   const r = await sql<any>`
     select c.codigo, c.quien_completa, c.completa_emisor, c.posicion_firmante,
-           c.pagina, c.x, c.y, c.ancho, c.alto
+           c.pagina, c.x, c.y, c.ancho, c.alto, c.espejos
       from campo c
       join instancia i on i.id = ${instanciaId}::uuid and i.circuito_id = c.circuito_id
      order by c.pagina, c.orden
@@ -739,26 +821,35 @@ export async function widgetsAPredeclarar(
   const vistos = new Set<string>();
   const salida: WidgetPredeclarado[] = [];
 
-  for (const f of r.rows) {
-    const nombre = nombreDelWidget(f);
+  const agregar = (nombre: string, pagina: number, rect: [number, number, number, number]) => {
     // `unique (circuito_id, codigo)` de la 038 hace que esto no pueda pasar. Se
     // comprueba igual porque el costo es una línea y la consecuencia sería dos
     // widgets con el mismo `/T` adentro de un documento firmado — el defecto
     // nº 2 del 4/8, con el lector mostrando el vacío.
     if (vistos.has(nombre)) {
       console.warn(`[predeclarar] dos campos quieren llamarse «${nombre}»; se pre-declara uno solo`);
-      continue;
+      return;
     }
     vistos.add(nombre);
+    salida.push({ nombre, pagina, rect });
+  };
+
+  for (const f of r.rows) {
     const x = Number(f.x), y = Number(f.y);
-    salida.push({
-      nombre,
-      pagina: f.pagina,
-      // El rectángulo propuesto. Si después el valor se dibuja en otro lado
-      // —o el firmante mueve algo— el widget se reescribe con el rectángulo
-      // nuevo, que es un cambio permitido. Variante C del laboratorio.
-      rect: [x, y, x + Number(f.ancho), y + Number(f.alto)],
-    });
+    // El rectángulo propuesto. Si después el valor se dibuja en otro lado
+    // —o el firmante mueve algo— el widget se reescribe con el rectángulo
+    // nuevo, que es un cambio permitido. Variante C del laboratorio.
+    agregar(nombreDelWidget(f), f.pagina, [x, y, x + Number(f.ancho), y + Number(f.alto)]);
+
+    // Un widget por ESPEJO, con el nombre que después va a buscar
+    // `prepararCampos`. Pre-declarar de más deja un widget vacío que no dibuja
+    // nada — costo conocido del pre-declarado, ver el encabezado.
+    const espejos: Espejo[] = Array.isArray(f.espejos) ? f.espejos : [];
+    for (const [iEspejo, e] of espejos.entries()) {
+      const ex = Number(e.x), ey = Number(e.y);
+      agregar(nombreDelEspejo(f, iEspejo), Number(e.pagina),
+              [ex, ey, ex + Number(e.ancho), ey + Number(e.alto)]);
+    }
   }
 
   return salida;
@@ -936,6 +1027,11 @@ export interface CampoDetectado {
   color: string | null;
   /** Si ese código ya está adoptado como campo del circuito. */
   ya_adoptado: boolean;
+  /**
+   * Los demás lugares donde el formulario repite este dato (el primero va en
+   * pagina/x/y/ancho/alto). Sólo texto/párrafo; vacío para el resto. 059.
+   */
+  espejos: Espejo[];
 }
 
 export async function detectarCampos(
@@ -1017,18 +1113,46 @@ export async function detectarCampos(
 
     // ⚠ El rectángulo sale del WIDGET, no del campo: un mismo campo puede tener
     // varios widgets —el mismo dato repetido en tres hojas— y cada uno tiene su
-    // lugar. Se toma el primero; los demás se ven cuando el editor de cajas
-    // exista y se puedan mover de a uno.
+    // lugar. El PRIMERO es el lugar principal; los demás, para texto y párrafo,
+    // son ESPEJOS: el valor se va a dibujar en todos (migración 059, deuda 26).
+    //
+    // ⚠ Para casilla y opción NO se ofrecen espejos: en un grupo de opciones
+    // cada widget es UNA OPCIÓN DISTINTA —los círculos de elegir una—, no el
+    // mismo dato repetido. Espejar ahí estamparía lo elegido arriba de todas.
     let pagina = 0, x = 0, y = 0, ancho = 0, alto = 0;
+    const espejos: Espejo[] = [];
     try {
-      const w = f.acroField.getWidgets()[0];
-      if (w) {
-        const r = w.getRectangle();
-        x = r.x; y = r.y; ancho = r.width; alto = r.height;
+      const ws = f.acroField.getWidgets();
+      const paginaDe = (w: any): number => {
         const ref = w.P?.();
         if (ref) {
           const idx = paginas.findIndex((pg: any) => pg.ref === ref);
-          if (idx >= 0) pagina = idx;
+          if (idx >= 0) return idx;
+        }
+        return 0;
+      };
+      const w = ws[0];
+      if (w) {
+        const r = w.getRectangle();
+        x = r.x; y = r.y; ancho = r.width; alto = r.height;
+        pagina = paginaDe(w);
+      }
+      if ((tipo === 'texto' || tipo === 'parrafo') && ws.length > 1) {
+        // ⚠ El mismo tope que el check de la base y que `definirCampos`. Un PDF
+        // hostil con quinientos widgets del mismo campo no se vuelve quinientas
+        // marcas por firma; se corta y se dice cuánto quedó afuera.
+        for (const we of ws.slice(1, 1 + MAX_ESPEJOS)) {
+          const re = we.getRectangle();
+          espejos.push({
+            pagina: paginaDe(we),
+            x: Math.round(re.x * 100) / 100,
+            y: Math.round(re.y * 100) / 100,
+            ancho: Math.round(Math.max(20, re.width) * 100) / 100,
+            alto: Math.round(Math.max(10, re.height) * 100) / 100,
+          });
+        }
+        if (ws.length - 1 > MAX_ESPEJOS) {
+          console.warn(`[detectar] «${nombre.slice(0, 60)}» repite el dato en ${ws.length - 1} lugares; se ofrecen ${MAX_ESPEJOS}`);
         }
       }
     } catch { /* sin rectángulo: queda en 0 y el editor lo acomoda */ }
@@ -1063,6 +1187,7 @@ export async function detectarCampos(
       ya_adoptado: datos.adoptados.has(nombre.slice(0, 60)),
       cuerpo: letra.cuerpo,
       color: letra.color,
+      espejos,
     });
   }
 

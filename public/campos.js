@@ -263,6 +263,12 @@
           obligatorio: c.obligatorio,
           pagina: c.pagina, x: Number(c.x), y: Number(c.y),
           ancho: Number(c.ancho), alto: Number(c.alto),
+          // ⚠ Los espejos VIAJAN por el modelo aunque esta pantalla no los
+          // edite: el guardado reemplaza el juego entero de campos, así que un
+          // dato que no se lleva de vuelta se pierde en silencio al primer
+          // «Guardar campos». Es la misma razón por la que se conservan los
+          // valores del emisor. Migración 059.
+          espejos: c.espejos || [],
           usos: Number(c.usos || 0),
           id: c.id || null,
           valor: c.valor_emisor == null ? '' : String(c.valor_emisor),
@@ -324,6 +330,9 @@
               '<b>' + esc(d.etiqueta) + '</b><br>' +
               '<span style="font-size:12px;color:var(--mut)">' + tipoNombre(d.tipo) +
               ' · hoja ' + (d.pagina + 1) +
+              (d.espejos && d.espejos.length
+                ? ' · se repite en ' + (d.espejos.length + 1) + ' lugares'
+                : '') +
               (d.valor_actual ? ' · ya dice «' + esc(d.valor_actual) + '»' : '') + '</span></td>' +
               '<td style="padding:6px 0;border-bottom:1px solid var(--line);text-align:right">' +
               '<button class="btn btn-s chico" data-adoptar="' + i + '">Agregar</button>' +
@@ -600,6 +609,9 @@
         color: d.color || null,
         obligatorio: false,
         pagina: d.pagina, x: d.x, y: d.y, ancho: d.ancho, alto: d.alto, usos: 0,
+        // Los demás lugares donde el formulario repite este dato. El valor se
+        // va a dibujar en todos; en la hoja se ven como recuadros fijos.
+        espejos: d.espejos || [],
       });
     }
 
@@ -830,6 +842,13 @@
               x: +Number(c.x).toFixed(2), y: +Number(c.y).toFixed(2),
               ancho: +Number(c.ancho).toFixed(2), alto: +Number(c.alto).toFixed(2),
               orden: i + 1,
+              espejos: (c.espejos || []).map(function (e) {
+                return {
+                  pagina: e.pagina,
+                  x: +Number(e.x).toFixed(2), y: +Number(e.y).toFixed(2),
+                  ancho: +Number(e.ancho).toFixed(2), alto: +Number(e.alto).toFixed(2),
+                };
+              }),
             };
           }),
         });
