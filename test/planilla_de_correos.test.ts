@@ -187,7 +187,12 @@ test('un .xlsx de verdad, con encabezado, hueco y basura al final', async () => 
     'Juan Díaz|juan@empresa.com',
     'María Ñandú|maria@otra.com',
   ]);
-  assert.deepEqual(r.detalleSalteadas, ['1: Nombre / Correo / Sector', '6: Total: 3']);
+  // ⚠ El encabezado YA NO figura entre las salteadas — cambió con los datos por
+  // persona: cuando la planilla tiene forma de tabla, la fila de títulos se
+  // ENTIENDE (es la que nombra las columnas), y reportar como «no pude leer
+  // esto» algo que se leyó bien hace dudar de toda la lectura. El «Total: 3»
+  // sí sigue: ésa es exactamente la basura que hay que mostrar.
+  assert.deepEqual(r.detalleSalteadas, ['6: Total: 3']);
   assert.deepEqual(r.malos, []);
 });
 

@@ -5,6 +5,7 @@ import {
   verCircuito,
   agregarFirmante,
   agregarDestinatarios,
+  agregarDestinatariosConDatos,
   quitarFirmante,
   reordenarFirmantes,
   configurarCircuito,
@@ -14,7 +15,9 @@ import {
   enlaceDeFirma,
   asegurarQuePuedePreparar,
 } from '../../services/circuito';
-import { listarCampos, definirCampos, detectarCampos, guardarValorDelEmisor } from '../../services/campos';
+import {
+  listarCampos, definirCampos, detectarCampos, guardarValorDelEmisor, mapearColumnasACampos,
+} from '../../services/campos';
 import { leerPlanilla, esPlanillaExcel } from '../../services/planilla_de_correos';
 import { HttpError } from '../errors';
 
@@ -89,9 +92,25 @@ export function registrarRutasCircuitos(app: FastifyInstance) {
    */
   app.post('/circuitos/:id/destinatarios', async (req) => {
     const { id } = z.object({ id: z.string().uuid() }).parse(req.params);
-    const b = z.object({ lista: z.string().min(1).max(20000) }).parse(req.body);
+    // Dos formas de entrada, una a la vez: la LISTA pegada de siempre, o las
+    // FILAS con datos por persona que armó la vista previa de la planilla. Las
+    // filas van estructuradas —correo, nombre, valores por código— porque a
+    // esa altura ya no hay nada que partir: lo que se ve en la tabla es lo que
+    // entra, textual.
+    const b = z.union([
+      z.object({ lista: z.string().min(1).max(20000) }),
+      z.object({
+        filas: z.array(z.object({
+          correo: z.string().min(3).max(320),
+          nombre: z.string().max(120).nullable().optional(),
+          valores: z.record(z.string(), z.string().max(2000)).default({}),
+          fila: z.coerce.number().int().min(1).optional(),
+        })).min(1).max(50),
+      }),
+    ]).parse(req.body);
     const { cuentaId, identidadId } = req.identidad;
-    return agregarDestinatarios(cuentaId, identidadId, id, b.lista);
+    if ('lista' in b) return agregarDestinatarios(cuentaId, identidadId, id, b.lista);
+    return agregarDestinatariosConDatos(cuentaId, identidadId, id, b.filas);
   });
 
   /**
@@ -116,7 +135,7 @@ export function registrarRutasCircuitos(app: FastifyInstance) {
 
     // Que el circuito sea suyo y esté en borrador se comprueba con la misma
     // función que usa agregar, y ANTES de leer un solo byte del archivo.
-    await asegurarQuePuedePreparar(cuentaId, identidadId, id);
+    const prep = await asegurarQuePuedePreparar(cuentaId, identidadId, id);
 
     const parte = await (req as any).file();
     if (!parte) throw new HttpError(400, 'No llegó ningún archivo.');
@@ -138,8 +157,9 @@ export function registrarRutasCircuitos(app: FastifyInstance) {
       throw new HttpError(400, 'El archivo es demasiado grande. Una lista de correos no llega a 2 MB.');
     }
 
+    let leida;
     try {
-      return await leerPlanilla(datos, nombre);
+      leida = await leerPlanilla(datos, nombre);
     } catch (e: any) {
       // El error de una biblioteca de planillas no le dice nada a nadie
       // («readFiles(...).then is not a function» fue uno real). Se traduce.
@@ -150,6 +170,42 @@ export function registrarRutasCircuitos(app: FastifyInstance) {
           : 'No pude leer ese archivo como texto separado por comas.',
       );
     }
+
+    // ═══ ¿Y ADEMÁS TRAE DATOS POR PERSONA? ═══
+    //
+    // Si la planilla tiene forma de tabla, el circuito es de copias y algún
+    // título coincide con un campo del emisor, la respuesta suma `datos`: las
+    // columnas mapeadas, las que no (con su porqué), y una fila por persona con
+    // sus valores POR CÓDIGO de campo. La pantalla muestra eso como vista
+    // previa; agregar sigue siendo el POST de siempre, ahora con `filas`.
+    //
+    // La tabla cruda no viaja: afuera de este cruce no significa nada, y todo
+    // lo que la pantalla necesita ya va masticado en `datos`.
+    const { tabla, ...resto } = leida;
+    if (!tabla || prep.modo !== 'copias') return resto;
+
+    const { campos } = await listarCampos(cuentaId, identidadId, id);
+    const mapa = mapearColumnasACampos(tabla.titulos, campos);
+    if (!mapa.columnas.length) return resto;
+
+    const porTitulo = new Map(mapa.columnas.map((c) => [c.titulo, c.codigo]));
+    return {
+      ...resto,
+      datos: {
+        columnas: mapa.columnas,
+        ignoradas: mapa.ignoradas,
+        filas: tabla.filas.map((f) => ({
+          fila: f.fila,
+          correo: f.correo,
+          nombre: f.nombre,
+          valores: Object.fromEntries(
+            Object.entries(f.datos)
+              .filter(([titulo]) => porTitulo.has(titulo))
+              .map(([titulo, valor]) => [porTitulo.get(titulo)!, valor]),
+          ),
+        })),
+      },
+    };
   });
 
   /**

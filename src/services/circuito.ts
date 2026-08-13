@@ -10,6 +10,7 @@ import { enviarCorreo } from './correo';
 import { avisar } from './mensajes';
 import { almacen } from '../almacenamiento/almacen';
 import { partirLista } from './lista_de_correos';
+import { juzgarValorDePlanilla, type CampoValidable } from './campos';
 import { HttpError } from '../http/errors';
 
 /**
@@ -612,6 +613,223 @@ export async function agregarDestinatarios(
     }
 
     return { ok: true, copias: hechos.length, destinatarios: hechos };
+  });
+}
+
+/** Una fila de la planilla con datos: a quién va la copia y qué valores trae. */
+export interface FilaConDatos {
+  correo: string;
+  nombre?: string | null;
+  /** Valor por CÓDIGO de campo, ya mapeado por la ruta. */
+  valores: Record<string, string>;
+  /**
+   * El número de fila COMO SE VE EN EXCEL, para que el error diga dónde ir a
+   * corregir. Sin él se numera por posición, que con encabezados y huecos no
+   * coincide con lo que la persona tiene delante.
+   */
+  fila?: number;
+}
+
+/**
+ * El envío desde planilla CON DATOS POR PERSONA — el que faltaba de la lista
+ * de venta (punto 6), sobre el camino de copias del 5/8.
+ *
+ * ═══ QUÉ AGREGA SOBRE `agregarDestinatarios` ═══
+ *
+ * Lo mismo —una copia por fila, todo o nada, tope de 50— más los VALORES de la
+ * fila puestos en los campos de ESA copia, con `origen='planilla'`, que la
+ * migración 038 dejó reservado exactamente para esto. El comentario de
+ * `guardarValorDelEmisor` lo venía anunciando: «lo que cambia por persona va a
+ * venir de la planilla y es otra cosa».
+ *
+ * ═══ LAS REGLAS, DECIDIDAS POR CLAUDIO EL 13/8 (opción B a la tarde) ═══
+ *
+ *  · **La planilla escribe TODOS los campos, también los del firmante.** El
+ *    dato del firmante queda como PRELLENADO editable: él lo puede corregir
+ *    hasta firmar (la 060 abre la escritura del emisor sólo en borrador), y el
+ *    expediente dice quién escribió qué —`origen='planilla'`, `completado_por`
+ *    el emisor— y si el firmante lo cambió. Firmar con el dato a la vista lo
+ *    cubre, como un formulario preimpreso. Uno de «cualquiera» prellenado
+ *    queda respondido por el emisor: primer escritor, la regla de siempre.
+ *  · **Todo o nada, validando ANTES.** Las cuarenta filas se juzgan completas
+ *    —correos, tipos, obligatorios— y recién después se escribe la primera.
+ *    Un lote a medias es un estado que hay que adivinar mirando la pantalla.
+ *  · **Un obligatorio DEL EMISOR vacío rechaza el lote** nombrando fila y
+ *    columna (riesgo R6: despachado así, el documento no se puede firmar).
+ *    Uno del firmante vacío NO rechaza: lo completa la persona, como siempre.
+ *
+ * ═══ POR QUÉ EL ORDEN COPIA-PRIMERO-VALORES-DESPUÉS ═══
+ *
+ * `copiaParaUno` (adentro de `sumarFirmante`) siembra en la copia nueva los
+ * valores COMUNES del emisor — los que puso a mano y valen para todos. Los de
+ * la planilla se escriben después y PISAN al común donde los dos existen: si
+ * la columna «sueldo» está en la planilla, manda la fila; si no está, queda lo
+ * que el emisor escribió para todos. Es un upsert, así que el orden no deja
+ * huecos.
+ */
+export async function agregarDestinatariosConDatos(
+  cuentaId: string,
+  identidadId: string,
+  circuitoId: string,
+  filas: FilaConDatos[],
+) {
+  if (!filas.length) throw new HttpError(400, 'La planilla no trae ninguna fila con correo.');
+  if (filas.length > MAX_FIRMANTES) {
+    throw new HttpError(400, `Un envío no puede tener más de ${MAX_FIRMANTES} copias y la planilla trae ${filas.length}.`);
+  }
+
+  // ⚠ Los correos pasan por el MISMO molino que la lista pegada (`partirLista`):
+  // mal escritos y repetidos salen con las mismas palabras de siempre, y no hay
+  // un segundo criterio de qué es un correo válido esperando a divergir.
+  const renglones = filas
+    .map((f) => (f.nombre ? `"${String(f.nombre).replace(/"/g, '')}" <${f.correo}>` : f.correo))
+    .join('\n');
+  const { personas, malos, repetidos } = partirLista(renglones);
+  if (malos.length) {
+    throw new HttpError(
+      400,
+      `Estos no parecen correos: ${malos.slice(0, 5).join(', ')}` +
+        (malos.length > 5 ? ` y ${malos.length - 5} más` : '') +
+        '. Corregilos en la planilla y volvé a subirla.',
+    );
+  }
+  if (repetidos.length) {
+    throw new HttpError(
+      400,
+      `${repetidos.join(', ')} está repetido en la planilla. Cada persona entra una sola vez; ` +
+        'si de verdad va dos veces, mandale la segunda copia en otro envío.',
+    );
+  }
+
+  return withUsuario(cuentaId, identidadId, async (trx, autz) => {
+    exigir(autz, 'circuito', 'crear', 'No tenés permiso para preparar circuitos de firma.');
+    const c = await exigirBorrador(trx, circuitoId, cuentaId);
+    if (c.modo !== 'copias') {
+      throw new HttpError(
+        400,
+        'Los datos por persona sólo tienen sentido cuando cada uno recibe su propia copia. ' +
+          'Elegí «Una copia propia para cada uno» y volvé a subir la planilla.',
+      );
+    }
+
+    // ═══ LOS CAMPOS DEL EMISOR, POR CÓDIGO ═══
+    const rc = await sql<any>`
+      select id, codigo, etiqueta_i18n, tipo, opciones, obligatorio, quien_completa
+        from campo
+       where circuito_id = ${circuitoId}::uuid
+    `.execute(trx);
+    const campos = new Map<string, { id: string } & CampoValidable & { quien_completa: string }>();
+    for (const f of rc.rows) {
+      campos.set(f.codigo, {
+        id: f.id,
+        codigo: f.codigo,
+        etiqueta: (f.etiqueta_i18n?.es ?? f.codigo) as string,
+        tipo: f.tipo,
+        opciones: Array.isArray(f.opciones) ? f.opciones : null,
+        obligatorio: !!f.obligatorio,
+        quien_completa: f.quien_completa ?? 'firmante',
+      });
+    }
+
+    // ═══ TODO EL LOTE SE JUZGA ANTES DE ESCRIBIR NADA ═══
+    //
+    // ⚠ Se juntan TODOS los problemas y se dicen de una vez (hasta cinco): con
+    // «corregí uno, subí, corregí otro» una planilla de cuarenta filas se vuelve
+    // una tarde. Es el mismo criterio del choque de repetidos de arriba.
+    // `personas[i]` y `filas[i]` van a la par: los renglones se armaron uno por
+    // fila, y los que no parecían correos o venían repetidos ya cortaron arriba.
+    if (personas.length !== filas.length) {
+      throw new HttpError(400, 'No pude aparear las filas de la planilla con sus correos. Volvé a subirla.');
+    }
+
+    const problemas: string[] = [];
+    const listas: { correo: string; nombre: string | null; puestos: { campoId: string; valor: string }[] }[] = [];
+    for (const [i, fila] of filas.entries()) {
+      const p = personas[i]!;
+      const nro = fila.fila ?? i + 1; // el número que la persona ve en Excel
+      const puestos: { campoId: string; valor: string }[] = [];
+      for (const [codigo, crudo] of Object.entries(fila.valores ?? {})) {
+        const campo = campos.get(codigo);
+        if (!campo) {
+          problemas.push(`Fila ${nro} (${p.correo}): el documento no tiene ningún campo «${codigo}»`);
+          continue;
+        }
+        // ⚠ El obligatorio sólo se exige cuando el campo es DEL EMISOR: un
+        // obligatorio del firmante con la celda vacía no es un problema de la
+        // planilla — lo va a completar la persona, que para eso es suyo.
+        const exigible = campo.quien_completa === 'emisor'
+          ? campo
+          : { ...campo, obligatorio: false };
+        const juicio = juzgarValorDePlanilla(exigible, crudo);
+        if (!juicio.ok) {
+          problemas.push(`Fila ${nro} (${p.correo}), columna «${campo.etiqueta}»: ${juicio.motivo}`);
+          continue;
+        }
+        if (juicio.valor !== '') puestos.push({ campoId: campo.id, valor: juicio.valor });
+      }
+      // ⚠ El obligatorio DECLARADO EN LA PLANILLA y vacío ya cayó arriba (lo
+      // juzga `juzgarValorDePlanilla`). Acá no se exige el que NO vino como
+      // columna: puede estar completado a mano para todos, y de los olvidados
+      // se encarga el despacho, que es donde todavía se pueden completar.
+      listas.push({ correo: p.correo, nombre: p.nombre ?? null, puestos });
+    }
+    if (problemas.length) {
+      throw new HttpError(
+        400,
+        problemas.slice(0, 5).join(' · ') +
+          (problemas.length > 5 ? ` · y ${problemas.length - 5} más` : '') +
+          '. No se agregó a nadie: corregí la planilla y volvé a subirla.',
+      );
+    }
+
+    // ═══ RECIÉN AHORA SE ESCRIBE — todo adentro de esta transacción ═══
+    let conDatos = 0;
+    for (const fila of listas) {
+      let r: { participacion_id: string | undefined };
+      try {
+        r = await sumarFirmante(trx, cuentaId, identidadId, circuitoId, c, {
+          email: fila.correo,
+          nombre: fila.nombre,
+          orden: 1, // en copias no hay turno: cada copia tiene a su única persona
+        });
+      } catch (e: any) {
+        if (e instanceof HttpError) throw new HttpError(e.statusCode, `${fila.correo}: ${e.message}`);
+        throw e;
+      }
+      if (!fila.puestos.length) continue;
+
+      const inst = await sql<{ instancia_id: string }>`
+        select instancia_id from participacion where id = ${r.participacion_id}::uuid
+      `.execute(trx);
+      const instanciaId = inst.rows[0]?.instancia_id;
+      if (!instanciaId) throw new HttpError(500, `No encontré la copia recién creada para ${fila.correo}.`);
+
+      for (const puesto of fila.puestos) {
+        // El mismo upsert que `guardarValorDelEmisor`, con el origen que dice
+        // la verdad: este valor vino de una planilla. La RLS que lo autoriza es
+        // la misma —campo del emisor, cuenta propietaria, circuito en borrador—
+        // y si esto se moviera de lugar, la base lo frena igual.
+        await sql`
+          insert into valor_campo (campo_id, instancia_id, cuenta_propietaria_id,
+                                   valor, completado_por, completado_en, origen)
+          values (${puesto.campoId}::uuid, ${instanciaId}::uuid, ${cuentaId}::uuid,
+                  ${puesto.valor}, ${identidadId}::uuid, now(), 'planilla')
+          on conflict (campo_id, instancia_id) do update
+             set valor = excluded.valor,
+                 completado_por = excluded.completado_por,
+                 completado_en = excluded.completado_en,
+                 origen = excluded.origen
+        `.execute(trx).catch((err: any) => {
+          if (/row-level security/.test(String(err?.message))) {
+            throw new HttpError(403, `${fila.correo}: ese campo ya no se puede completar.`);
+          }
+          throw err;
+        });
+      }
+      conDatos++;
+    }
+
+    return { ok: true, copias: listas.length, con_datos: conDatos };
   });
 }
 
@@ -1943,8 +2161,11 @@ export async function asegurarQuePuedePreparar(
 ) {
   return withUsuario(cuentaId, identidadId, async (trx, autz) => {
     exigir(autz, 'circuito', 'crear', 'No tenés permiso para preparar circuitos de firma.');
-    await exigirBorrador(trx, circuitoId, cuentaId);
-    return { ok: true };
+    const c = await exigirBorrador(trx, circuitoId, cuentaId);
+    // El modo viaja de vuelta porque la ruta del archivo lo necesita: los datos
+    // por persona sólo se ofrecen en copias, y preguntarlo aparte sería abrir
+    // una segunda transacción para un dato que ya está en la mano.
+    return { ok: true, modo: c.modo };
   });
 }
 

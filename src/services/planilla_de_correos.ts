@@ -64,6 +64,30 @@ export interface FilaSalteada {
   texto: string;
 }
 
+/**
+ * La planilla vista como TABLA: encabezados arriba, una persona por fila, y
+ * columnas de datos alrededor del correo — deuda «datos distintos por persona».
+ *
+ * Sólo aparece cuando la planilla realmente tiene esa forma (ver `leerTabla`).
+ * El parser NO sabe qué es un campo del documento: entrega los títulos tal
+ * cual y los datos crudos por título; el mapeo contra los campos del circuito
+ * es de la ruta, que es la que conoce el circuito.
+ */
+export interface FilaDeTabla {
+  /** El número de fila como se ve en Excel: sirve para ir a buscarla. */
+  fila: number;
+  correo: string;
+  nombre: string | null;
+  /** Valor por título de columna, tal como vino (ya como texto legible). */
+  datos: Record<string, string>;
+}
+
+export interface TablaLeida {
+  /** Los títulos de las columnas de datos, en el orden de la planilla. */
+  titulos: string[];
+  filas: FilaDeTabla[];
+}
+
 export interface PlanillaLeida {
   /** Lo que va al cuadro de texto, listo para que lo mire el emisor. */
   texto: string;
@@ -93,10 +117,46 @@ export interface PlanillaLeida {
   de_mas: number;
   /** El nombre de la hoja leída, cuando el archivo es una planilla. */
   hoja: string | null;
+  /**
+   * La misma planilla vista como tabla con datos por persona, cuando la tiene.
+   *
+   * ⚠ Es ADEMÁS del texto, no en vez de: una pantalla que no sepa de tablas
+   * sigue funcionando con `texto` como siempre.
+   */
+  tabla: TablaLeida | null;
 }
 
-/** Una fila ya en celdas, venga de donde venga. */
-type Fila = (string | null)[];
+/**
+ * Una fila ya en celdas, venga de donde venga.
+ *
+ * ⚠ `unknown` y no `string`: el lector de xlsx devuelve las celdas TIPADAS —
+ * una fecha llega como `Date`, un número como `number`— y tratarlas como texto
+ * con `String(...)` escribe «Wed Aug 13 2026 00:00:00 GMT-0300» en el
+ * documento de alguien. Ver `celdaATexto`.
+ */
+type Fila = unknown[];
+
+/**
+ * Una celda, como texto que una persona escribiría.
+ *
+ * · `Date`   → «13/08/2026». La planilla la trae como fecha de verdad y el
+ *              documento la necesita como se escribe acá: día/mes/año.
+ * · `number` → sin notación científica ni coma de miles: lo que se ve en la
+ *              celda. Los decimales quedan con punto, que es como ya se
+ *              escriben los montos en los campos.
+ * · `boolean`→ «sí» / «no», que es lo que el dibujante de casillas entiende.
+ */
+export function celdaATexto(c: unknown): string {
+  if (c == null) return '';
+  if (c instanceof Date) {
+    const dd = String(c.getDate()).padStart(2, '0');
+    const mm = String(c.getMonth() + 1).padStart(2, '0');
+    return `${dd}/${mm}/${c.getFullYear()}`;
+  }
+  if (typeof c === 'number') return Number.isFinite(c) ? String(c) : '';
+  if (typeof c === 'boolean') return c ? 'sí' : 'no';
+  return String(c).trim();
+}
 
 /**
  * Un CSV de verdad, con comillas.
@@ -149,13 +209,100 @@ export function partirCsv(texto: string): Fila[] {
  * dirección**, porque es lo único sin lo cual no se puede mandar nada.
  */
 export function filaARenglon(fila: Fila): string | null {
-  const celdas = fila.map((c) => (c == null ? '' : String(c).trim()));
+  const celdas = fila.map(celdaATexto);
   const correo = celdas.find((c) => CORREO.test(c));
   if (!correo) return null;
   const nombre = celdas.find((c) => c && c !== correo && !CORREO.test(c));
   // Las comillas van siempre que haya nombre: si trae una coma, sin comillas
   // `partirLista` lo cortaría al medio y perdería el apellido.
   return nombre ? `"${nombre.replace(/"/g, '')}" <${correo}>` : correo;
+}
+
+/**
+ * ¿La planilla tiene forma de TABLA? Encabezado arriba, personas abajo, y el
+ * correo siempre en la misma columna.
+ *
+ * ═══ POR QUÉ EXIGE TANTO ═══
+ *
+ * Los datos por persona van a parar a un documento legal, así que acá no se
+ * adivina: si la forma no es inequívoca, se devuelve null y la planilla se
+ * trata como siempre —una lista de correos— sin perder nada de lo que ya
+ * andaba. En concreto, NO hay tabla si:
+ *
+ *  · no hay una fila de títulos (sin correo) arriba de la primera persona;
+ *  · una fila trae DOS correos — no se sabe cuál manda;
+ *  · el correo cambia de columna entre filas — las columnas no significan
+ *    lo mismo en toda la planilla, y un dato leído de la columna equivocada
+ *    es un sueldo en el renglón del teléfono;
+ *  · no queda ninguna columna de datos con título.
+ *
+ * La columna del nombre se reconoce por su título («nombre», «name», «nome» y
+ * variantes). Sin ese título, el nombre queda vacío antes que adivinado: en
+ * una tabla con datos, «la primera celda que no parece correo» puede ser un
+ * monto, y saludar a alguien por «2500» es peor que no saludarlo.
+ */
+const TITULOS_DE_NOMBRE = new Set([
+  'nombre', 'nombres', 'nombre completo', 'nombre y apellido', 'name', 'full name', 'nome',
+]);
+
+function normalizarTitulo(s: string): string {
+  return s.toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '').trim();
+}
+
+function leerTabla(filas: Fila[]): { tabla: TablaLeida; filaTitulos: number } | null {
+  const textos = filas.map((f) => f.map(celdaATexto));
+  const esCorreo = (c: string) => CORREO.test(c);
+
+  const iPrimera = textos.findIndex((f) => f.some(esCorreo));
+  if (iPrimera <= 0) return null; // sin personas, o arrancan en la fila 1: no hay lugar para títulos
+
+  // El encabezado es la última fila no vacía antes de la primera persona.
+  let iTitulos = -1;
+  for (let i = iPrimera - 1; i >= 0; i--) {
+    const f = textos[i]!;
+    if (!f.some(Boolean)) continue;
+    iTitulos = i;
+    break;
+  }
+  if (iTitulos < 0) return null;
+  const titulosFila = textos[iTitulos]!;
+
+  let correoCol = -1;
+  const personas: { i: number; f: string[] }[] = [];
+  for (let i = iTitulos + 1; i < textos.length; i++) {
+    const f = textos[i]!;
+    if (!f.some(Boolean)) continue;
+    const cols: number[] = [];
+    f.forEach((c, j) => { if (esCorreo(c)) cols.push(j); });
+    if (!cols.length) continue; // sin correo: la cuenta de salteadas la lleva `armar`
+    if (cols.length > 1) return null;
+    if (correoCol < 0) correoCol = cols[0]!;
+    else if (cols[0] !== correoCol) return null;
+    personas.push({ i, f });
+  }
+  if (correoCol < 0 || !personas.length) return null;
+
+  let nombreCol = -1;
+  const columnas: { j: number; titulo: string }[] = [];
+  titulosFila.forEach((t, j) => {
+    if (j === correoCol || !t) return;
+    if (nombreCol < 0 && TITULOS_DE_NOMBRE.has(normalizarTitulo(t))) { nombreCol = j; return; }
+    columnas.push({ j, titulo: t });
+  });
+  if (!columnas.length) return null;
+
+  return {
+    filaTitulos: iTitulos,
+    tabla: {
+      titulos: columnas.map((c) => c.titulo),
+      filas: personas.slice(0, TOPE_RENGLONES).map(({ i, f }) => ({
+        fila: i + 1,
+        correo: f[correoCol]!,
+        nombre: nombreCol >= 0 && f[nombreCol] ? f[nombreCol]! : null,
+        datos: Object.fromEntries(columnas.map((c) => [c.titulo, f[c.j] ?? ''])),
+      })),
+    },
+  };
 }
 
 /** De filas a resultado, que es lo único que cambia entre CSV y xlsx. */
@@ -166,7 +313,7 @@ function armar(filas: Fila[], hoja: string | null): PlanillaLeida {
   filas.forEach((f, i) => {
     // Una fila entera vacía no es una fila salteada: es el espacio en blanco
     // que toda planilla tiene. Contarla asustaría sin motivo.
-    if (!f.some((c) => c != null && String(c).trim() !== '')) return;
+    if (!f.some((c) => celdaATexto(c) !== '')) return;
     const r = filaARenglon(f);
     if (r) { renglones.push(r); return; }
 
@@ -175,7 +322,7 @@ function armar(filas: Fila[], hoja: string | null): PlanillaLeida {
     // encabezado y nada más— y ver el nombre de alguien que se estaba por
     // perder por un correo mal tipeado.
     const resumen = f
-      .map((c) => (c == null ? '' : String(c).trim()))
+      .map(celdaATexto)
       .filter(Boolean)
       .join(' / ');
     salteadas.push({
@@ -187,13 +334,24 @@ function armar(filas: Fila[], hoja: string | null): PlanillaLeida {
   });
 
   const de_mas = Math.max(0, renglones.length - TOPE_RENGLONES);
-  return {
+  const base: PlanillaLeida = {
     texto: renglones.slice(0, TOPE_RENGLONES).join('\n'),
     personas: Math.min(renglones.length, TOPE_RENGLONES),
     salteadas,
     de_mas,
     hoja,
+    tabla: null,
   };
+
+  // ¿Y además tiene forma de tabla con datos? Si la tiene, la fila de títulos
+  // dejó de ser una salteada: se ENTENDIÓ — reportarla igual haría dudar de
+  // una lectura que salió bien.
+  const t = leerTabla(filas);
+  if (t) {
+    base.tabla = t.tabla;
+    base.salteadas = salteadas.filter((s) => s.fila !== t.filaTitulos + 1);
+  }
+  return base;
 }
 
 /** ¿El archivo es una planilla de Excel o texto separado por comas? */

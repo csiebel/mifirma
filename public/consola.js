@@ -1485,6 +1485,13 @@
         'style="display:none">' +
         '<button class="btn btn-s" id="mSubirLista">…o subilo de un archivo</button>' +
         '</span>' +
+        // La vista previa del envío CON DATOS POR PERSONA (sólo en copias, si la
+        // planilla trae columnas que coinciden con campos del emisor). Vacía no
+        // ocupa alto. Lo que se ve acá es EXACTAMENTE lo que entra al apretar
+        // el botón: no hay edición celda por celda a propósito — se corrige en
+        // la planilla y se vuelve a subir, que es donde el dato tiene que
+        // quedar bien de todos modos.
+        '<div id="mTablaDatos" style="margin-top:10px"></div>' +
         '<p class="pista">Uno por línea, o separados por comas. Si alguno está mal escrito ' +
         'no entra ninguno y te digo cuál es, para que lo corrijas sobre el mismo texto.<br>' +
         (copias
@@ -1701,6 +1708,65 @@
       } catch (e) { msg('msgModal', e.message, 'err'); $('mAgregar').disabled = false; }
     });
 
+    // ═══ EL ENVÍO CON DATOS POR PERSONA — la tabla de vista previa ═══
+    //
+    // Cuando la planilla trae columnas que son campos del emisor, la respuesta
+    // del archivo suma `datos` y esto la muestra como tabla: una fila por
+    // persona, una columna por dato. `filasPlanilla` guarda lo que se va a
+    // mandar; mientras esté cargada, «Agregar todos» manda ESTO y no el cuadro.
+    var filasPlanilla = null;
+
+    function limpiarTablaPlanilla() {
+      filasPlanilla = null;
+      if ($('mTablaDatos')) $('mTablaDatos').innerHTML = '';
+      if ($('mPegar')) $('mPegar').textContent = 'Agregar todos';
+    }
+
+    function pintarTablaPlanilla(datos) {
+      var MUESTRA = 8;
+      var cab = '<tr><th style="text-align:left;padding:4px 8px">Fila</th>' +
+        '<th style="text-align:left;padding:4px 8px">Nombre</th>' +
+        '<th style="text-align:left;padding:4px 8px">Correo</th>' +
+        datos.columnas.map(function (c) {
+          return '<th style="text-align:left;padding:4px 8px">' + esc(c.etiqueta) + '</th>';
+        }).join('') + '</tr>';
+      var cuerpo = datos.filas.slice(0, MUESTRA).map(function (f) {
+        return '<tr>' +
+          '<td style="padding:4px 8px;color:var(--mut)">' + f.fila + '</td>' +
+          '<td style="padding:4px 8px">' + esc(f.nombre || '—') + '</td>' +
+          '<td style="padding:4px 8px">' + esc(f.correo) + '</td>' +
+          datos.columnas.map(function (c) {
+            return '<td style="padding:4px 8px">' + esc(f.valores[c.codigo] || '') + '</td>';
+          }).join('') + '</tr>';
+      }).join('');
+      // ⚠ Las columnas que van a campos DEL FIRMANTE se dicen acá, antes de
+      // agregar: quedan como sugerencia que esa persona puede corregir hasta
+      // firmar (opción B, 13/8). Que el emisor se entere DESPUÉS de que el
+      // firmante podía cambiar «su» dato sería una sorpresa en el peor momento.
+      var sugeridas = datos.columnas.filter(function (c) { return c.quien !== 'emisor'; });
+      var avisoSugeridas = sugeridas.length
+        ? '<p class="pista">' +
+          (sugeridas.length === 1
+            ? 'La columna ' + sugeridas.map(function (c) { return '«' + esc(c.etiqueta) + '»'; }).join(', ') +
+              ' queda como sugerencia: ese dato es de quien firma y lo puede corregir antes de firmar.'
+            : 'Las columnas ' + sugeridas.map(function (c) { return '«' + esc(c.etiqueta) + '»'; }).join(', ') +
+              ' quedan como sugerencia: esos datos son de quien firma y los puede corregir antes de firmar.') +
+          '</p>'
+        : '';
+      $('mTablaDatos').innerHTML =
+        '<div style="border:1px solid var(--line);border-radius:8px;overflow:auto;max-height:260px">' +
+        '<table style="border-collapse:collapse;font-size:13px;width:100%">' +
+        '<thead style="position:sticky;top:0;background:var(--panel,#fff)">' + cab + '</thead>' +
+        '<tbody>' + cuerpo + '</tbody></table></div>' +
+        avisoSugeridas +
+        (datos.filas.length > MUESTRA
+          ? '<p class="pista">Se muestran ' + MUESTRA + ' de ' + datos.filas.length +
+            ' filas; entran todas. Si algo está mal, corregí la planilla y volvé a subirla.</p>'
+          : '<p class="pista">Si algo está mal, corregí la planilla y volvé a subirla.</p>');
+      filasPlanilla = datos.filas;
+      $('mPegar').textContent = 'Agregar ' + datos.filas.length + ' con sus datos';
+    }
+
     // ═══ LA LISTA QUE VIENE DE UN ARCHIVO ═══
     //
     // El <input type=file> está escondido y lo dispara un botón: el control
@@ -1708,8 +1774,9 @@
     // nuestro y no se puede cambiar, y al lado de «Agregar todos» parecía un
     // error de la página.
     //
-    // ⚠ Lo que vuelve va al CUADRO, no a la lista de firmantes. Ver el comentario
-    // de arriba y `services/planilla_de_correos.ts`.
+    // ⚠ Lo que vuelve va al CUADRO, no a la lista de firmantes — salvo cuando
+    // trae DATOS POR PERSONA: ahí va a la tabla de arriba, que muestra también
+    // los valores, y el cuadro no se toca. Ver `services/planilla_de_correos.ts`.
     if ($('mSubirLista') && $('mArchivo')) {
       $('mSubirLista').addEventListener('click', function () { $('mArchivo').click(); });
 
@@ -1755,12 +1822,28 @@
               'tenga las direcciones' + (d.hoja ? ' en la hoja «' + d.hoja + '»' : '') + '.', 'err');
           }
 
-          // ⚠ Se AGREGA a lo que ya había escrito, no se pisa. Alguien que pegó
-          // cinco a mano y después sube el resto no tiene por qué perder los
-          // cinco, y sobrescribir sin avisar es la clase de cosa que se descubre
-          // cuando ya no está.
-          var previo = $('mLista').value.trim();
-          $('mLista').value = (previo ? previo + '\n' : '') + d.texto;
+          // Cada subida arranca de cero para la tabla: si este archivo no trae
+          // datos, la tabla de uno anterior no puede quedar mandando.
+          limpiarTablaPlanilla();
+
+          var conDatos = d.datos && d.datos.filas && d.datos.filas.length;
+          if (conDatos) {
+            // ═══ CON DATOS POR PERSONA: LA TABLA, NO EL CUADRO ═══
+            //
+            // El cuadro es editable y los datos viajan atados a cada fila: si
+            // el correo se corrigiera en el cuadro, sus datos quedarían
+            // huérfanos sin ningún error a la vista. La tabla muestra TODO lo
+            // que va a entrar —correo, nombre y valores— y se corrige en la
+            // planilla, que es donde tiene que quedar bien de todos modos.
+            pintarTablaPlanilla(d.datos);
+          } else {
+            // ⚠ Se AGREGA a lo que ya había escrito, no se pisa. Alguien que pegó
+            // cinco a mano y después sube el resto no tiene por qué perder los
+            // cinco, y sobrescribir sin avisar es la clase de cosa que se descubre
+            // cuando ya no está.
+            var previo = $('mLista').value.trim();
+            $('mLista').value = (previo ? previo + '\n' : '') + d.texto;
+          }
 
           // ═══ LO QUE SE SALTEÓ SE MUESTRA, NO SE CUENTA ═══
           //
@@ -1781,6 +1864,16 @@
           if (d.hoja) partes.push('de la hoja «' + d.hoja + '»');
           var texto = partes.join(' ') + '. ';
 
+          if (conDatos) {
+            texto += 'Con datos por persona: ' +
+              d.datos.columnas.map(function (c) { return '«' + c.etiqueta + '»'; }).join(', ') + '. ';
+            // ⚠ Lo ignorado se dice con su porqué. Una columna que desaparece en
+            // silencio es un dato que alguien cree que mandó y no llegó.
+            (d.datos.ignoradas || []).forEach(function (ig) {
+              texto += 'La columna «' + ig.titulo + '» no entra: ' + ig.motivo + '. ';
+            });
+          }
+
           var salt = d.salteadas || [];
           if (salt.length) {
             // Se muestran hasta cinco: más que eso es una planilla con otra
@@ -1797,8 +1890,12 @@
           if (d.de_mas) {
             texto += 'Y ' + d.de_mas + ' quedaron afuera por ser demasiadas. ';
           }
-          msg('msgModal', texto + 'Revisalo y apretá «Agregar todos».',
-            salt.length || d.de_mas ? 'aviso' : 'ok');
+          msg('msgModal',
+            texto + (conDatos
+              ? 'Revisá la tabla y apretá «Agregar ' + d.datos.filas.length + ' con sus datos».'
+              : 'Revisalo y apretá «Agregar todos».'),
+            salt.length || d.de_mas || (conDatos && d.datos.ignoradas && d.datos.ignoradas.length)
+              ? 'aviso' : 'ok');
         } catch (e) {
           msg('msgModal', e.message, 'err');
         } finally {
@@ -1813,9 +1910,33 @@
 
     if ($('mPegar')) {
       $('mPegar').addEventListener('click', async function () {
+        var b = $('mPegar');
+
+        // ═══ CON TABLA CARGADA, VA LA TABLA ═══ Lo que se ve es lo que entra:
+        // filas estructuradas con sus valores, todo o nada del lado del
+        // servidor. Si falla, la tabla queda a la vista para saber qué
+        // corregir en la planilla.
+        if (filasPlanilla) {
+          b.disabled = true; b.textContent = 'Agregando…';
+          try {
+            var rd = await api('/circuitos/' + circuitoId + '/destinatarios', 'POST',
+              { filas: filasPlanilla });
+            limpiarTablaPlanilla();
+            msg('msgModal',
+              rd.copias + (rd.copias === 1 ? ' copia creada' : ' copias creadas') +
+              (rd.con_datos ? ', con los datos de la planilla puestos.' : '.'),
+              'ok');
+            setTimeout(function () { abrirCircuito(circuitoId); }, 700);
+          } catch (e) {
+            msg('msgModal', e.message, 'err');
+            b.disabled = false;
+            b.textContent = 'Agregar ' + filasPlanilla.length + ' con sus datos';
+          }
+          return;
+        }
+
         var texto = $('mLista').value.trim();
         if (!texto) return msg('msgModal', 'Pegá la lista de correos primero.', 'err');
-        var b = $('mPegar');
         b.disabled = true; b.textContent = 'Agregando…';
         try {
           var r = await api('/circuitos/' + circuitoId + '/destinatarios', 'POST', { lista: texto });

@@ -534,6 +534,202 @@ export interface CamposListos {
 /** Las formas de «marcada» que pueden llegar de verdad. Ver `prepararCampos`. */
 const CASILLA_MARCADA = new Set(['sí', 'si', 'true', '1', 'x', 'yes', 'on', 'sim']);
 
+/** Y las de «sin marcar», para que una planilla pueda decir que no. */
+const CASILLA_VACIA = new Set(['no', 'false', '0', 'nao', 'não', 'off', '-']);
+
+/** Lo que hay que saber de un campo para juzgar un valor de planilla. */
+export interface CampoValidable {
+  codigo: string;
+  etiqueta: string;
+  tipo: string;
+  opciones: string[] | null;
+  obligatorio: boolean;
+}
+
+export type ValorJuzgado = { ok: true; valor: string } | { ok: false; motivo: string };
+
+/**
+ * ¿Este valor de la planilla puede ir a este campo? — envío con datos por persona.
+ *
+ * ═══ POR QUÉ VALIDA MÁS QUE LA PANTALLA ═══
+ *
+ * En la pantalla el emisor escribe UN valor, lo tiene adelante y lo corrige al
+ * toque. Una planilla son cuarenta valores que nadie va a mirar uno por uno:
+ * un «13/8» donde iba un monto termina dibujado en el contrato de alguien y se
+ * descubre cuando ya está firmado. Acá el criterio es el del lote del diseño
+ * (§5 de repositorio-campos-y-envio-masivo): **se valida todo ANTES de escribir
+ * nada**, y un valor que no se entiende rechaza el lote diciendo qué y dónde.
+ *
+ * ⚠ NO normaliza números ni fechas: guarda lo que la celda decía, que es lo
+ * que se va a dibujar. Validar es constatar que se entiende, no reescribirlo.
+ * La única excepción es `opcion`, que guarda la opción CANÓNICA del campo:
+ * «juridica» y «Jurídica» son la misma opción y el documento tiene que decirla
+ * como el emisor la definió.
+ *
+ * Devuelve el motivo SIN fila ni columna: ésos los agrega el llamador, que es
+ * quien los conoce.
+ */
+export function juzgarValorDePlanilla(campo: CampoValidable, crudo: string): ValorJuzgado {
+  const valor = String(crudo ?? '').trim();
+
+  if (!valor) {
+    return campo.obligatorio
+      ? { ok: false, motivo: 'es obligatorio y la celda está vacía' }
+      : { ok: true, valor: '' };
+  }
+
+  const malos = fueraDeWinAnsi(valor);
+  if (malos.length) {
+    return { ok: false, motivo: `trae caracteres que no se pueden dibujar: ${malos.join(' ')}` };
+  }
+
+  switch (campo.tipo) {
+    case 'numero':
+    case 'moneda': {
+      // Se acepta como lo escribe una persona: 1234 · 1.234,56 · 1,234.56 ·
+      // $ 1234. Lo que no se acepta es algo que no sea un número.
+      const pelado = valor.replace(/[\s$]/g, '').replace(/^(U\$S|USD|UYU|R\$|Gs\.?)/i, '');
+      if (!/^-?\d{1,3}(([.,]\d{3})*|\d*)([.,]\d+)?$/.test(pelado)) {
+        return { ok: false, motivo: `tiene que ser un número y dice «${valor}»` };
+      }
+      return { ok: true, valor };
+    }
+    case 'fecha': {
+      // dd/mm/aaaa (como escribe la celda y como formatea `celdaATexto`) o
+      // aaaa-mm-dd. Se constata que el día exista: 31/02 no es una fecha.
+      const m =
+        /^(\d{1,2})[/-](\d{1,2})[/-](\d{4})$/.exec(valor) ??
+        (/^(\d{4})-(\d{2})-(\d{2})$/.test(valor)
+          ? (() => {
+              const [a, mm, d] = valor.split('-');
+              return [valor, d, mm, a] as unknown as RegExpExecArray;
+            })()
+          : null);
+      if (!m) return { ok: false, motivo: `tiene que ser una fecha como 05/03/2026 y dice «${valor}»` };
+      const [d, mes, anio] = [Number(m[1]), Number(m[2]), Number(m[3])];
+      const f = new Date(anio, mes - 1, d);
+      if (f.getFullYear() !== anio || f.getMonth() !== mes - 1 || f.getDate() !== d) {
+        return { ok: false, motivo: `«${valor}» no es una fecha del calendario` };
+      }
+      return { ok: true, valor };
+    }
+    case 'casilla': {
+      const bajo = valor.toLowerCase();
+      if (CASILLA_MARCADA.has(bajo)) return { ok: true, valor };
+      if (CASILLA_VACIA.has(bajo)) return { ok: true, valor: '' };
+      return {
+        ok: false,
+        motivo: `una casilla se marca con «sí», «x» o «1» (o «no» para dejarla vacía) y dice «${valor}»`,
+      };
+    }
+    case 'opcion': {
+      const opciones = campo.opciones ?? [];
+      const aplanar = (s: string) =>
+        s.toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '').trim();
+      const elegida = opciones.find((o) => aplanar(o) === aplanar(valor));
+      if (!elegida) {
+        return { ok: false, motivo: `tiene que ser una de: ${opciones.join(', ')} — y dice «${valor}»` };
+      }
+      return { ok: true, valor: elegida };
+    }
+    case 'texto':
+    case 'parrafo':
+      return { ok: true, valor };
+    default:
+      // `etiqueta` y lo que venga después: no reciben valores por persona.
+      return { ok: false, motivo: `un campo de tipo «${campo.tipo}» no se completa desde una planilla` };
+  }
+}
+
+/** Una columna de la planilla que SÍ es un campo del documento. */
+export interface ColumnaMapeada {
+  titulo: string;
+  codigo: string;
+  etiqueta: string;
+  /**
+   * De quién es el campo. Importa para dos cosas: la pantalla avisa cuáles
+   * columnas quedan como SUGERENCIA que el firmante puede corregir, y el lote
+   * sólo exige los obligatorios que son del emisor.
+   */
+  quien: 'emisor' | 'firmante' | 'cualquiera';
+}
+/** Una que no, con el porqué — se muestra, no se descarta en silencio. */
+export interface ColumnaIgnorada { titulo: string; motivo: string; }
+
+/**
+ * ¿Qué columna de la planilla es qué campo del documento?
+ *
+ * Por NOMBRE y nada más: el título de la columna contra el código del campo y
+ * contra su etiqueta en cualquiera de los idiomas, sin mayúsculas ni tildes.
+ * «Sueldo», «sueldo» y «SUELDO» son la misma columna; adivinar por posición o
+ * por parecido es poner el monto en el renglón del teléfono.
+ *
+ * ⚠ Entran TODOS los campos, también los del firmante — opción B, decidida por
+ * Claudio el 13/8 (reemplaza al «sólo del emisor» de esa misma tarde). El dato
+ * del firmante queda PRELLENADO en su copia y él puede corregirlo hasta
+ * firmar: la migración 060 abre esa escritura sólo en borrador, y el
+ * expediente dice quién escribió qué (`origen='planilla'`). Cada columna sale
+ * con su `quien` para que la pantalla avise cuáles son sugerencias.
+ */
+export function mapearColumnasACampos(
+  titulos: string[],
+  campos: {
+    codigo: string;
+    etiqueta_i18n?: unknown;
+    etiqueta?: string;
+    tipo: string;
+    quien_completa?: string | null;
+  }[],
+): { columnas: ColumnaMapeada[]; ignoradas: ColumnaIgnorada[] } {
+  const aplanar = (s: string) =>
+    String(s ?? '').toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '').trim();
+
+  // Cada campo, con todos los nombres por los que responde.
+  const porNombre = new Map<string, (typeof campos)[number]>();
+  for (const c of campos) {
+    const nombres = new Set<string>([aplanar(c.codigo)]);
+    if (c.etiqueta) nombres.add(aplanar(c.etiqueta));
+    if (c.etiqueta_i18n && typeof c.etiqueta_i18n === 'object') {
+      for (const v of Object.values(c.etiqueta_i18n as Record<string, unknown>)) {
+        if (typeof v === 'string') nombres.add(aplanar(v));
+      }
+    }
+    // Si dos campos responden al mismo nombre, gana el primero: el orden es el
+    // de la consulta (página y orden), que es el del documento.
+    for (const n of nombres) if (n && !porNombre.has(n)) porNombre.set(n, c);
+  }
+
+  const RELLENABLES = new Set(['texto', 'parrafo', 'numero', 'fecha', 'moneda', 'casilla', 'opcion']);
+  const columnas: ColumnaMapeada[] = [];
+  const ignoradas: ColumnaIgnorada[] = [];
+  const usados = new Set<string>();
+
+  for (const titulo of titulos) {
+    const campo = porNombre.get(aplanar(titulo));
+    if (!campo) {
+      ignoradas.push({ titulo, motivo: 'no coincide con ningún campo del documento' });
+      continue;
+    }
+    if (!RELLENABLES.has(campo.tipo)) {
+      ignoradas.push({ titulo, motivo: `un campo de tipo «${campo.tipo}» no se completa desde una planilla` });
+      continue;
+    }
+    if (usados.has(campo.codigo)) {
+      ignoradas.push({ titulo, motivo: `repite una columna que ya apunta a «${campo.codigo}»` });
+      continue;
+    }
+    usados.add(campo.codigo);
+    const quien = (campo.quien_completa ?? 'firmante') as ColumnaMapeada['quien'];
+    columnas.push({
+      titulo,
+      codigo: campo.codigo,
+      etiqueta: campo.etiqueta ?? campo.codigo,
+      quien: quien === 'emisor' || quien === 'cualquiera' ? quien : 'firmante',
+    });
+  }
+  return { columnas, ignoradas };
+}
+
 /** Lo mínimo que hace falta saber de un campo para nombrarlo. */
 type CampoNombrable = {
   codigo: string;
