@@ -198,7 +198,7 @@ export function construirServidor(): FastifyInstance {
     // El sitio comercial —`/` y lo que se le agregue— NO lleva la cabecera:
     // eso es contenido y tiene que poder encontrarse.
     const camino = (_req.url || '/').split('?')[0] || '/';
-    if (/^\/(entrar|app|operador|firmar|publico)(\/|$)/.test(camino) || camino === '/mi.html') {
+    if (/^\/(entrar|app|operador|firmar|publico)(\/|$)/.test(camino)) {
       reply.header('X-Robots-Tag', 'noindex, nofollow, noarchive');
     }
   });
@@ -328,7 +328,7 @@ export function construirServidor(): FastifyInstance {
 
   // JavaScript de las páginas públicas. Se sirve como archivo suelto, igual que
   // el HTML: para dos archivos no vale la pena montar un servidor de estáticos.
-  for (const js of ['sitio.js', 'entrar.js', 'consola.js', 'operador.js', 'firmar.js', 'marcas.js', 'rubrica.js', 'visor.js', 'campos.js', 'cajas.js']) {
+  for (const js of ['sitio.js', 'entrar.js', 'consola.js', 'operador.js', 'firmar.js', 'marcas.js', 'rubrica.js', 'visor.js', 'campos.js', 'cajas.js', 'instalar.js']) {
     app.get('/' + js, async (_req, reply) => {
       try {
         const ruta = new URL('../public/' + js, import.meta.url);
@@ -405,15 +405,6 @@ export function construirServidor(): FastifyInstance {
       }
     });
   }
-  app.get('/manifest-empleado.webmanifest', async (_req, reply) => {
-    try {
-      const body = readFileSync(new URL('../public/manifest-empleado.webmanifest', import.meta.url), 'utf8');
-      reply.type('application/manifest+json').send(body);
-    } catch {
-      reply.code(404).send('manifest no encontrado');
-    }
-  });
-
   // Rutas públicas (sin token): la página, health y el login de desarrollo.
   const PUBLICAS = new Set([
     // Páginas y estáticos
@@ -444,6 +435,7 @@ export function construirServidor(): FastifyInstance {
     '/rubrica.js',
     '/visor.js',
     '/cajas.js',
+    '/instalar.js',
     '/vendor/pdf.min.mjs',
     '/vendor/pdf.worker.min.mjs',
     // El firmante externo: su autorización es el otorgamiento que lleva el
@@ -474,7 +466,6 @@ export function construirServidor(): FastifyInstance {
     '/firmar/marca/limpiar',
     '/firmar/marca/quitar',
     '/manifest.webmanifest',
-    '/manifest-empleado.webmanifest',
     '/sw.js',
     '/favicon.svg',
     '/logo.svg',

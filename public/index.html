@@ -9,6 +9,13 @@
 <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
 <link rel="apple-touch-icon" href="/apple-touch-icon.png" />
 <link rel="manifest" href="/manifest.webmanifest" />
+<!-- Para que en iPhone la app instalada abra a pantalla completa y no dentro de
+     Safari. Sin estas etiquetas, «Agregar a inicio» deja un atajo con la barra
+     del navegador arriba, que no parece una app. -->
+<meta name="mobile-web-app-capable" content="yes" />
+<meta name="apple-mobile-web-app-capable" content="yes" />
+<meta name="apple-mobile-web-app-status-bar-style" content="default" />
+<meta name="apple-mobile-web-app-title" content="MiFirma" />
 <link rel="preconnect" href="https://fonts.googleapis.com" />
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
 <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet" />
@@ -42,6 +49,11 @@
   aside .pie span{color:#8fa9c2;font-size:12.5px}
   aside .pie button{margin-top:12px;font:inherit;font-size:13px;color:#b7cde1;background:none;border:0;padding:0;cursor:pointer}
   aside .pie button:hover{color:#fff;text-decoration:underline}
+  /* El botón de instalar. Vive en el pie del lateral y sólo aparece cuando el
+     navegador realmente permite instalar (lo decide instalar.js). */
+  aside .pie #instalar button{color:#cfe0ee;font-weight:600}
+  aside .pie #instalar .comoInstalar{margin:8px 0 0;color:#8fa9c2;font-size:12.5px;line-height:1.45}
+  aside .pie #instalar .comoInstalar b{display:inline;color:#fff;font-size:12.5px}
 
   /* ---------- contenido ---------- */
   main{padding:30px 28px 60px;overflow-x:hidden}
@@ -408,6 +420,9 @@
   <div class="pie">
     <b id="pieCuenta">…</b>
     <span id="pieUsuario"></span>
+    <!-- Lo llena instalar.js, y sólo si se puede instalar de verdad. Vacío no
+         ocupa lugar: un botón que no hace nada es peor que no tenerlo. -->
+    <div id="instalar"></div>
     <button onclick="salir()">Cerrar sesión</button>
   </div>
 </aside>
@@ -636,5 +651,8 @@
 <script src="/marcas.js"></script>
 <script src="/campos.js"></script>
   <script src="/cajas.js"></script>
+<!-- Enciende el service worker y ofrece instalar. Va último: no lo necesita
+     nadie para que la consola funcione. -->
+<script src="/instalar.js"></script>
 </body>
 </html>

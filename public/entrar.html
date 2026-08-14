@@ -8,6 +8,14 @@
 <meta name="robots" content="noindex" />
 <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
 <link rel="apple-touch-icon" href="/apple-touch-icon.png" />
+<!-- La puerta de entrada también es parte de la webapp instalable: mucha gente
+     va a instalar desde acá, antes de tener sesión. Sin el manifiesto, el menú
+     del navegador no ofrece «Instalar» en esta página. -->
+<link rel="manifest" href="/manifest.webmanifest" />
+<meta name="mobile-web-app-capable" content="yes" />
+<meta name="apple-mobile-web-app-capable" content="yes" />
+<meta name="apple-mobile-web-app-status-bar-style" content="default" />
+<meta name="apple-mobile-web-app-title" content="MiFirma" />
 <link rel="preconnect" href="https://fonts.googleapis.com" />
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
 <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet" />
@@ -300,5 +308,9 @@
 <footer>MiFirma · <span data-t="footer">Firma electrónica con validez legal</span></footer>
 
 <script src="/entrar.js"></script>
+<!-- Enciende el service worker. Acá NO se muestra botón de instalar: la
+     pantalla de login no es lugar para pedir nada más. El hueco `#instalar`
+     no existe en esta página, así que instalar.js sólo registra el worker. -->
+<script src="/instalar.js"></script>
 </body>
 </html>

@@ -7,8 +7,17 @@
 // ni las cachee. Así no hay riesgo de servir datos viejos ni de romper la API.
 //
 // Para invalidar el cache (p. ej. tras un cambio grande), subí el número de CACHE.
-const CACHE = 'mifirma-shell-v3';
-const SHELL = ['/app', '/mi'];
+//
+// ⚠ v4 (14/8): el shell precacheaba `/mi`, que es una ruta de PAYROLL y en
+// MiFirma no existe. `addAll` es todo-o-nada: el 404 de `/mi` tiraba abajo el
+// precache ENTERO, y el `.catch(() => {})` se lo tragaba sin decir nada. El
+// respaldo sin conexión no existía y nadie se enteraba. Las dos rutas de acá
+// abajo son las dos puertas reales de la webapp.
+//
+// ⚠ Subir el número de CACHE también sirve para desalojar cualquier resto que
+// haya quedado de payroll en un navegador que alguna vez abrió `/mi`.
+const CACHE = 'mifirma-shell-v4';
+const SHELL = ['/app', '/entrar'];
 
 self.addEventListener('install', (e) => {
   self.skipWaiting();
