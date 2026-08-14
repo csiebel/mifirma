@@ -115,6 +115,10 @@ export async function notificarUsuario(
         .selectFrom('push_suscripcion')
         .select(['id', 'endpoint', 'p256dh', 'auth'])
         .where('identidad_id', '=', identidadId)
+        // Un dispositivo dado de baja no recibe. La columna y su índice
+        // (`push_vigente`) existen desde la 014 y hasta el 14/8 nadie los
+        // miraba: se le mandaba igual a quien había apagado las notificaciones.
+        .where('revocada_en', 'is', null)
         .execute(),
     );
     if (subs.length === 0) {

@@ -176,10 +176,26 @@ export async function canalesPara(
   const canales: Canal[] = ['email'];
 
   if (d.identidadId && ambito.cuentaId) {
+    // ⚠ La suscripción es de la IDENTIDAD, no de la cuenta: `push_suscripcion`
+    // no tiene ni tuvo nunca `cuenta_id` (migración 014). Y así corresponde: una
+    // persona puede estar en varias empresas y el teléfono sigue siendo el
+    // mismo — el push llega al dispositivo de alguien, no a una empresa. El
+    // filtro por empresa lo hace el RLS (`push_select`), que es donde vive la
+    // autorización.
+    //
+    // ⚠⚠ Del 3/8 al 14/8 esta consulta pidió `cuenta_id` y reventaba con
+    // «column "cuenta_id" does not exist» (42703) cada vez que se avisaba a
+    // alguien con identidad. Como el único que llama a `avisar()` es la
+    // cancelación de circuito, once días de cancelaciones devolvieron 500
+    // DESPUÉS de haber cancelado, y ningún firmante se enteró de que ya no
+    // tenía que firmar. Nadie lo vio porque no había un solo test de esta
+    // función. Ahora lo hay: `test/mensajes/canales.test.ts`.
+    //
+    // `revocada_en is null`: un dispositivo dado de baja no prende el canal.
     const hay = await enSistema(async (trx) => {
       const r = await sql<{ n: number }>`
         select count(*)::int as n from push_suscripcion
-         where identidad_id = ${d.identidadId}::uuid and cuenta_id = ${ambito.cuentaId}::uuid
+         where identidad_id = ${d.identidadId}::uuid and revocada_en is null
       `.execute(trx);
       return (r.rows[0]?.n ?? 0) > 0;
     });
@@ -218,7 +234,27 @@ export async function avisar(
     const idioma = d.idioma || 'es';
     const suyas = { ...vars, nombre: d.nombre || d.email.split('@')[0]! };
 
-    for (const canal of await canalesPara(d, ambito)) {
+    // ⚠⚠ Elegir los canales NO puede tumbar el aviso. Esta función promete más
+    // arriba que «nunca lanza», y hasta el 14/8 no cumplía: `canalesPara` estaba
+    // fuera del try, y su consulta rota se llevó puesto el aviso de cancelación
+    // ENTERO —correo incluido— durante once días. Si averiguar los canales
+    // falla, se degrada al correo: el push acelera, el correo prueba.
+    let canales: Canal[];
+    try {
+      canales = await canalesPara(d, ambito);
+    } catch (e) {
+      canales = ['email'];
+      console.error('canalesPara falló; se avisa sólo por correo:', e);
+      if (ambito.cuentaId) {
+        await registrarSistema(ambito.cuentaId, d.identidadId ?? null, {
+          accion: 'aviso.canales_degradados',
+          recursoTipo: 'mensaje',
+          despues: { codigo, motivo: e instanceof Error ? e.message : String(e) },
+        }).catch(() => {});
+      }
+    }
+
+    for (const canal of canales) {
       const t = await armar(codigo, canal, idioma, suyas, ambito);
       if (!t) continue;                    // sin plantilla para ese canal: se saltea
       try {
