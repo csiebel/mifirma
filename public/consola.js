@@ -843,9 +843,10 @@
    * atrás del navegador no es una forma de cerrar un documento, y cuando acá
    * adentro haya que poner campos y firmar, esta ventana es donde va a pasar.
    *
-   * El PDF lo dibuja el visor del navegador dentro de un iframe. No usamos una
-   * librería de render: la del navegador ya está, está probada y es la misma que
-   * el firmante va a usar para leer lo que firma.
+   * El PDF lo dibuja el visor del navegador dentro de un iframe — donde ese
+   * visor EXISTE. En iPhone y en el Chrome de Android no existe (15/8: pantalla
+   * en blanco en la primera prueba en un teléfono), y ahí lo dibuja pdf.js,
+   * hoja por hoja: ver `dibujarHojas`, y el `pdfViewerEnabled` de más abajo.
    */
   var urlBlobVisor = null; // el blob del documento abierto; se libera al abrir el siguiente
 
@@ -910,15 +911,131 @@
         msg('msgVisor', (d && d.error) || ('No se pudo abrir el documento (HTTP ' + r.status + ').'), 'err');
         return;
       }
+      var bytes = await r.blob();
+
+      // ⚠ En iPhone —y en el Chrome de Android— un PDF metido en un iframe NO
+      // se dibuja: queda la pantalla en blanco debajo de los botones. Medido el
+      // 15/8 en el iPhone de Claudio, primera vez que el visor pisó un
+      // teléfono. Ahí el documento se dibuja hoja por hoja con pdf.js, el mismo
+      // motor del editor y de la pantalla del firmante.
+      //
+      // ⚠⚠ Cómo se detecta, y por qué así. `navigator.pdfViewerEnabled` dice si
+      // el navegador tiene visor de PDF — pero habla del visor de PESTAÑA
+      // entera, no del iframe. En iOS da `true` (por eso «Abrir aparte»
+      // funciona) y el iframe queda en blanco igual: la primera versión de este
+      // arreglo confió en la propiedad sola y en el iPhone no dibujó nada
+      // (15/8, segunda prueba). Así que: en iOS, SIEMPRE pdf.js — todo iPhone y
+      // iPad es WebKit, incluido el «Chrome» de iOS —; en el resto, lo que
+      // declare la propiedad (`=== false`, no `!`: en un navegador viejo no
+      // existe, y ésos sí muestran PDF en iframe).
+      //
+      // El mismo pedido, el mismo blob, la misma única apertura en el
+      // expediente: lo único que cambia es quién pinta los píxeles.
+      var esIOS = /iPad|iPhone|iPod/.test(navigator.userAgent) ||
+        // El iPad de hoy se presenta como Mac; lo delata la pantalla táctil.
+        (/Macintosh/.test(navigator.userAgent) && 'ontouchend' in document);
+      if ((esIOS || navigator.pdfViewerEnabled === false) && (await dibujarHojas(marco, bytes))) return;
+      if (esIOS || navigator.pdfViewerEnabled === false) {
+        // pdf.js falló donde el iframe tampoco va a andar: decirlo, con la
+        // salida que sí funciona a un botón de distancia. Una pantalla en
+        // blanco sin explicación es lo que este arreglo vino a matar.
+        msg('msgVisor', 'No se pudo dibujar el documento acá. Usá «Abrir aparte», que lo abre en otra pestaña.', 'err');
+        return;
+      }
+
       // Un blob por visor: se libera el anterior para no acumular memoria si
       // se abren muchos documentos seguidos.
       if (urlBlobVisor) { try { URL.revokeObjectURL(urlBlobVisor); } catch (e) {} }
-      urlBlobVisor = URL.createObjectURL(await r.blob());
+      urlBlobVisor = URL.createObjectURL(bytes);
       marco.src = urlBlobVisor;
     }).catch(function () {
       if (!marco || !marco.isConnected) return;
       msg('msgVisor', 'No se pudo abrir el documento. Revisá la conexión y reintentá.', 'err');
     });
+  }
+
+  // pdf.js se carga UNA vez y sólo si hizo falta: en el escritorio, donde el
+  // iframe alcanza, estos ~300 KB no se piden nunca.
+  var pdfjsLector = null;
+  function cargarPdfjsLector() {
+    if (!pdfjsLector) {
+      pdfjsLector = import('/vendor/pdf.min.mjs').then(function (lib) {
+        // Por archivo y no por blob: `worker-src 'self'` bloquea los blob, y
+        // está bien que los bloquee. Igual que en visor.js.
+        lib.GlobalWorkerOptions.workerSrc = '/vendor/pdf.worker.min.mjs';
+        return lib;
+      });
+    }
+    return pdfjsLector;
+  }
+  var docLectorAbierto = null; // el documento pdf.js abierto; se libera al abrir otro
+
+  /**
+   * Dibuja el PDF hoja por hoja donde estaba el iframe. Sólo LEER: sin marcas,
+   * sin campos, sin zoom propio —el gesto de pellizcar del teléfono agranda la
+   * página entera y para leer alcanza—. Para ubicar firmas está el editor.
+   *
+   * Devuelve false si algo falla, y el que llama vuelve al iframe: perder el
+   * dibujo lindo es aceptable, perder poder leer el documento no.
+   */
+  async function dibujarHojas(marco, blob) {
+    try {
+      var lib = await cargarPdfjsLector();
+      var doc = await lib.getDocument({ data: await blob.arrayBuffer() }).promise;
+      if (!marco || !marco.isConnected) { doc.destroy(); return true; }
+      if (docLectorAbierto) { try { docLectorAbierto.destroy(); } catch (e) {} }
+      docLectorAbierto = doc;
+
+      var caja = document.createElement('div');
+      caja.className = 'hojasLector';
+      marco.replaceWith(caja);
+
+      var anchoCaja = Math.max(280, (caja.clientWidth || 360) - 16);
+      // Nítido en pantallas densas, con techo: en un teléfono con DPR 3 un
+      // contrato largo a resolución completa es memoria que no sobra.
+      var dpr = Math.min(window.devicePixelRatio || 1, 2);
+
+      // Perezoso, como visor.js: hoja que entra en pantalla, hoja que se
+      // dibuja. Se miden todas al abrir para que el largo del scroll sea real.
+      var pendientes = new Map();
+      var mirador = new IntersectionObserver(function (entradas) {
+        entradas.forEach(function (e) {
+          if (!e.isIntersecting) return;
+          var f = pendientes.get(e.target);
+          if (f) { pendientes.delete(e.target); mirador.unobserve(e.target); f(); }
+        });
+      }, { root: caja, rootMargin: '600px' });
+
+      for (var n = 1; n <= doc.numPages; n++) {
+        var pagina = await doc.getPage(n);
+        var v1 = pagina.getViewport({ scale: 1 });
+        var vista = pagina.getViewport({ scale: Math.min(anchoCaja / v1.width, 1.6) });
+        var hoja = document.createElement('div');
+        hoja.className = 'hojaLector';
+        hoja.style.width = vista.width + 'px';
+        hoja.style.height = vista.height + 'px';
+        caja.appendChild(hoja);
+        pendientes.set(hoja, (function (pagina, vista, hoja) {
+          return function () {
+            var c = document.createElement('canvas');
+            c.width = Math.floor(vista.width * dpr);
+            c.height = Math.floor(vista.height * dpr);
+            c.style.width = vista.width + 'px';
+            c.style.height = vista.height + 'px';
+            hoja.appendChild(c);
+            pagina.render({
+              canvasContext: c.getContext('2d'),
+              viewport: vista,
+              transform: dpr !== 1 ? [dpr, 0, 0, dpr, 0, 0] : null,
+            });
+          };
+        })(pagina, vista, hoja));
+        mirador.observe(hoja);
+      }
+      return true;
+    } catch (e) {
+      return false;
+    }
   }
 
   /**

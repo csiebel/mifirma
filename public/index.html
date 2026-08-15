@@ -209,6 +209,12 @@
   .modal.visor .cabVisor{display:flex;align-items:center;justify-content:space-between;
                          gap:14px;padding:14px 18px;border-bottom:1px solid var(--line)}
   .modal.visor iframe{flex:1;width:100%;border:0;background:var(--soft)}
+  /* El lector de hojas: lo que dibuja pdf.js donde el navegador no muestra PDF
+     en iframe (iPhone, Android). Mismo lugar y mismo scroll que el iframe. */
+  .modal.visor .hojasLector{flex:1;overflow:auto;background:var(--soft);padding:12px 8px;
+                            -webkit-overflow-scrolling:touch}
+  .hojaLector{margin:0 auto 12px;background:#fff;box-shadow:0 1px 4px rgba(15,30,44,.14)}
+  .hojaLector canvas{display:block}
 
   /* Vistas por estado. Son un FILTRO sobre la lista, no carpetas: el árbol es
      para organizar y el estado es un hecho del sistema. */
