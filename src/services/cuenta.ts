@@ -1,4 +1,7 @@
 import { createHash, randomInt } from 'node:crypto';
+import { sql, type Transaction } from 'kysely';
+import { db } from '../db/pool';
+import type { DB } from '../db/schema';
 import { withUsuario } from '../auth/authz';
 import { hashPassword, verifyPassword, validarPassword } from '../auth/password';
 import { registrarSistema } from './auditoria';
@@ -150,6 +153,41 @@ export async function cambiarMiTelefono(
    archivo: ver la 061.
    =========================================================================== */
 
+/**
+ * Modo sistema, sólo para `token_acceso`.
+ *
+ * ⚠⚠ POR QUÉ HACE FALTA. La política de esa tabla (011) es
+ * `with check (app.actor() = 'sistema')`: **los códigos y enlaces los emite el
+ * sistema, nunca un usuario**. Es a propósito — ahí viven las invitaciones, el
+ * recupero de contraseña y los códigos de entrada.
+ *
+ * La 061 agregó el tipo `confirmar_telefono` a esa tabla y nadie miró esa
+ * política. Resultado: **«Tu acceso» nunca pudo confirmar un teléfono**. Pedir
+ * el código reventaba con 500 (un `insert` que viola la política SÍ grita), y
+ * el paso siguiente hubiera fallado callado: el `select` no viola nada, sólo
+ * devuelve cero filas, así que el código correcto habría dado *«el código no es
+ * correcto o ya venció»* para siempre. Encontrado el 15/8/2026, probando con la
+ * contraseña — el único tramo que no se había probado.
+ *
+ * ⚠ Lo que NO cambia: la contraseña se verifica ANTES, con `withUsuario`, y ahí
+ * la RLS garantiza que sólo se puede leer la credencial propia. El modo sistema
+ * empieza después de esa verificación y toca **una sola tabla**.
+ */
+async function enSistema<T>(fn: (trx: Transaction<DB>) => Promise<T>): Promise<T> {
+  return db.transaction().execute(async (trx) => {
+    await sql`select
+      set_config('app.actor','sistema',true),
+      set_config('app.cuenta_id','',true),
+      set_config('app.identidad_id','',true),
+      set_config('app.anclajes_probados','',true),
+      set_config('app.nivel_garantia','ninguno',true),
+      set_config('app.idioma','es',true),
+      set_config('app.otorgamiento_id','',true)
+    `.execute(trx);
+    return fn(trx);
+  });
+}
+
 const TTL_CONFIRMACION_MIN = 10;
 
 const hashToken = (t: string) => createHash('sha256').update(t).digest('hex');
@@ -244,7 +282,11 @@ export async function pedirCodigoDeTelefono(
     if (!c?.hash_password || !verifyPassword(password, c.hash_password)) {
       throw new HttpError(400, 'La contraseña no es correcta.');
     }
+  });
 
+  // ⚠ La contraseña ya quedó verificada arriba, leyendo la credencial CON RLS
+  // (sólo se puede leer la propia). Recién ahora el sistema emite el código.
+  await enSistema(async (trx) => {
     // Uno vigente por vez: pedir otro invalida el anterior.
     await trx
       .updateTable('token_acceso')
@@ -317,7 +359,11 @@ export async function confirmarMiTelefono(
   }
   const hash = hashToken(codigo.trim() + '|' + tel);
 
-  await withUsuario(cuentaId, identidadId, async (trx) => {
+  // ⚠ Buscar y consumir el código va en modo sistema por la misma política que
+  // impide emitirlo. Y acá el fallo sería MUDO: la RLS no rompe un `select`,
+  // sólo lo deja sin filas — el código bueno diría «no es correcto» para
+  // siempre. El identidad_id del `where` sale de la sesión, no del pedido.
+  await enSistema(async (trx) => {
     const t = await trx
       .selectFrom('token_acceso')
       .select(['id', 'expira_en'])
@@ -338,7 +384,12 @@ export async function confirmarMiTelefono(
       .set({ usado_en: new Date() })
       .where('id', '=', t.id)
       .execute();
+  });
 
+  // ⚠ El teléfono se escribe CON RLS, no en modo sistema: `credencial_update`
+  // (009) exige que sea la propia identidad, y eso es justo la promesa de la
+  // 061. El modo sistema se usa para la tabla de códigos y para nada más.
+  await withUsuario(cuentaId, identidadId, async (trx) => {
     await trx
       .updateTable('credencial')
       .set({ telefono_e164: tel, telefono_propuesto_e164: null })
