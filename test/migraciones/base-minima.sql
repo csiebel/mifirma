@@ -112,6 +112,35 @@ create table registro_pendiente (
   ip_solicitud inet
 );
 
+-- La credencial: lo que convierte una identidad en una cuenta de acceso, y por
+-- donde entra el segundo factor. En esqueleto, por el mismo motivo que las dos
+-- de arriba: la 061 le agrega columnas y el banco moría con «relation
+-- "credencial" does not exist» — rojo por lo que al banco le falta, no por lo
+-- que la migración hace. Agregado el 15/8/2026, probando la 061.
+--
+-- ⚠ Las columnas son las de la 003, incluida `otp_habilitado`: el banco tiene
+-- que empezar donde empieza la base real, o una migración que BORRA esa columna
+-- no estaría probando nada.
+create table credencial (
+  identidad_id uuid primary key references identidad(id),
+  hash_password text,
+  password_cambiada_en timestamptz,
+  otp_habilitado boolean not null default false,
+  telefono_e164 text,
+  idp_externo text,
+  idp_sujeto text,
+  ultimo_acceso_en timestamptz,
+  intentos_fallidos int not null default 0,
+  bloqueada_hasta timestamptz,
+  creada_en timestamptz not null default now()
+);
+
+-- Datos incómodos, que es para lo que existe este archivo: una credencial con
+-- teléfono puesto de antes (la 061 no puede tratarla como propuesta) y otra
+-- sin nada.
+insert into credencial (identidad_id, hash_password, telefono_e164, otp_habilitado)
+select id, 'hash-viejo', '+59899111222', false from identidad limit 1;
+
 create table circuito (
   id uuid primary key default gen_random_uuid(),
   cuenta_propietaria_id uuid not null references cuenta(id),

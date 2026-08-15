@@ -215,9 +215,18 @@ export interface Credencial {
   idp_externo: string | null;
   idp_sujeto: string | null;
   intentos_fallidos: Generated<number>;
-  otp_habilitado: Generated<boolean>;
+  // Por dónde quiere recibir el código de acceso (migración 061). Reemplaza a
+  // `otp_habilitado`, que existía desde la 003 y no escribía nadie.
+  // ⚠ El correo es el respaldo y no se puede apagar: elegir un canal ahorra un
+  // paso, no deja a nadie afuera de su cuenta.
+  otp_canal: Generated<'email' | 'sms' | 'whatsapp'>;
   password_cambiada_en: Timestamp | null;
+  // ⚠ CONFIRMADO por su dueño. El login lo lee sin preguntar nada más, así que
+  // acá no escribe nadie más que la propia persona — ni el administrador de su
+  // empresa. Ver la 061.
   telefono_e164: string | null;
+  // Lo que propuso el administrador. NO habilita nada.
+  telefono_propuesto_e164: string | null;
   ultimo_acceso_en: Timestamp | null;
 }
 

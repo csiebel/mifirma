@@ -78,6 +78,16 @@ export interface DarAccesoInput {
   /** Legajo dentro de la cuenta, opcional: no toda cuenta lleva organigrama. */
   personaId?: string | null;
   nombre?: string | null;
+  /**
+   * El celular que PROPONE el administrador (migración 061).
+   *
+   * ⚠⚠ Va a `telefono_propuesto_e164` y **no habilita nada**. Escribirlo en
+   * `telefono_e164` sería regalar la cuenta: el login lee esa columna derecho
+   * para mandar el código de acceso, así que un admin podría poner su propio
+   * número y entrar como cualquiera de su gente. La persona lo confirma desde
+   * «Tu acceso», con su contraseña y un código que le llega a ese teléfono.
+   */
+  telefonoPropuesto?: string | null;
 }
 
 export interface AccesoCreado {
@@ -154,11 +164,36 @@ export async function darAcceso(
         .execute();
     }
 
+    // El celular que propone el admin. ⚠ A la columna de PROPUESTA, y sólo si
+    // esa persona todavía no tiene un teléfono confirmado: si ya confirmó uno,
+    // una propuesta nueva no pinta nada — el suyo manda, y el trigger de la 061
+    // rechazaría tener las dos cosas si alguien intentara el atajo.
+    if (input.telefonoPropuesto) {
+      const tel = input.telefonoPropuesto.trim().replace(/[\s-]/g, '');
+      if (!/^\+[1-9][0-9]{7,14}$/.test(tel)) {
+        throw new HttpError(400, 'El celular va en formato internacional, por ejemplo +59899123456.');
+      }
+      await trx
+        .updateTable('credencial')
+        .set({ telefono_propuesto_e164: tel })
+        .where('identidad_id', '=', destino)
+        .where('telefono_e164', 'is', null)
+        .execute();
+    }
+
     await registrar(trx, cuentaId, identidadId, {
       accion: 'acceso.otorgado',
       recursoTipo: 'membresia',
       recursoId: destino,
-      despues: { email, rol_id: input.rolId, reactivada: yaExistia },
+      despues: {
+        email,
+        rol_id: input.rolId,
+        reactivada: yaExistia,
+        // Que quede en la bitácora QUIÉN propuso el número: es el dato que
+        // contesta «¿de dónde salió este teléfono?» si algún día hay que
+        // preguntarlo.
+        telefono_propuesto: !!input.telefonoPropuesto,
+      },
     });
 
     return { identidad_id: destino, email, ya_existia: yaExistia };

@@ -9,7 +9,19 @@ import * as usuarios from '../../services/usuarios';
  *
  *   · `PUT /usuarios/:id/canal-otp` — el teléfono y el canal del segundo factor
  *     son de la identidad, que es global. El admin de una empresa no los toca.
- *     Cada persona los administra en su perfil (`/mi/telefono`).
+ *     Cada persona los administra en su perfil: `GET /mi/acceso`,
+ *     `POST /mi/telefono/codigo`, `POST /mi/telefono/confirmar`, `PUT /mi/canal`
+ *     — en `routes/perfil.ts`.
+ *
+ *     ⚠ Este comentario nombró durante días una ruta `/mi/telefono` que NO
+ *     existía: el archivo se escribió cuando se decidió, y la ruta nunca se
+ *     construyó. **Un comentario que nombra una ruta es una afirmación
+ *     comprobable** — y ésta era falsa. Las de arriba existen; están en
+ *     `server.ts` registradas con `registrarRutasPerfil`.
+ *
+ *     Lo que el admin SÍ puede es PROPONER un celular al dar acceso
+ *     (`telefono_propuesto`), que no habilita nada hasta que su dueño lo
+ *     confirma. Migración 061.
  *   · `POST /usuarios/invitar` — era un alta que creaba persona + usuario. Acá
  *     dar acceso es una sola operación: `POST /usuarios`.
  */
@@ -31,6 +43,8 @@ export function registrarRutasUsuarios(app: FastifyInstance) {
         rol_id: z.string().uuid(),
         nombre: z.string().max(120).optional(),
         persona_id: z.string().uuid().nullable().optional(),
+        // ⚠ PROPUESTA, no teléfono confirmado. Ver `DarAccesoInput`.
+        telefono_propuesto: z.string().max(24).nullable().optional(),
       })
       .parse(req.body);
     const { cuentaId, identidadId } = req.identidad;
@@ -39,6 +53,7 @@ export function registrarRutasUsuarios(app: FastifyInstance) {
       rolId: b.rol_id,
       nombre: b.nombre ?? null,
       personaId: b.persona_id ?? null,
+      telefonoPropuesto: b.telefono_propuesto ?? null,
     });
   });
 

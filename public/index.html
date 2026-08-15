@@ -844,6 +844,17 @@
       <div id="msgCuenta"></div>
     </div>
 
+    <!-- Tu acceso: contraseña, celular y por dónde llega el código. Panel
+         aparte porque NO son datos de la empresa: son de la persona, y la
+         misma persona los usa en las otras empresas donde tenga acceso.
+         Lo llena acceso.js. Ver la migración 061. -->
+    <div class="panel" style="padding:26px;max-width:560px;margin-top:18px">
+      <h2 style="font-size:17px;margin:0 0 4px">Tu acceso</h2>
+      <p class="pista" style="margin:0 0 16px">Esto es tuyo, no de la empresa:
+         te acompaña a cualquier cuenta donde tengas acceso.</p>
+      <div id="acceso"></div>
+    </div>
+
     <!-- Los avisos en el teléfono. Panel aparte: no es un dato de la empresa,
          es una preferencia de ESTE dispositivo, y guardar la cuenta no tiene
          nada que ver con prenderlos. Lo llena avisos.js. -->
@@ -970,5 +981,7 @@
 <!-- Los avisos en el teléfono. Va después de instalar.js: necesita que el
      service worker esté registrado. -->
 <script src="/avisos.js"></script>
+<!-- «Tu acceso», en la pantalla Cuenta. -->
+<script src="/acceso.js"></script>
 </body>
 </html>

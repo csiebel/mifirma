@@ -1,7 +1,9 @@
+import { createHash, randomInt } from 'node:crypto';
 import { withUsuario } from '../auth/authz';
 import { hashPassword, verifyPassword, validarPassword } from '../auth/password';
 import { registrarSistema } from './auditoria';
 import { HttpError } from '../http/errors';
+import { enviarOtpPorTwilio, twilioActivo } from './twilio';
 
 /**
  * Perfil propio: contraseña y teléfono.
@@ -124,6 +126,281 @@ export async function cambiarMiTelefono(
   }, 'usuario');
 
   return { ok: true, telefono: tel };
+}
+
+/* ===========================================================================
+   EL TELÉFONO: PROPUESTO vs. CONFIRMADO  (migración 061)
+
+   ⚠⚠ Por qué hay dos columnas y no una. `auth_login.ts` lee
+   `credencial.telefono_e164` DERECHO para mandar el código de acceso — tres
+   lugares, sin condición ninguna. O sea que **cualquier número que quede ahí
+   es una llave de esa cuenta**.
+
+   Claudio pidió que el administrador pueda cargarle el celular a su gente.
+   Escrito en `telefono_e164`, eso sería regalarle el acceso: pone su propio
+   número, pide el código y entra como cualquiera de ellos — incluida gente que
+   firma documentos con valor legal.
+
+   Por eso lo que carga el admin va a `telefono_propuesto_e164`, que **no
+   habilita nada**: es un dato para que la persona no tenga que tipearlo. Pasa a
+   ser un teléfono de verdad cuando su dueño lo confirma con su contraseña y un
+   código, y en ese mismo movimiento la propuesta se consume.
+
+   La base lo hace cumplir con un trigger, no con buena voluntad de este
+   archivo: ver la 061.
+   =========================================================================== */
+
+const TTL_CONFIRMACION_MIN = 10;
+
+const hashToken = (t: string) => createHash('sha256').update(t).digest('hex');
+
+/** Seis dígitos, del generador criptográfico y no de `Math.random`. */
+const codigoDe6 = () => String(randomInt(0, 1_000_000)).padStart(6, '0');
+
+const E164 = /^\+[1-9][0-9]{7,14}$/;
+
+function normalizarTelefono(valor: unknown): string {
+  if (typeof valor !== 'string') throw new HttpError(400, 'Falta el teléfono.');
+  const tel = valor.trim().replace(/[\s-]/g, '');
+  if (!E164.test(tel)) {
+    throw new HttpError(400, 'El teléfono va en formato internacional, por ejemplo +59899123456.');
+  }
+  return tel;
+}
+
+/**
+ * Qué mostrarle a la persona en «Tu acceso».
+ *
+ * ⚠ Devuelve qué canales son POSIBLES, no cuáles existen en teoría: SMS y
+ * WhatsApp piden un teléfono confirmado **y** que el operador tenga ese canal
+ * conectado. Ofrecer en la pantalla algo que después no va a salir es la forma
+ * más rápida de que alguien se quede esperando un código que nunca se mandó.
+ */
+export async function miAcceso(cuentaId: string, identidadId: string) {
+  const c = await withUsuario(cuentaId, identidadId, async (trx) =>
+    trx
+      .selectFrom('credencial')
+      .select([
+        'telefono_e164',
+        'telefono_propuesto_e164',
+        'otp_canal',
+        'hash_password',
+        'password_cambiada_en',
+      ])
+      .where('identidad_id', '=', identidadId)
+      .executeTakeFirst(),
+  );
+
+  const tw = await twilioActivo().catch(() => null);
+  const canales: Array<'email' | 'sms' | 'whatsapp'> = ['email']; // el respaldo, siempre
+  if (c?.telefono_e164) {
+    if (tw?.from_sms) canales.push('sms');
+    if (tw?.from_whatsapp) canales.push('whatsapp');
+  }
+
+  return {
+    tiene_password: !!c?.hash_password,
+    password_cambiada_en: c?.password_cambiada_en ?? null,
+    telefono: c?.telefono_e164 ?? null,
+    telefono_propuesto: c?.telefono_propuesto_e164 ?? null,
+    // Tres estados, y cada uno pide algo distinto de la persona.
+    estado_telefono: c?.telefono_e164
+      ? ('confirmado' as const)
+      : c?.telefono_propuesto_e164
+        ? ('propuesto' as const)
+        : ('sin_telefono' as const),
+    otp_canal: c?.otp_canal ?? 'email',
+    canales_posibles: canales,
+  };
+}
+
+/**
+ * Paso 1 de la confirmación: manda el código al número que se quiere confirmar.
+ *
+ * Exige la contraseña actual por lo mismo que `cambiarMiTelefono`: cambiar el
+ * teléfono es cambiar dónde llegan los códigos de acceso, y sin reautenticar,
+ * una sesión robada se redirige el segundo factor y deja al dueño afuera.
+ *
+ * ⚠ El código viaja en `token_acceso` con tipo `confirmar_telefono`, **no en
+ * `otp_login`**: un código para confirmar un teléfono no puede servir para
+ * entrar. Ver el §3 de la 061.
+ */
+export async function pedirCodigoDeTelefono(
+  cuentaId: string,
+  identidadId: string,
+  password: unknown,
+  telefono: unknown,
+) {
+  if (typeof password !== 'string') throw new HttpError(400, 'Falta tu contraseña actual.');
+  const tel = normalizarTelefono(telefono);
+  const codigo = codigoDe6();
+
+  await withUsuario(cuentaId, identidadId, async (trx) => {
+    const c = await trx
+      .selectFrom('credencial')
+      .select(['hash_password'])
+      .where('identidad_id', '=', identidadId)
+      .executeTakeFirst();
+    if (!c?.hash_password || !verifyPassword(password, c.hash_password)) {
+      throw new HttpError(400, 'La contraseña no es correcta.');
+    }
+
+    // Uno vigente por vez: pedir otro invalida el anterior.
+    await trx
+      .updateTable('token_acceso')
+      .set({ usado_en: new Date() })
+      .where('identidad_id', '=', identidadId)
+      .where('tipo', '=', 'confirmar_telefono')
+      .where('usado_en', 'is', null)
+      .execute();
+
+    await trx
+      .insertInto('token_acceso')
+      .values({
+        identidad_id: identidadId,
+        cuenta_id: cuentaId,
+        tipo: 'confirmar_telefono',
+        // ⚠ El hash lleva el NÚMERO adentro: así un código pedido para un
+        // teléfono no sirve para confirmar otro. Sin esto, alguien podría
+        // pedir el código a su propio celular y confirmar el ajeno.
+        token_hash: hashToken(codigo + '|' + tel),
+        expira_en: new Date(Date.now() + TTL_CONFIRMACION_MIN * 60000),
+      })
+      .execute();
+
+  });
+
+  const tw = await twilioActivo().catch(() => null);
+  const porDonde: 'sms' | 'whatsapp' | null = tw?.from_sms
+    ? 'sms'
+    : tw?.from_whatsapp
+      ? 'whatsapp'
+      : null;
+
+  // ⚠ El código va al TELÉFONO que se quiere confirmar, nunca al correo: lo que
+  // se está probando es que ese aparato es de esta persona. Mandarlo por correo
+  // probaría el correo, que ya estaba probado.
+  if (!porDonde) {
+    throw new HttpError(
+      503,
+      'Todavía no podemos mandar mensajes al celular. Escribinos y lo activamos.',
+    );
+  }
+  await enviarOtpPorTwilio(porDonde, tel, codigo, TTL_CONFIRMACION_MIN);
+
+  await registrarSistema(cuentaId, identidadId, {
+    accion: 'perfil.telefono_codigo',
+    recursoTipo: 'credencial',
+    recursoId: identidadId,
+    despues: { canal: porDonde, minutos: TTL_CONFIRMACION_MIN },
+  }, 'usuario');
+
+  return { ok: true, canal: porDonde, vence_en_minutos: TTL_CONFIRMACION_MIN };
+}
+
+/**
+ * Paso 2: el código acertado mueve el número de propuesto a confirmado.
+ *
+ * ⚠ La propuesta se consume en el MISMO update. El trigger de la 061 lo exige,
+ * y la razón es que un número propuesto que sobreviva a la confirmación es un
+ * fantasma: nadie sabría si ya se usó o está esperando.
+ */
+export async function confirmarMiTelefono(
+  cuentaId: string,
+  identidadId: string,
+  telefono: unknown,
+  codigo: unknown,
+) {
+  const tel = normalizarTelefono(telefono);
+  if (typeof codigo !== 'string' || !/^[0-9]{6}$/.test(codigo.trim())) {
+    throw new HttpError(400, 'El código son seis números.');
+  }
+  const hash = hashToken(codigo.trim() + '|' + tel);
+
+  await withUsuario(cuentaId, identidadId, async (trx) => {
+    const t = await trx
+      .selectFrom('token_acceso')
+      .select(['id', 'expira_en'])
+      .where('identidad_id', '=', identidadId)
+      .where('tipo', '=', 'confirmar_telefono')
+      .where('token_hash', '=', hash)
+      .where('usado_en', 'is', null)
+      .executeTakeFirst();
+
+    // El mismo mensaje para «no existe» y «venció»: distinguirlos le diría a
+    // quien prueba códigos cuáles estuvieron cerca.
+    if (!t || new Date(t.expira_en) < new Date()) {
+      throw new HttpError(400, 'El código no es correcto o ya venció. Pedí uno nuevo.');
+    }
+
+    await trx
+      .updateTable('token_acceso')
+      .set({ usado_en: new Date() })
+      .where('id', '=', t.id)
+      .execute();
+
+    await trx
+      .updateTable('credencial')
+      .set({ telefono_e164: tel, telefono_propuesto_e164: null })
+      .where('identidad_id', '=', identidadId)
+      .execute();
+  });
+
+  await registrarSistema(cuentaId, identidadId, {
+    accion: 'perfil.telefono_confirmado',
+    recursoTipo: 'credencial',
+    recursoId: identidadId,
+    despues: { tiene_telefono: true },
+  }, 'usuario');
+
+  return { ok: true, telefono: tel };
+}
+
+/**
+ * Por dónde quiere recibir el código de acceso.
+ *
+ * ⚠ El correo no se puede apagar y por eso no hace falta protegerlo: es el
+ * respaldo. Lo que sí se comprueba es lo contrario — que no elija un canal que
+ * hoy no puede funcionar, porque entonces se quedaría esperando un código que
+ * nunca sale.
+ */
+export async function elegirMiCanal(
+  cuentaId: string,
+  identidadId: string,
+  canal: unknown,
+) {
+  if (canal !== 'email' && canal !== 'sms' && canal !== 'whatsapp') {
+    throw new HttpError(400, 'Ese canal no existe.');
+  }
+
+  if (canal !== 'email') {
+    const estado = await miAcceso(cuentaId, identidadId);
+    if (!estado.canales_posibles.includes(canal)) {
+      throw new HttpError(
+        400,
+        estado.estado_telefono === 'confirmado'
+          ? 'Ese canal todavía no está conectado. Elegí otro.'
+          : 'Antes de recibir el código por ahí, confirmá tu celular.',
+      );
+    }
+  }
+
+  await withUsuario(cuentaId, identidadId, async (trx) => {
+    await trx
+      .updateTable('credencial')
+      .set({ otp_canal: canal })
+      .where('identidad_id', '=', identidadId)
+      .execute();
+  });
+
+  await registrarSistema(cuentaId, identidadId, {
+    accion: 'perfil.canal_otp',
+    recursoTipo: 'credencial',
+    recursoId: identidadId,
+    despues: { canal },
+  }, 'usuario');
+
+  return { ok: true, otp_canal: canal };
 }
 
 

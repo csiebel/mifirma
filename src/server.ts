@@ -15,6 +15,7 @@ import { registrarRutasUsuarios } from './http/routes/usuarios';
 import { registrarRutasRoles } from './http/routes/roles';
 import { registrarRutasCarpetas } from './http/routes/carpetas';
 import { registrarRutasAvisos } from './http/routes/avisos';
+import { registrarRutasPerfil } from './http/routes/perfil';
 import { registrarRutasOperador } from './http/routes/operador';
 import { registrarRutasPublico } from './http/routes/publico';
 import { registrarRutasPagosWebhook } from './http/routes/pagos_webhook';
@@ -329,7 +330,7 @@ export function construirServidor(): FastifyInstance {
 
   // JavaScript de las páginas públicas. Se sirve como archivo suelto, igual que
   // el HTML: para dos archivos no vale la pena montar un servidor de estáticos.
-  for (const js of ['sitio.js', 'entrar.js', 'consola.js', 'operador.js', 'firmar.js', 'marcas.js', 'rubrica.js', 'visor.js', 'campos.js', 'cajas.js', 'instalar.js', 'avisos.js']) {
+  for (const js of ['sitio.js', 'entrar.js', 'consola.js', 'operador.js', 'firmar.js', 'marcas.js', 'rubrica.js', 'visor.js', 'campos.js', 'cajas.js', 'instalar.js', 'avisos.js', 'acceso.js']) {
     app.get('/' + js, async (_req, reply) => {
       try {
         const ruta = new URL('../public/' + js, import.meta.url);
@@ -440,6 +441,9 @@ export function construirServidor(): FastifyInstance {
     // ⚠ El ARCHIVO es público (es JavaScript de la página); las RUTAS de avisos
     // (/push/*) no: ésas piden sesión y por eso no están en esta lista.
     '/avisos.js',
+    // El ARCHIVO es público (es JavaScript de la página); las rutas `/mi/*` que
+    // usa piden sesión y por eso no están acá.
+    '/acceso.js',
     '/vendor/pdf.min.mjs',
     '/vendor/pdf.worker.min.mjs',
     // El firmante externo: su autorización es el otorgamiento que lleva el
@@ -640,6 +644,9 @@ export function construirServidor(): FastifyInstance {
     registrarRutasCarpetas(app);
     // Los avisos en el teléfono. Piden sesión: NO van a PUBLICAS.
     registrarRutasAvisos(app);
+    // Tu acceso: contraseña, teléfono y canal del código. Self-scoped, con
+    // sesión — tampoco van a PUBLICAS.
+    registrarRutasPerfil(app);
     registrarRutasOperador(app);
     registrarRutasPublico(app);
     registrarRutasPagosWebhook(app);
