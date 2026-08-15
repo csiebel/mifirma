@@ -145,7 +145,10 @@
 
   async function pintar(mensaje) {
     const caja = document.getElementById('avisos');
-    const pie = document.getElementById('avisosPie');
+    // ⚠ La invitación del pie vive en DOS lugares desde el rediseño de teléfono
+    // (15/8): el pie del lateral (computadora) y la hoja de «Más» (teléfono).
+    // Con un id sólo se llenaba el primero.
+    const pies = document.querySelectorAll('.huecoAvisosPie');
     const est = await situacion();
     const t = TEXTOS[est];
 
@@ -168,11 +171,12 @@
       }
     }
 
-    // En el pie del lateral, sólo la invitación mientras estén apagados.
-    if (pie) {
+    // En el pie (lateral y hoja de «Más»), sólo la invitación mientras estén
+    // apagados. Cuando ya están prendidos, el lugar de tocarlos es Cuenta.
+    pies.forEach((pie) => {
       if (est === 'apagado') {
-        pie.innerHTML = '<button type="button" id="btnAvisosPie">Avisarme en este dispositivo</button>';
-        document.getElementById('btnAvisosPie').addEventListener('click', async () => {
+        pie.innerHTML = '<button type="button">Avisarme en este dispositivo</button>';
+        pie.querySelector('button').addEventListener('click', async () => {
           try {
             await prender();
           } catch (e) {
@@ -183,11 +187,11 @@
       } else {
         pie.innerHTML = '';
       }
-    }
+    });
   }
 
   async function arrancar() {
-    if (!document.getElementById('avisos') && !document.getElementById('avisosPie')) return;
+    if (!document.getElementById('avisos') && !document.querySelectorAll('.huecoAvisosPie').length) return;
     if (soportado) {
       try {
         clavePublica = (await pedir(RUTA_CLAVE)).clave;

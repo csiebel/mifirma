@@ -382,6 +382,86 @@
   .vacio{padding:48px 24px;text-align:center;color:var(--mut);font-size:14.5px}
   .hidden{display:none!important}
   .pista{font-size:12.5px;color:var(--mut);margin-top:6px}
+
+  /* =========================================================================
+     EL TELÉFONO — etapa 1 del rediseño del 15/8
+
+     Decisión de Claudio: las tres superficies (webapp, iPhone, Android) se ven
+     IDÉNTICAS entre sí, y la app hace todo lo que hace la web. Ver
+     `apps-y-dispositivos.md` §D1 y §D2.
+
+     ⚠ **Entre TAMAÑOS no puede ser idéntico** y no se pretende: en un monitor
+     el menú es la columna azul de la izquierda; en un teléfono es una barra de
+     iconos abajo, al alcance del pulgar. Mismo contenido, mismo color, mismo
+     tipo de letra, distinto acomodo.
+
+     El problema que esto arregla, medido el 15/8 en el iPhone de Claudio: por
+     debajo de 900px la columna azul dejaba de ser columna y se apilaba ARRIBA
+     de todo, comiéndose el 55% de la primera pantalla. Con el título y su
+     copete, la lista de documentos empezaba recién en la TERCERA pantalla.
+
+     ⚠ La barra usa `nav.menu` y `data-v` a propósito: así `ir()` de consola.js
+     la marca sola, sin tocar una línea de JavaScript.
+     ========================================================================= */
+
+  nav.abajo{display:none}
+
+  @media(max-width:899px){
+    /* La columna azul no se apila: desaparece. Todo lo suyo vive abajo. */
+    aside{display:none}
+    main{padding:18px 16px calc(72px + env(safe-area-inset-bottom))}
+    h1{font-size:22px}
+    .cab{margin-bottom:18px}
+    .cab p{font-size:13.5px}
+
+    nav.menu.abajo{
+      display:flex;flex-direction:row;gap:0;position:fixed;left:0;right:0;bottom:0;z-index:60;
+      height:calc(58px + env(safe-area-inset-bottom));padding:0 0 env(safe-area-inset-bottom);
+      background:rgba(255,255,255,.92);backdrop-filter:saturate(180%) blur(16px);
+      border-top:1px solid var(--line)}
+    nav.menu.abajo button{
+      flex:1;flex-direction:column;align-items:center;justify-content:center;gap:3px;
+      background:none;border:0;border-radius:0;padding:0;text-align:center;
+      color:var(--mut);font-size:10.5px;font-weight:500}
+    nav.menu.abajo button:hover{background:none;color:var(--mut)}
+    nav.menu.abajo svg{width:23px;height:23px;stroke-width:1.7}
+    nav.menu.abajo button[aria-current="true"]{background:none;color:var(--brand);font-weight:600}
+    nav.menu.abajo button[aria-current="true"] svg{stroke-width:2.1}
+    nav.menu.abajo button:active{opacity:.55}
+
+    /* La hoja de «Más», que sube desde abajo. */
+    #veloHoja{position:fixed;inset:0;background:rgba(11,43,74,.45);z-index:70;
+              opacity:0;pointer-events:none;transition:opacity .22s}
+    #veloHoja.abierta{opacity:1;pointer-events:auto}
+    #hojaMas{position:fixed;left:0;right:0;bottom:0;z-index:80;background:var(--paper);
+             border-radius:22px 22px 0 0;padding:10px 16px calc(18px + env(safe-area-inset-bottom));
+             transform:translateY(102%);transition:transform .26s cubic-bezier(.32,.72,0,1);
+             box-shadow:0 -10px 40px rgba(11,43,74,.18);max-height:82vh;overflow-y:auto}
+    #hojaMas.abierta{transform:translateY(0)}
+    #hojaMas .tirador{width:38px;height:4px;border-radius:99px;background:var(--line);margin:2px auto 12px}
+    #hojaMas .quien{padding:2px 0 12px;border-bottom:1px solid var(--line);margin-bottom:4px}
+    #hojaMas .quien b{display:block;font-size:15px}
+    #hojaMas .quien span{color:var(--mut);font-size:13px}
+    #hojaMas button.fila{display:flex;align-items:center;gap:13px;width:100%;min-height:50px;
+                         background:none;border:0;border-bottom:1px solid var(--soft);
+                         font:inherit;font-size:15.5px;font-weight:500;color:var(--ink);
+                         text-align:left;cursor:pointer;padding:0}
+    #hojaMas button.fila:last-of-type{border-bottom:0}
+    #hojaMas button.fila svg{width:20px;height:20px;stroke:var(--mut);fill:none;stroke-width:1.8;
+                             stroke-linecap:round;stroke-linejoin:round;flex:none}
+    #hojaMas button.fila.salir{color:var(--danger)}
+    #hojaMas button.fila.salir svg{stroke:var(--danger)}
+    /* Los huecos que llenan instalar.js y avisos.js, acá dentro. */
+    #hojaMas .huecoInstalar button,#hojaMas .huecoAvisosPie button{
+      font:inherit;font-size:15.5px;font-weight:500;color:var(--brand-600);
+      background:none;border:0;min-height:50px;width:100%;text-align:left;cursor:pointer;
+      border-bottom:1px solid var(--soft)}
+    #hojaMas .comoInstalar{color:var(--mut);font-size:13px;margin:0 0 10px}
+    #hojaMas .comoInstalar b{color:var(--ink)}
+  }
+
+  /* En el escritorio la hoja no existe. */
+  @media(min-width:900px){#hojaMas,#veloHoja{display:none}}
 </style>
 </head>
 <body>
@@ -423,10 +503,10 @@
     <span id="pieUsuario"></span>
     <!-- Lo llena instalar.js, y sólo si se puede instalar de verdad. Vacío no
          ocupa lugar: un botón que no hace nada es peor que no tenerlo. -->
-    <div id="instalar"></div>
+    <div id="instalar" class="huecoInstalar"></div>
     <!-- La invitación a prender los avisos, sólo mientras estén apagados. El
          interruptor de verdad, con su explicación, vive en Cuenta. -->
-    <div id="avisosPie"></div>
+    <div id="avisosPie" class="huecoAvisosPie"></div>
     <button onclick="salir()">Cerrar sesión</button>
   </div>
 </aside>
@@ -658,6 +738,78 @@
 </main>
 
 <div id="modal"></div>
+
+<!-- ============================================================= -->
+<!-- La barra de abajo y la hoja de «Más». Sólo se ven en teléfono. -->
+<!-- ⚠ `nav.menu` y `data-v`: con eso `ir()` de consola.js marca el   -->
+<!-- lugar activo sin que haya que tocar una línea de JavaScript.    -->
+<!-- ============================================================= -->
+<nav class="menu abajo">
+  <button onclick="ir('documentos')" data-v="documentos">
+    <svg viewBox="0 0 24 24"><path d="M14 3H7a2 2 0 00-2 2v14a2 2 0 002 2h10a2 2 0 002-2V8z"/><path d="M14 3v5h5"/></svg>
+    Documentos
+  </button>
+  <button onclick="ir('carpetas')" data-v="carpetas">
+    <svg viewBox="0 0 24 24"><path d="M3 7a2 2 0 012-2h4l2 2.5h8a2 2 0 012 2V18a2 2 0 01-2 2H5a2 2 0 01-2-2z"/></svg>
+    Carpetas
+  </button>
+  <button onclick="ir('mifirma')" data-v="mifirma">
+    <svg viewBox="0 0 24 24"><path d="M3 17c3-1 5-9 8-9s2 7 5 7 2-3 5-3"/></svg>
+    Mi firma
+  </button>
+  <button onclick="ir('actividad')" data-v="actividad">
+    <svg viewBox="0 0 24 24"><path d="M12 8v4l3 2"/><circle cx="12" cy="12" r="9"/></svg>
+    Actividad
+  </button>
+  <button onclick="abrirHoja()" id="btnHojaMas">
+    <svg viewBox="0 0 24 24"><circle cx="5" cy="12" r="1.4"/><circle cx="12" cy="12" r="1.4"/><circle cx="19" cy="12" r="1.4"/></svg>
+    Más
+  </button>
+</nav>
+
+<div id="veloHoja" onclick="cerrarHoja()"></div>
+<div id="hojaMas">
+  <div class="tirador"></div>
+  <div class="quien"><b id="hojaCuenta">…</b><span id="hojaUsuario"></span></div>
+  <button class="fila" onclick="cerrarHoja();ir('cuenta')">
+    <svg viewBox="0 0 24 24"><path d="M4 20V9l8-5 8 5v11"/><path d="M9 20v-6h6v6"/></svg> Cuenta
+  </button>
+  <button class="fila" onclick="cerrarHoja();ir('accesos')">
+    <svg viewBox="0 0 24 24"><circle cx="9" cy="8" r="3.4"/><path d="M3 20c0-3.3 2.7-6 6-6s6 2.7 6 6"/><path d="M17 11h5M19.5 8.5v5"/></svg> Accesos
+  </button>
+  <button class="fila" onclick="cerrarHoja();ir('roles')">
+    <svg viewBox="0 0 24 24"><path d="M12 3l8 3.5v5.8c0 4.9-3.3 8.8-8 10.2-4.7-1.4-8-5.3-8-10.2V6.5z"/><path d="M9 12l2 2 4.5-4.5"/></svg> Roles
+  </button>
+  <!-- Los llenan instalar.js y avisos.js, igual que en el pie del lateral. -->
+  <div class="huecoInstalar"></div>
+  <div class="huecoAvisosPie"></div>
+  <button class="fila salir" onclick="cerrarHoja();salir()">
+    <svg viewBox="0 0 24 24"><path d="M15 12H4m0 0l4-4m-4 4l4 4"/><path d="M11 4h7a1 1 0 011 1v14a1 1 0 01-1 1h-7"/></svg> Cerrar sesión
+  </button>
+</div>
+
+<script>
+  // La hoja de «Más». Quince líneas y ninguna decisión: abrir, cerrar, y copiar
+  // el nombre de la cuenta desde el pie del lateral —que es el que llena
+  // consola.js— para no tocar consola.js por algo tan chico.
+  function abrirHoja(){
+    var c = document.getElementById('pieCuenta'), u = document.getElementById('pieUsuario');
+    if (c) document.getElementById('hojaCuenta').textContent = c.textContent;
+    if (u) document.getElementById('hojaUsuario').textContent = u.textContent;
+    document.getElementById('hojaMas').classList.add('abierta');
+    document.getElementById('veloHoja').classList.add('abierta');
+  }
+  function cerrarHoja(){
+    document.getElementById('hojaMas').classList.remove('abierta');
+    document.getElementById('veloHoja').classList.remove('abierta');
+  }
+  // ⚠ Si se cambia de sección desde la barra, la hoja no puede quedar abierta.
+  document.addEventListener('click', function(e){
+    if (e.target.closest && e.target.closest('nav.menu.abajo button') &&
+        e.target.closest('nav.menu.abajo button').id !== 'btnHojaMas') cerrarHoja();
+  });
+</script>
+
 <script src="/consola.js"></script>
 <!-- El editor visual de marcas. Va después: usa `window.uiMiFirma`. -->
 <script src="/marcas.js"></script>

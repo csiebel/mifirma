@@ -50,48 +50,54 @@
   }
 
   // ── 3. El botón ─────────────────────────────────────────────────────────
-  var hueco = null;
+  //
+  // ⚠ Hay MÁS DE UN hueco desde el rediseño de teléfono (15/8): el del pie del
+  // lateral, que se ve en la computadora, y el de la hoja de «Más», que se ve
+  // en el teléfono. Por eso `.huecoInstalar` (clase) y no `#instalar` (id): con
+  // el id sólo se llenaba el primero, y en el teléfono —justo donde instalar
+  // tiene sentido— el botón no aparecía.
   var invitacion = null; // el `beforeinstallprompt` que guardó el navegador
 
+  function huecos() {
+    return document.querySelectorAll('.huecoInstalar');
+  }
+
   function pintar() {
-    hueco = hueco || document.getElementById('instalar');
-    if (!hueco) return; // esta página no ofrece instalar (p. ej. /entrar)
+    var lista = huecos();
+    if (!lista.length) return; // esta página no ofrece instalar (p. ej. /entrar)
     if (yaInstalada()) {
-      hueco.innerHTML = '';
+      lista.forEach(function (h) { h.innerHTML = ''; });
       return;
     }
 
+    function vaciarTodos() {
+      huecos().forEach(function (h) { h.innerHTML = ''; });
+    }
+
     if (invitacion) {
-      hueco.innerHTML =
-        '<button type="button" id="btnInstalar">Instalar MiFirma</button>';
-      document.getElementById('btnInstalar').addEventListener('click', function () {
-        var guardada = invitacion;
-        invitacion = null; // una invitación se usa una sola vez
-        guardada.prompt();
-        guardada.userChoice
-          .then(function (r) {
-            if (r && r.outcome === 'accepted') {
-              hueco.innerHTML = '';
-            } else {
-              // Dijo que no: no insistimos en esta visita.
-              hueco.innerHTML = '';
-            }
-          })
-          .catch(function () {
-            hueco.innerHTML = '';
-          });
+      lista.forEach(function (h) {
+        h.innerHTML = '<button type="button">Instalar MiFirma</button>';
+        h.querySelector('button').addEventListener('click', function () {
+          var guardada = invitacion;
+          invitacion = null; // una invitación se usa una sola vez
+          guardada.prompt();
+          // Diga que sí o que no, el botón se va: no se insiste en esta visita.
+          guardada.userChoice.then(vaciarTodos).catch(vaciarTodos);
+        });
       });
       return;
     }
 
     if (esIOS()) {
-      hueco.innerHTML =
-        '<button type="button" id="btnInstalar">Instalar MiFirma</button>' +
-        '<p class="comoInstalar" hidden>Tocá <b>Compartir</b> abajo y elegí ' +
-        '<b>Agregar a inicio</b>. MiFirma queda con su ícono, como una app.</p>';
-      document.getElementById('btnInstalar').addEventListener('click', function () {
-        var p = hueco.querySelector('.comoInstalar');
-        if (p) p.hidden = !p.hidden;
+      lista.forEach(function (h) {
+        h.innerHTML =
+          '<button type="button">Instalar MiFirma</button>' +
+          '<p class="comoInstalar" hidden>Tocá <b>Compartir</b> abajo y elegí ' +
+          '<b>Agregar a inicio</b>. MiFirma queda con su ícono, como una app.</p>';
+        h.querySelector('button').addEventListener('click', function () {
+          var p = h.querySelector('.comoInstalar');
+          if (p) p.hidden = !p.hidden;
+        });
       });
     }
     // Ni invitación ni iOS: el navegador no permite instalar (o ya lo hizo).
@@ -109,7 +115,7 @@
 
   window.addEventListener('appinstalled', function () {
     invitacion = null;
-    if (hueco) hueco.innerHTML = '';
+    huecos().forEach(function (h) { h.innerHTML = ''; });
   });
 
   if (document.readyState === 'loading') {
