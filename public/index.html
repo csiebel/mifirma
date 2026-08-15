@@ -497,31 +497,46 @@
     .enrollar[aria-expanded="true"] .flecha{transform:rotate(90deg)}
     .enrollado{display:none!important}
 
-    /* 3. La tabla deja de ser tabla: cada documento es una TARJETA.
+    /* 3. Las tablas anchas dejan de ser tablas: cada fila es una TARJETA.
           Los encabezados de columna se van —«DOCUMENTO ESTADO FIRMAS SUBIDO»
           arriba de una tarjeta no significa nada— y cada celda pasa a ser un
-          renglón. El orden que queda es el que ya tenía: nombre, estado,
-          firmas, fecha, acciones. */
-    .zona table,.zona tbody,.zona tr,.zona td{display:block;width:auto}
-    .zona thead{display:none}
-    .zona table{border-collapse:separate}
-    .zona tr{background:var(--paper);border:1px solid var(--line);border-radius:var(--r);
-             padding:14px;margin:0 0 10px;box-shadow:0 1px 2px rgba(15,30,44,.04)}
-    .zona td{border:0;padding:0;font-size:14.5px}
-    .zona td:empty{display:none}
-    .zona tr td:nth-child(1){font-size:15.5px;line-height:1.35}
-    .zona tr td:nth-child(2),.zona tr td:nth-child(3){margin-top:9px}
-    /* La fecha, chiquita y gris: es lo que menos se mira. */
-    .zona tr td:nth-child(4){margin-top:9px;font-size:12.5px;color:var(--mut)}
+          renglón, en el orden que ya tenía.
+
+          ⚠ Se marca con `class="tarjetas"` en el HTML, tabla por tabla, y NO se
+          aplica a todas: `tPermisos` tiene dos columnas (rol y qué puede hacer)
+          y entra perfecto como tabla. Convertir en tarjeta algo que ya se ve
+          bien es empeorarlo. */
+    .tarjetas,.tarjetas tbody,.tarjetas tr,.tarjetas td{display:block;width:auto}
+    .tarjetas thead{display:none}
+    .tarjetas{border-collapse:separate}
+    .tarjetas tr{background:var(--paper);border:1px solid var(--line);border-radius:var(--r);
+                 padding:14px;margin:0 0 10px;box-shadow:0 1px 2px rgba(15,30,44,.04)}
+    .tarjetas td{border:0;padding:0;font-size:14.5px}
+    .tarjetas td:empty{display:none}
+    .tarjetas tr td:nth-child(1){font-size:15.5px;line-height:1.35}
+    .tarjetas tr td+td{margin-top:9px}
     /* Las acciones, a lo ancho y con tamaño de dedo. */
-    .zona tr td:last-child{margin-top:12px}
-    .zona tr td:last-child .acc{justify-content:flex-start!important;flex-wrap:wrap;gap:8px}
-    .zona tr td:last-child .btn{flex:1 1 auto;min-width:calc(50% - 4px);min-height:44px;
-                                justify-content:center;display:inline-flex;align-items:center}
+    .tarjetas tr td:last-child{margin-top:12px}
+    .tarjetas tr td:last-child .acc{justify-content:flex-start!important;flex-wrap:wrap;gap:8px}
+    .tarjetas tr td:last-child .btn{flex:1 1 auto;min-width:calc(50% - 4px);min-height:44px;
+                                    justify-content:center;display:inline-flex;align-items:center}
     /* La fila de «Un momento…» o «no hay nada» no es una tarjeta. */
-    .zona tr:has(td.vacio){background:none;border:0;box-shadow:none;padding:0}
-    .zona td.vacio{padding:36px 12px}
+    .tarjetas tr:has(td.vacio){background:none;border:0;box-shadow:none;padding:0}
+    .tarjetas td.vacio{padding:36px 12px}
+
+    /* Lo que cambia de tabla a tabla es qué dato es el que menos se mira, y ése
+       va chiquito y gris. En Documentos es la fecha de subida; en Actividad es
+       al revés: la fecha ENCABEZA cada renglón de la bitácora. */
+    .tarjetas.docs tr td:nth-child(4){font-size:12.5px;color:var(--mut)}
+    .tarjetas.acts tr td:nth-child(1){font-size:12.5px;color:var(--mut);margin-bottom:2px}
+    .tarjetas.acts tr td:nth-child(2){font-size:15.5px;font-weight:600;margin-top:0}
+    .tarjetas.acts tr td:nth-child(4){font-size:13px;color:var(--mut)}
+    .tarjetas.gente tr td:nth-child(1){font-size:15px}
+    .tarjetas.roles tr td:nth-child(2){font-size:13.5px;color:var(--mut)}
+
     .cabPanel{flex-wrap:wrap;gap:8px}
+    /* El árbol de Carpetas: mismo tratamiento que el de Documentos. */
+    .doscol{gap:0}
   }
 </style>
 </head>
@@ -613,7 +628,7 @@
             </label>
           </div>
         </div>
-        <table>
+        <table class="tarjetas docs">
           <thead><tr><th>Documento</th><th>Estado</th><th>Firmas</th><th>Subido</th><th></th></tr></thead>
           <tbody id="tDocumentos"></tbody>
         </table>
@@ -633,6 +648,12 @@
       <button class="btn btn-p" onclick="abrirNuevaCarpeta()">Nueva subcarpeta</button>
     </div>
     <div class="doscol">
+      <!-- Igual que en Documentos: en el teléfono el árbol viene enrollado. -->
+      <button type="button" class="enrollar" onclick="enrollar('arbol', this)" aria-expanded="false">
+        <svg viewBox="0 0 24 24"><path d="M3 7a2 2 0 012-2h4l2 2.5h8a2 2 0 012 2V18a2 2 0 01-2 2H5a2 2 0 01-2-2z"/></svg>
+        <span>Elegir carpeta</span>
+        <span class="flecha">›</span>
+      </button>
       <div class="panel arbol" id="arbol"></div>
       <div class="panel">
         <div class="cabPanel">
@@ -662,7 +683,7 @@
       <button class="btn btn-p" onclick="abrirNuevoAcceso()">Dar acceso</button>
     </div>
     <div class="panel">
-      <table>
+      <table class="tarjetas gente">
         <thead><tr><th>Persona</th><th>Roles</th><th>Estado</th><th></th></tr></thead>
         <tbody id="tUsuarios"></tbody>
       </table>
@@ -680,7 +701,7 @@
       </div>
       <button class="btn btn-p" onclick="abrirNuevoRol()">Nuevo rol</button>
     </div>
-    <div class="panel"><table>
+    <div class="panel"><table class="tarjetas roles">
       <thead><tr><th>Rol</th><th>Capacidades</th><th></th></tr></thead>
       <tbody id="tRoles"></tbody>
     </table></div>
@@ -757,7 +778,7 @@
       <button class="btn btn-s" onclick="cargarActividad()">Actualizar</button>
     </div></div>
     <div class="panel">
-      <table>
+      <table class="tarjetas acts">
         <thead><tr><th>Cuándo</th><th>Qué pasó</th><th>Quién</th><th>Detalle</th></tr></thead>
         <tbody id="tActividad"></tbody>
       </table>
@@ -889,8 +910,10 @@
   // —`.enrollado` es `display:none` y ahí no hay botón para volver a abrirlo—.
   document.addEventListener('DOMContentLoaded', function(){
     if (window.matchMedia('(max-width:899px)').matches) {
-      var p = document.getElementById('panelArbolDocs');
-      if (p) p.classList.add('enrollado');
+      ['panelArbolDocs','arbol'].forEach(function(id){
+        var p = document.getElementById(id);
+        if (p) p.classList.add('enrollado');
+      });
     }
   });
 
