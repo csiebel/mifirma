@@ -16,7 +16,7 @@
       'canal.h1':'Por onde mandamos o código?','canal.lead':'É um equipamento novo, então confirmamos que é você.',
       'canal.correo':'Por e-mail','canal.sms':'Por SMS','canal.wa':'Por WhatsApp',
       'otp.h1':'Digite o código','otp.codigo':'Código de 6 dígitos','btn.verificar':'Verificar',
-      'otp.reenviar':'Enviar outro código','otp.destino':'Enviamos para {destino}.',
+      'otp.reenviar':'Enviar outro código','otp.porCorreo':'Enviar por e-mail','otp.destino':'Enviamos para {destino}.',
       'otp.enviado':'Pronto, enviamos outro para {destino}.',
       'cuenta.h1':'Em qual conta você quer entrar?','cuenta.lead':'Você tem acesso a mais de uma.',
       'crear.h1':'Crie a conta da sua empresa','crear.h1.persona':'Crie a sua conta',
@@ -62,7 +62,7 @@
       'canal.h1':'Where should we send the code?','canal.lead':'New device, so we check it’s really you.',
       'canal.correo':'By email','canal.sms':'By SMS','canal.wa':'By WhatsApp',
       'otp.h1':'Enter the code','otp.codigo':'6-digit code','btn.verificar':'Verify',
-      'otp.reenviar':'Send another code','otp.destino':'We sent it to {destino}.',
+      'otp.reenviar':'Send another code','otp.porCorreo':'Send it by email','otp.destino':'We sent it to {destino}.',
       'otp.enviado':'Done, we sent another one to {destino}.',
       'cuenta.h1':'Which account do you want to enter?','cuenta.lead':'You have access to more than one.',
       'crear.h1':'Create your company account','crear.h1.persona':'Create your account',
@@ -106,7 +106,7 @@
   document.querySelectorAll('[data-t]').forEach(function(el){ BASE[el.dataset.t] = el.textContent; });
   T.es = Object.assign({}, BASE, {
     'canal.sms':'Por SMS','canal.wa':'Por WhatsApp','esperando':'Un momento…',
-    'otp.destino':'Te lo mandamos a {destino}.','otp.enviado':'Listo, te mandamos otro a {destino}.',
+    'otp.porCorreo':'Mandámelo por correo','otp.destino':'Te lo mandamos a {destino}.','otp.enviado':'Listo, te mandamos otro a {destino}.',
     'np.h1.inv':'Bienvenido: elegí tu contraseña',
     'reset.ok':'Si ese correo tiene cuenta, te llega un enlace en unos minutos.',
     'np.ok':'Listo. Entrá con tu contraseña nueva.',
@@ -311,6 +311,16 @@
   function mostrarOtp(j){
     DESAFIO_OTP = j.challenge;
     $('otpDestino').textContent = t('otp.destino').replace('{destino}', j.destino_masked || '');
+    // ⚠ El botón SIEMPRE manda por correo (`reenviarOtp` pide 'email'), pero
+    // decía «Enviar otro código»: si el código salió al teléfono, eso esconde
+    // justo el respaldo que hace falta cuando el teléfono no está a mano.
+    // Se cambia también el `data-t` para que sobreviva a un cambio de idioma.
+    var bReenviar = document.querySelector('[data-t="otp.reenviar"], [data-t="otp.porCorreo"]');
+    if (bReenviar) {
+      var clave = j.canal && j.canal !== 'email' ? 'otp.porCorreo' : 'otp.reenviar';
+      bReenviar.setAttribute('data-t', clave);
+      bReenviar.textContent = t(clave);
+    }
     $('codigo').value = ''; msg('msgOtp','',''); ver('vOtp');
     setTimeout(function(){ $('codigo').focus(); }, 50);
   }

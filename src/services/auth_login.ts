@@ -16,6 +16,7 @@ import { enviarCorreo } from './correo';
 import { enviarOtpPorTwilio, twilioActivo } from './twilio';
 import { registrarSistema, registrarPlataforma } from './auditoria';
 import { HttpError } from '../http/errors';
+import { canalTelefono } from './canal_otp';
 
 /**
  * Login en dos pasos, sobre identidad global.
@@ -114,15 +115,6 @@ function enmascararTel(tel: string): string {
   return d.length <= 3 ? '••••' : '•••• ' + d.slice(-3);
 }
 
-function canalTelefono(
-  tel: string,
-  c: { from_sms: string | null; from_whatsapp: string | null } | null,
-): 'sms' | 'whatsapp' | null {
-  if (!tel || !c) return null;
-  if (c.from_sms) return 'sms';
-  if (c.from_whatsapp) return 'whatsapp';
-  return null;
-}
 
 /**
  * Modo sistema sin cuenta: el login ocurre antes de saber a qué cuenta se entra.
@@ -259,7 +251,7 @@ async function crearYEnviarOtp(
   let canal: 'email' | 'sms' | 'whatsapp' = 'email';
   if (canalPedido === 'sms' || canalPedido === 'whatsapp') {
     const c = tel ? await twilioActivo() : null;
-    canal = canalTelefono(tel, c) ?? 'email';
+    canal = canalTelefono(tel, c, canalPedido) ?? 'email';
   }
 
   const codigo = String(randomInt(0, 1000000)).padStart(6, '0');
@@ -383,6 +375,8 @@ interface IdentidadLogin {
   bloqueadaHasta: Date | null;
   telefono: string | null;
   idioma: string | null;
+  /** Por dónde eligió recibir el código (migración 061). 'email' = no eligió. */
+  otpCanal: string | null;
 }
 
 export async function loginConPassword(
@@ -406,6 +400,7 @@ export async function loginConPassword(
         'c.hash_password as hashPassword',
         'c.bloqueada_hasta as bloqueadaHasta',
         'c.telefono_e164 as telefono',
+        'c.otp_canal as otpCanal',
       ])
       .where('i.email_normalizado', '=', emailN)
       .executeTakeFirst(),
@@ -440,6 +435,7 @@ export async function loginConPassword(
     bloqueadaHasta: ident.bloqueadaHasta as Date | null,
     telefono: ident.telefono,
     idioma: ident.idioma,
+    otpCanal: ident.otpCanal,
   };
 
   // Dispositivo conocido: la prueba de identidad se hereda de cuando se lo confió.
@@ -456,7 +452,35 @@ export async function loginConPassword(
   const challenge = await firmarDesafioOtp(yo.id, deviceId);
   const anclajes = await anclajesDe(yo.id);
   const tel = (yo.telefono || '').trim();
-  const canalTel = tel ? canalTelefono(tel, await twilioActivo()) : null;
+  const twilio = tel ? await twilioActivo() : null;
+
+  // ⚠⚠ LA PREFERENCIA MANDA, Y NO SE VUELVE A PREGUNTAR (migración 061).
+  //
+  // Quien eligió SMS o WhatsApp en su cuenta lo recibe por ahí, sin la pantalla
+  // de «¿por dónde?». Quien no eligió nada queda en 'email', que es lo que
+  // viene de fábrica, y **sigue viendo la pregunta igual que antes** — decidido
+  // por Claudio el 15/8: 'email' no distingue «elegí el correo» de «no elegí»,
+  // así que no se puede tratar como una elección.
+  //
+  // ⚠ Si el canal elegido no está conectado en Twilio, esto da null y el código
+  // sale por correo. La preferencia es un deseo, no una promesa, y el correo es
+  // el respaldo que no puede fallar.
+  const elegido = yo.otpCanal === 'sms' || yo.otpCanal === 'whatsapp' ? yo.otpCanal : null;
+  const canalElegido = elegido ? canalTelefono(tel, twilio, elegido) : null;
+
+  if (canalElegido) {
+    const { canal, destinoMasked } = await crearYEnviarOtp(
+      yo.id,
+      deviceId,
+      { email: yo.email, anclajeEmailId: anclajes.email, telefono: tel, anclajeTelId: anclajes.telefono },
+      canalElegido,
+      ip,
+      userAgent,
+    );
+    return { tipo: 'otp', challenge, canal, destino_masked: destinoMasked };
+  }
+
+  const canalTel = canalTelefono(tel, twilio);
 
   if (canalTel) {
     return {
@@ -700,7 +724,7 @@ export async function verificarOtp(
   if (!yo) throw new HttpError(401, 'Sesión inválida.');
 
   return elegirCuenta(
-    { id: yo.id, email: yo.email, hashPassword: null, bloqueadaHasta: null, telefono: null, idioma: yo.idioma },
+    { id: yo.id, email: yo.email, hashPassword: null, bloqueadaHasta: null, telefono: null, idioma: yo.idioma, otpCanal: null },
     {
       anclajesProbados: prueba.anclajeId ? [prueba.anclajeId] : [],
       nivelGarantia: nivel,
@@ -799,7 +823,7 @@ export async function elegirCuentaLogin(
   return abrirSesion(
     cuentaId,
     elegida.nombre,
-    { id: yo.id, email: yo.email, hashPassword: null, bloqueadaHasta: null, telefono: null, idioma: yo.idioma },
+    { id: yo.id, email: yo.email, hashPassword: null, bloqueadaHasta: null, telefono: null, idioma: yo.idioma, otpCanal: null },
     datos,
     ip,
     userAgent,
