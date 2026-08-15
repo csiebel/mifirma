@@ -106,8 +106,36 @@ export async function twilioActivo(): Promise<FilaTwilio | null> {
   return c;
 }
 
-function textoOtp(codigo: string, ttlMin: number): string {
-  return `Tu código de acceso a MiFirma es ${codigo}. Vence en ${ttlMin} minutos.`;
+/**
+ * A qué viene el mensaje. **No es decoración: es lo único que distingue tres
+ * cosas muy distintas** que salen al mismo teléfono.
+ */
+export type PropositoSms = 'entrar' | 'confirmar_telefono' | 'prueba';
+
+/**
+ * ⚠⚠ POR QUÉ ESTO EXISTE. Hasta el 15/8/2026 los tres mandaban el MISMO texto:
+ * «Tu código de acceso a MiFirma es 123456». El código para entrar, el de
+ * confirmar un celular y el botón de prueba del operador eran indistinguibles
+ * mirando el teléfono.
+ *
+ * Costó una discusión de cinco mensajes esa misma tarde —había que ir a la base
+ * para saber cuál era cuál— y tenía un filo peor: **si alguien recibe un
+ * «código de acceso» que no pidió, no puede distinguir un ataque de una prueba.**
+ *
+ * > Regla: si dos mensajes distintos dicen lo mismo, no se pueden distinguir
+ * > cuando importa. Y el momento en que importa es siempre el peor.
+ *
+ * ⚠ Se cuidan los 160 caracteres: pasarse cuesta el doble por mensaje.
+ * ⚠ Salen sólo en castellano, como el resto de los avisos (deuda 56).
+ */
+function textoSms(proposito: PropositoSms, codigo: string, ttlMin: number): string {
+  if (proposito === 'prueba') {
+    return `Mensaje de prueba de MiFirma. Si no lo pediste vos, ignoralo: no es un código de acceso.`;
+  }
+  if (proposito === 'confirmar_telefono') {
+    return `Tu código para confirmar este celular en MiFirma es ${codigo}. Vence en ${ttlMin} minutos. Si no lo pediste, ignoralo.`;
+  }
+  return `Tu código para entrar a MiFirma es ${codigo}. Vence en ${ttlMin} minutos. Si no intentaste entrar, ignoralo.`;
 }
 
 async function enviarMensaje(c: FilaTwilio, params: Record<string, string>) {
@@ -143,18 +171,34 @@ async function enviarMensaje(c: FilaTwilio, params: Record<string, string>) {
 }
 
 /** Manda el código por SMS. Requiere from_sms. */
-async function enviarSms(c: FilaTwilio, telefono: string, codigo: string, ttlMin: number) {
+async function enviarSms(
+  c: FilaTwilio,
+  telefono: string,
+  codigo: string,
+  ttlMin: number,
+  proposito: PropositoSms,
+) {
   if (!c.from_sms) throw new HttpError(503, 'No hay número de SMS configurado en Twilio.');
-  await enviarMensaje(c, { To: telefono, From: c.from_sms, Body: textoOtp(codigo, ttlMin) });
+  await enviarMensaje(c, { To: telefono, From: c.from_sms, Body: textoSms(proposito, codigo, ttlMin) });
 }
 
 /** Manda el código por WhatsApp. Usa la plantilla aprobada (Content SID) si está
  *  configurada; si no, manda texto plano (solo válido en sandbox o ventana de 24h). */
-async function enviarWhatsapp(c: FilaTwilio, telefono: string, codigo: string, ttlMin: number) {
+async function enviarWhatsapp(
+  c: FilaTwilio,
+  telefono: string,
+  codigo: string,
+  ttlMin: number,
+  proposito: PropositoSms,
+) {
   if (!c.from_whatsapp) throw new HttpError(503, 'No hay remitente de WhatsApp configurado en Twilio.');
   const to = telefono.startsWith('whatsapp:') ? telefono : `whatsapp:${telefono}`;
   const from = c.from_whatsapp.startsWith('whatsapp:') ? c.from_whatsapp : `whatsapp:${c.from_whatsapp}`;
   if (c.wa_content_sid) {
+    // ⚠ Con plantilla aprobada, el texto lo define Meta y acá sólo viaja el
+    // código: el propósito NO puede cambiarlo. Una plantilla de «authentication»
+    // habla de iniciar sesión, así que para confirmar un celular el texto va a
+    // quedar impreciso hasta que haya una plantilla propia para eso.
     await enviarMensaje(c, {
       To: to,
       From: from,
@@ -162,7 +206,7 @@ async function enviarWhatsapp(c: FilaTwilio, telefono: string, codigo: string, t
       ContentVariables: JSON.stringify({ '1': codigo }),
     });
   } else {
-    await enviarMensaje(c, { To: to, From: from, Body: textoOtp(codigo, ttlMin) });
+    await enviarMensaje(c, { To: to, From: from, Body: textoSms(proposito, codigo, ttlMin) });
   }
 }
 
@@ -172,11 +216,14 @@ export async function enviarOtpPorTwilio(
   telefono: string,
   codigo: string,
   ttlMin: number,
+  // ⚠ Sin valor por omisión A PROPÓSITO: quien manda un código tiene que decir
+  // a qué viene. Un default sería volver al problema de que todos digan lo mismo.
+  proposito: PropositoSms,
 ) {
   const c = await twilioActivo();
   if (!c) throw new HttpError(503, 'No hay conexión de Twilio activa.');
-  if (canal === 'whatsapp') await enviarWhatsapp(c, telefono, codigo, ttlMin);
-  else await enviarSms(c, telefono, codigo, ttlMin);
+  if (canal === 'whatsapp') await enviarWhatsapp(c, telefono, codigo, ttlMin, proposito);
+  else await enviarSms(c, telefono, codigo, ttlMin, proposito);
 }
 
 /** Envío de prueba desde la consola del operador, con un código de ejemplo. */
@@ -187,8 +234,11 @@ export async function enviarPruebaTwilio(canal: 'sms' | 'whatsapp', telefono: st
   }
   const c = await twilioActivo();
   if (!c) throw new HttpError(503, 'Activá la conexión de Twilio antes de probar.');
+  // El código sólo se usa si hay plantilla de WhatsApp (que exige una variable);
+  // en SMS el texto de prueba no lleva ningún código, para que no se confunda
+  // con uno real.
   const codigo = '123456';
-  if (canal === 'whatsapp') await enviarWhatsapp(c, limpio, codigo, 10);
-  else await enviarSms(c, limpio, codigo, 10);
+  if (canal === 'whatsapp') await enviarWhatsapp(c, limpio, codigo, 10, 'prueba');
+  else await enviarSms(c, limpio, codigo, 10, 'prueba');
   return { ok: true, canal, telefono: limpio };
 }

@@ -328,7 +328,7 @@ export async function pedirCodigoDeTelefono(
       'Todavía no podemos mandar mensajes al celular. Escribinos y lo activamos.',
     );
   }
-  await enviarOtpPorTwilio(porDonde, tel, codigo, TTL_CONFIRMACION_MIN);
+  await enviarOtpPorTwilio(porDonde, tel, codigo, TTL_CONFIRMACION_MIN, 'confirmar_telefono');
 
   await registrarSistema(cuentaId, identidadId, {
     accion: 'perfil.telefono_codigo',

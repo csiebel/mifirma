@@ -298,7 +298,7 @@ async function crearYEnviarOtp(
 
   try {
     if (canal === 'sms' || canal === 'whatsapp') {
-      await enviarOtpPorTwilio(canal, tel, codigo, OTP_TTL_MIN);
+      await enviarOtpPorTwilio(canal, tel, codigo, OTP_TTL_MIN, 'entrar');
     } else {
       await enviarOtpPorCorreo(destino.email, codigo);
     }
