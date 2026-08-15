@@ -7,7 +7,8 @@ import { anotar } from './evidencia';
 import { registrar, registrarSistema } from './auditoria';
 import { emitirEnlaceFirma, urlDeFirma } from '../auth/enlace_firma';
 import { enviarCorreo } from './correo';
-import { avisar } from './mensajes';
+import { avisar, armar } from './mensajes';
+import { notificarUsuario } from './push';
 import { almacen } from '../almacenamiento/almacen';
 import { partirLista } from './lista_de_correos';
 import { juzgarValorDePlanilla, type CampoValidable } from './campos';
@@ -1553,6 +1554,37 @@ export async function enlaceDeFirma(
 }
 
 /**
+ * El cartelito en el teléfono, si esta persona lo prendió en algún dispositivo.
+ *
+ * ⚠ **Acompaña al correo, no lo reemplaza.** El correo lleva el enlace y deja
+ * constancia; esto sólo acelera el enterarse. Por eso va DESPUÉS del envío del
+ * correo y no puede afectarlo: `notificarUsuario` no lanza nunca, y acá igual se
+ * envuelve, porque un aviso no puede tumbar un despacho.
+ *
+ * ⚠ El texto sale del catálogo (`armar`), nunca de acá: en el canal push no va
+ * nada del documento — ver el comentario de `POR_OMISION` en `mensajes.ts`.
+ */
+async function empujarAviso(
+  cuentaId: string,
+  identidadId: string | null,
+  codigo: 'invitacion_firma' | 'completado',
+  idioma = 'es',
+): Promise<void> {
+  if (!identidadId) return;
+  try {
+    const t = await armar(codigo, 'push', idioma, {}, { cuentaId });
+    if (!t) return; // sin texto para este canal no se manda nada
+    await notificarUsuario(cuentaId, identidadId, {
+      title: t.asunto ?? 'MiFirma',
+      body: t.cuerpo,
+      url: '/app',
+    });
+  } catch {
+    /* nunca puede afectar al despacho ni al cierre del circuito */
+  }
+}
+
+/**
  * Manda el correo y lo anota. Fuera de la transacción del despacho: que un
  * servidor SMTP caído impida despachar sería peor que un documento enviado con
  * una notificación que hay que reintentar.
@@ -1591,6 +1623,19 @@ async function notificar(
   } catch (err) {
     error = err instanceof Error ? err.message : 'error desconocido';
   }
+
+  // Y además, el cartelito en el teléfono — si esta persona lo prendió en algún
+  // dispositivo. **No reemplaza al correo**: el correo lleva el enlace, deja
+  // constancia y sobrevive a que alguien cambie de teléfono; el aviso sólo hace
+  // que se entere antes, que es el problema real (el documento parado porque
+  // nadie vio el correo).
+  //
+  // `notificarUsuario` nunca lanza y no manda nada si la persona no tiene
+  // suscripción, así que no hace falta preguntar antes.
+  //
+  // ⚠ El texto sale del catálogo, NO se escribe acá: en el push no va nada del
+  // documento (ver `POR_OMISION` en `mensajes.ts`).
+  await empujarAviso(cuentaId, e.identidadId, 'invitacion_firma');
 
   // El resultado va al expediente en los dos casos. Que una notificación no
   // haya salido es parte de la historia del documento: si el firmante dice que
@@ -1967,6 +2012,10 @@ export async function avisarCompletado(circuitoId: string, instanciaId: string) 
         ],
       });
       avisados += 1;
+      // El cartelito, además del correo. Va acá adentro a propósito: si el
+      // correo —que es el que lleva el PDF firmado y el certificado— no salió,
+      // no corresponde decirle a nadie «ya está» en el teléfono.
+      await empujarAviso(datos.cuenta_id, d.identidadId, 'completado');
     } catch (err) {
       error = err instanceof Error ? err.message : 'error desconocido';
     }

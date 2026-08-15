@@ -70,14 +70,16 @@ self.addEventListener('push', (e) => {
     body: data.body || '',
     icon: '/icon-192.png',
     badge: '/icon-192.png',
-    data: { url: data.url || '/mi' },
+    // ⚠ `/app`, no `/mi`: `/mi` era la pantalla del empleado en PAYROLL y acá
+    // no existe. Tocar el cartelito habría abierto un 404.
+    data: { url: data.url || '/app' },
   };
   e.waitUntil(self.registration.showNotification(title, options));
 });
 
 self.addEventListener('notificationclick', (e) => {
   e.notification.close();
-  const url = (e.notification.data && e.notification.data.url) || '/mi';
+  const url = (e.notification.data && e.notification.data.url) || '/app';
   e.waitUntil(
     self.clients.matchAll({ type: 'window', includeUncontrolled: true }).then((list) => {
       for (const c of list) {

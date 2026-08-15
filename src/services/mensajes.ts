@@ -62,6 +62,20 @@ interface Texto { asunto: string | null; cuerpo: string }
  * origen del texto. El HTML del correo se arma alrededor, no acá — un texto que
  * sirve para un SMS no puede traer etiquetas.
  */
+/**
+ * ⚠⚠ **En el canal `push` no va NADA del documento.** Ni el título, ni el
+ * nombre del emisor, ni un monto. El cartelito se lee en la pantalla bloqueada
+ * de un teléfono apoyado en una mesa, o por encima del hombro en el ómnibus: lo
+ * que se ponga acá lo ve cualquiera que pase. Al tocarlo se abre MiFirma y ahí
+ * sí está todo, detrás de la sesión. Regla de `apps-y-dispositivos.md` §3,
+ * confirmada por Claudio el 14/8.
+ *
+ * ⚠ El texto del push de `cancelado` decía «emisor» canceló «titulo» desde el
+ * día que se escribió — nunca se había mandado uno, así que nadie lo vio.
+ *
+ * Y el `asunto` de push va en `null` a propósito: el título del cartelito lo
+ * pone `avisar()` y es «MiFirma», nada más.
+ */
 const POR_OMISION: Partial<Record<CodigoMensaje, Partial<Record<Canal, Texto>>>> = {
   cancelado: {
     email: {
@@ -73,8 +87,16 @@ const POR_OMISION: Partial<Record<CodigoMensaje, Partial<Record<Canal, Texto>>>>
         'Si ya lo habías firmado, tu firma sigue valiendo y el documento queda en tu ' +
         'repositorio con el estado «cancelado».',
     },
-    push: { asunto: null, cuerpo: '«emisor» canceló «titulo»' },
+    push: { asunto: null, cuerpo: 'Se canceló un documento que tenías para firmar.' },
     sms: { asunto: null, cuerpo: '«emisor» canceló el documento «titulo». Ya no hace falta que lo firmes.' },
+  },
+
+  invitacion_firma: {
+    push: { asunto: null, cuerpo: 'Tenés un documento para firmar.' },
+  },
+
+  completado: {
+    push: { asunto: null, cuerpo: 'Un documento que firmaste quedó firmado por todas las partes.' },
   },
 };
 

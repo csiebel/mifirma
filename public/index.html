@@ -54,6 +54,7 @@
   aside .pie #instalar button{color:#cfe0ee;font-weight:600}
   aside .pie #instalar .comoInstalar{margin:8px 0 0;color:#8fa9c2;font-size:12.5px;line-height:1.45}
   aside .pie #instalar .comoInstalar b{display:inline;color:#fff;font-size:12.5px}
+  aside .pie #avisosPie button{color:#cfe0ee;font-weight:600}
 
   /* ---------- contenido ---------- */
   main{padding:30px 28px 60px;overflow-x:hidden}
@@ -423,6 +424,9 @@
     <!-- Lo llena instalar.js, y sólo si se puede instalar de verdad. Vacío no
          ocupa lugar: un botón que no hace nada es peor que no tenerlo. -->
     <div id="instalar"></div>
+    <!-- La invitación a prender los avisos, sólo mientras estén apagados. El
+         interruptor de verdad, con su explicación, vive en Cuenta. -->
+    <div id="avisosPie"></div>
     <button onclick="salir()">Cerrar sesión</button>
   </div>
 </aside>
@@ -641,6 +645,14 @@
       </div>
       <div id="msgCuenta"></div>
     </div>
+
+    <!-- Los avisos en el teléfono. Panel aparte: no es un dato de la empresa,
+         es una preferencia de ESTE dispositivo, y guardar la cuenta no tiene
+         nada que ver con prenderlos. Lo llena avisos.js. -->
+    <div class="panel" style="padding:26px;max-width:560px;margin-top:18px">
+      <h2 style="font-size:17px;margin:0 0 4px">Avisos en este dispositivo</h2>
+      <div id="avisos"></div>
+    </div>
   </section>
 
 </main>
@@ -654,5 +666,8 @@
 <!-- Enciende el service worker y ofrece instalar. Va último: no lo necesita
      nadie para que la consola funcione. -->
 <script src="/instalar.js"></script>
+<!-- Los avisos en el teléfono. Va después de instalar.js: necesita que el
+     service worker esté registrado. -->
+<script src="/avisos.js"></script>
 </body>
 </html>
