@@ -33,6 +33,22 @@
 (function () {
   'use strict';
 
+  // ⚠ Se lee ACÁ, al cargar el archivo, y no en montar(): la pantalla del
+  // firmante se limpia la dirección apenas canjea la llave (replaceState en
+  // firmar.js) y se lleva el ?debug=1 puesto. Para cuando montar() corre, la
+  // dirección ya está pelada.
+  //
+  // Y queda anotado en sessionStorage: si la pestaña muere y recarga —que es
+  // exactamente cuando el tablero más sirve— la dirección recargada ya no trae
+  // el parámetro, y sin esto el tablero desaparecía justo en el vuelo que
+  // había que mirar (visto por Claudio el 15/8). Se apaga con ?debug=0.
+  var DEBUG = false;
+  try {
+    if (/[?&]debug=0/.test(location.search)) sessionStorage.removeItem('mfDebug');
+    else if (/[?&]debug=1/.test(location.search)) sessionStorage.setItem('mfDebug', '1');
+    DEBUG = sessionStorage.getItem('mfDebug') === '1';
+  } catch (e) { DEBUG = /[?&]debug=1/.test(location.search); }
+
   var ANCHO_OBJETIVO = 760;   // px de pantalla que ocupa una hoja
   var ESCALA_MAX = 1.6;       // techo del ajuste automático al abrir
 
@@ -148,12 +164,18 @@
       }
 
       estado.paginas = doc.numPages;
+      // Los dos botones de las puntas dicen EL NÚMERO de hoja al que llevan:
+      // «1» y «500» se entienden sin explicación, cosa que una flechita no.
+      // Pedidos por Claudio el 15/8, probando el contrato de 500 en el iPhone:
+      // llegar a la última hoja a pura deslizada no es un camino, es un castigo.
       caja.innerHTML =
         '<div id="visHojas" class="vis-hojas"></div>' +
         '<div class="vis-zoom" id="visZoom">' +
+        '<button type="button" class="vis-zoom-b" data-ir="ini" title="Ir a la primera hoja" aria-label="Ir a la primera hoja">1</button>' +
         '<button type="button" class="vis-zoom-b" data-z="-" title="Achicar" aria-label="Achicar">−</button>' +
         '<button type="button" class="vis-zoom-n" data-z="fit" title="Entrar la hoja en pantalla">100%</button>' +
         '<button type="button" class="vis-zoom-b" data-z="+" title="Agrandar" aria-label="Agrandar">+</button>' +
+        '<button type="button" class="vis-zoom-b" data-ir="fin" title="Ir a la última hoja" aria-label="Ir a la última hoja">' + estado.paginas + '</button>' +
         '</div>';
       var hojas = document.getElementById('visHojas');
       // Las páginas se guardan: al hacer zoom hay que volver a pedirle a pdf.js
@@ -161,21 +183,161 @@
       var paginasPdf = [];
       var escalaAjuste = 1;
 
-      // Se dibuja cuando la hoja entra en pantalla, no antes: un contrato de
-      // 200 hojas dibujado entero son ~1,6 GB de píxeles y una pestaña colgada.
-      // Pero se MIDEN todas al abrir, porque hace falta para convertir
-      // coordenadas en cualquier hoja aunque no se esté mirando.
-      var pendientes = new Map();
+      // Se dibuja cuando la hoja se ACERCA a la pantalla — y se SUELTA cuando
+      // se aleja. Las dos mitades importan igual:
+      //
+      //  · Dibujar todo al abrir: un contrato de 200 hojas entero son ~1,6 GB
+      //    de píxeles y una pestaña colgada. Eso ya estaba resuelto.
+      //  · Dibujar al pasar y NO soltar: medido el 15/8 con el contrato de
+      //    prueba de 500 hojas — leerlo entero deja 515 MB de lienzos vivos,
+      //    que en un teléfono es la pestaña muerta a mitad del documento.
+      //    Safari la recarga sin aviso y el firmante pierde el hilo.
+      //
+      // Por eso el mirador queda observando SIEMPRE: entrar dibuja, salir
+      // suelta. Lo que se mide una sola vez al abrir son los viewports, que
+      // pesan nada y hacen falta para convertir coordenadas en cualquier hoja.
+      // Las páginas también quedan (`paginasPdf`): pdf.js guarda la estructura,
+      // no los píxeles, y volver a dibujar una hoja suelta tarda menos que un
+      // parpadeo de scroll.
+      var tareas = new WeakMap();    // hoja -> render de pdf.js en vuelo
+      var enVentana = new Set();     // hojas dentro de la ventana del mirador
+      var cola = [];                 // hojas esperando su turno de dibujo
+      var dibujando = false;
+
+      function dibujarHoja(hoja, alTerminar) {
+        var i = Number(hoja.dataset.pagina);
+        var pagina = paginasPdf[i], vista = estado.viewports[i];
+        if (!pagina || !vista || hoja.querySelector('.vis-lienzo')) return alTerminar();
+        var lienzo = document.createElement('canvas');
+        lienzo.width = Math.round(vista.width);
+        lienzo.height = Math.round(vista.height);
+        lienzo.className = 'vis-lienzo';
+        hoja.insertBefore(lienzo, hoja.firstChild);
+        var t;
+        try {
+          t = pagina.render({ canvasContext: lienzo.getContext('2d'), viewport: vista });
+        } catch (e) { return alTerminar(); }
+        tareas.set(hoja, t);
+        t.promise.catch(function () { /* cancelado: la hoja se fue de la vista */ })
+          .then(function () {
+            if (tareas.get(hoja) === t) tareas.delete(hoja);
+            alTerminar();
+          });
+      }
+
+      function soltarHoja(hoja) {
+        var t = tareas.get(hoja);
+        if (t) { try { t.cancel(); } catch (e) {} tareas.delete(hoja); }
+        var lienzo = hoja.querySelector('.vis-lienzo');
+        if (lienzo) {
+          // ⚠⚠ ACHICARLO A CERO ANTES DE SACARLO. Safari de iPhone no devuelve
+          // la memoria de un canvas sacado del DOM hasta quién sabe cuándo:
+          // sin estas dos líneas, cada hoja soltada deja un fantasma del tamaño
+          // de la hoja y el visor muere por memoria igual. Ponerle 0×0 obliga a
+          // soltar los píxeles en el acto.
+          lienzo.width = 0;
+          lienzo.height = 0;
+          lienzo.remove();
+        }
+        // Y devolverle al worker lo que masticó de esta página: pdf.js guarda
+        // el contenido parseado de cada página que dibujó (letras, trazos,
+        // fuentes) y no lo suelta solo. En un contrato de 500 hojas eso también
+        // es memoria que crece con cada hoja visitada. Se limpia cuando el
+        // render en vuelo terminó de morir, y sólo si la hoja sigue lejos.
+        var i = Number(hoja.dataset.pagina);
+        var pagina = paginasPdf[i];
+        if (pagina) {
+          (t ? t.promise.catch(function () {}) : Promise.resolve()).then(function () {
+            if (!enVentana.has(hoja)) { try { pagina.cleanup(); } catch (e) {} }
+          });
+        }
+      }
+
+      /**
+       * ⚠⚠ DE A UNA HOJA POR VEZ. La versión que dibujaba apenas la hoja
+       * entraba en la ventana mató el iPhone dos veces la noche del 15/8: en un
+       * scroll rápido, decenas de hojas cruzan la ventana en segundos, cada una
+       * arrancaba su dibujo, se cancelaba al toque, y el teléfono quedaba
+       * enterrado en dibujos a medio cancelar — «Ocurrió un problema varias
+       * veces», a mitad del contrato de 500. El visor de referencia de pdf.js
+       * dibuja en fila india por esta razón exacta.
+       *
+       * La fila además TIRA lo vencido: si cuando le toca el turno la hoja ya
+       * salió de la ventana, no se dibuja nada. En un scroll largo las hojas
+       * del medio entran y salen antes de su turno, así que directamente no
+       * cuestan — ni dibujo, ni cancelación, ni worker.
+       */
+      function drenar() {
+        if (dibujando) return;
+        var hoja;
+        do { hoja = cola.shift(); }
+        while (hoja && (!enVentana.has(hoja) || hoja.querySelector('.vis-lienzo')));
+        if (!hoja) return;
+        dibujando = true;
+        dibujarHoja(hoja, function () { dibujando = false; drenar(); });
+      }
+      // ⚠⚠ El root es `caja` (#visCaja), QUE ES QUIEN SCROLLEA — no `hojas`.
+      // `#visHojas` es la tira entera: mide lo que miden las 500 hojas juntas y
+      // no recorta nada, así que comparado contra ella TODA hoja «está a la
+      // vista» siempre. Con ese root, el mirador dibujaba las 500 de una al
+      // abrir — medido el 15/8: 499 lienzos vivos a los segundos de entrar, y
+      // el iPhone muerto en la hoja 36 sin haber scrolleado casi nada. El
+      // dibujado perezoso de este visor nunca había funcionado; el del editor
+      // sí, porque allá el root ES su scrolleador (cpLienzo).
       var mirador = new IntersectionObserver(function (entradas) {
         entradas.forEach(function (e) {
-          if (!e.isIntersecting) return;
-          var dibujar = pendientes.get(e.target);
-          if (!dibujar) return;
-          pendientes.delete(e.target);
-          mirador.unobserve(e.target);
-          dibujar();
+          var hoja = e.target;
+          if (e.isIntersecting) {
+            enVentana.add(hoja);
+            if (cola.indexOf(hoja) === -1) cola.push(hoja);
+          } else {
+            enVentana.delete(hoja);
+            soltarHoja(hoja);
+          }
         });
-      }, { root: hojas, rootMargin: '500px' });
+        drenar();
+      }, { root: caja, rootMargin: '1200px' });
+
+      // ═══ EL TABLERO DE DIAGNÓSTICO — sólo con ?debug=1 en la dirección ═══
+      //
+      // En el iPhone no hay consola ni inspector a mano, y la noche del 15/8 el
+      // visor murió tres veces con tres arreglos distintos sin que pudiéramos
+      // ver UN número de adentro. Esto pone los números en la pantalla: la
+      // captura que manda Claudio pasa a ser una medición. No toca nada del
+      // producto: sin el parámetro, no existe.
+      if (DEBUG) {
+        var tablero = document.createElement('div');
+        tablero.id = 'visDebug';
+        tablero.style.cssText =
+          'position:fixed;left:6px;top:6px;z-index:99999;background:rgba(0,0,0,.82);' +
+          'color:#7fff7f;font:11px/1.5 monospace;padding:6px 9px;border-radius:6px;' +
+          'pointer-events:none;white-space:pre';
+        document.body.appendChild(tablero);
+
+        // ⚠ CAJA NEGRA. El tablero de a bordo murió con el avión tres veces: la
+        // captura nunca llegaba a sacarse. Los números se graban en
+        // localStorage varias veces por segundo — localStorage SOBREVIVE al
+        // choque de la pestaña— y el vuelo siguiente muestra los últimos
+        // números del anterior. La captura de DESPUÉS del choque alcanza.
+        var vueloAnterior = null;
+        try { vueloAnterior = localStorage.getItem('mfCajaNegra'); } catch (e) {}
+        var maxLienzos = 0;
+        setInterval(function () {
+          var cs = document.querySelectorAll('.vis-hoja canvas');
+          var px = 0;
+          for (var k = 0; k < cs.length; k++) px += cs[k].width * cs[k].height;
+          if (cs.length > maxLienzos) maxLienzos = cs.length;
+          var arriba = Math.round(caja.scrollTop / Math.max(1, caja.scrollHeight - caja.clientHeight) * 100);
+          var ahora =
+            'lienzos: ' + cs.length + ' (' + (px * 4 / 1048576).toFixed(1) + ' MB) max: ' + maxLienzos + '\n' +
+            'cola: ' + cola.length + (dibujando ? ' +dib' : '') + ' | ventana: ' + enVentana.size + '\n' +
+            'recorrido: ' + arriba + '%';
+          tablero.textContent =
+            'v7-vuelve-donde-estabas\n' + ahora +
+            (vueloAnterior ? '\n--- VUELO ANTERIOR ---\n' + vueloAnterior : '');
+          try { localStorage.setItem('mfCajaNegra', ahora.replace('v5-caja-negra\n', '')); } catch (e) {}
+        }, 300);
+      }
 
       for (var n = 1; n <= doc.numPages; n++) {
         var pag = await doc.getPage(n);
@@ -193,6 +355,17 @@
         hoja.dataset.pagina = String(n - 1);
         hoja.style.width = Math.round(vp.width) + 'px';
         hoja.style.height = Math.round(vp.height) + 'px';
+        // ⚠⚠ QUE EL NAVEGADOR NO PINTE LO LEJANO. La caja negra del 15/8 mostró
+        // 6 lienzos y 5 MB — y el iPhone muerto igual, siempre a mitad del
+        // contrato de 500. Lo que crecía no estaba en ningún contador de JS:
+        // Safari empapela el área scrolleada con baldosas de píxeles, y en una
+        // tira de 280.000 px las baldosas ya recorridas se le iban acumulando.
+        // `content-visibility: auto` le dice que lo que está lejos de la vista
+        // ni lo pinte ni lo empapele; el tamaño declarado abajo es para que el
+        // largo del scroll no cambie. Es la herramienta nativa para tiras
+        // larguísimas, y es EXTRA de nuestro mirador, no un reemplazo.
+        hoja.style.contentVisibility = 'auto';
+        hoja.style.containIntrinsicSize = Math.round(vp.width) + 'px ' + Math.round(vp.height) + 'px';
 
         var num = document.createElement('span');
         num.className = 'vis-num';
@@ -200,20 +373,35 @@
         hoja.appendChild(num);
         hojas.appendChild(hoja);
 
-        pendientes.set(hoja, (function (pagina, vista, destino) {
-          return function () {
-            var lienzo = document.createElement('canvas');
-            lienzo.width = Math.round(vista.width);
-            lienzo.height = Math.round(vista.height);
-            lienzo.className = 'vis-lienzo';
-            destino.insertBefore(lienzo, destino.firstChild);
-            pagina.render({ canvasContext: lienzo.getContext('2d'), viewport: vista });
-          };
-        })(pag, vp, hoja));
         mirador.observe(hoja);
 
-        if (estado.editable) hoja.addEventListener('pointerdown', clicEnHoja);
+        // ⚠ `click`, no `pointerdown` (15/8): con el dedo, desplazarse por el
+        // documento también empieza apoyándolo en la hoja — con `pointerdown`,
+        // CADA deslizada plantaba una firma. El editor del emisor recibió este
+        // arreglo el 15/8 (cajas.js y marcas.js) y este visor había quedado
+        // afuera: lo encontró la prueba del iPhone, sembrando marcas hasta la
+        // hoja 36. `click` sólo llega con un toque de verdad.
+        if (estado.editable) hoja.addEventListener('click', clicEnHoja);
       }
+
+      // ⚠ EL LUGAR DE LECTURA SOBREVIVE A LA MUERTE DE LA PESTAÑA. En iPhone,
+      // una ráfaga de deslizadas a máxima velocidad todavía puede matar la
+      // página: la caja negra del 15/8 mostró lienzos y cola impecables (6 y
+      // 5 MB) y el compositor de Safari muriendo igual — el empapelado de una
+      // tira de 280.000 px no da abasto a esa velocidad; a paso de lectura,
+      // sí. La cookie ya reabre sola; esto devuelve A LA HOJA donde estaba en
+      // vez de a la primera. La muerte pasa de perder el hilo a un parpadeo.
+      try {
+        var lugarGuardado = Number(sessionStorage.getItem('mfVisorScroll') || 0);
+        if (lugarGuardado > 0) caja.scrollTop = lugarGuardado;
+      } catch (e) {}
+      var ultimaAnotacion = 0;
+      caja.addEventListener('scroll', function () {
+        var ahora = Date.now();
+        if (ahora - ultimaAnotacion < 500) return;
+        ultimaAnotacion = ahora;
+        try { sessionStorage.setItem('mfVisorScroll', String(Math.round(caja.scrollTop))); } catch (e) {}
+      }, { passive: true });
 
       // =======================================================================
       // El zoom
@@ -233,7 +421,9 @@
 
         // Dónde estaba mirando, para no perder el lugar al agrandar. Sin esto,
         // hacer zoom sobre la hoja 7 de un contrato de 20 devuelve a la 1.
-        var antes = hojas.scrollTop / Math.max(1, hojas.scrollHeight);
+        // ⚠ Se mide en `caja`, que es quien scrollea: `hojas` es la tira entera
+        // y su scrollTop es siempre 0 — con él, este guardado no guardaba nada.
+        var antes = caja.scrollTop / Math.max(1, caja.scrollHeight);
         estado.escala = e2;
 
         for (var i = 0; i < paginasPdf.length; i++) {
@@ -243,24 +433,20 @@
           if (!h) continue;
           h.style.width = Math.round(vista.width) + 'px';
           h.style.height = Math.round(vista.height) + 'px';
-          var viejo = h.querySelector('.vis-lienzo');
-          if (viejo) viejo.remove();
-          pendientes.set(h, (function (pagina, v2, destino) {
-            return function () {
-              var lienzo = document.createElement('canvas');
-              lienzo.width = Math.round(v2.width);
-              lienzo.height = Math.round(v2.height);
-              lienzo.className = 'vis-lienzo';
-              destino.insertBefore(lienzo, destino.firstChild);
-              pagina.render({ canvasContext: lienzo.getContext('2d'), viewport: v2 });
-            };
-          })(paginasPdf[i], vista, h));
+          h.style.containIntrinsicSize = Math.round(vista.width) + 'px ' + Math.round(vista.height) + 'px';
+          soltarHoja(h);
+          // Re-observar de cero: el mirador sólo avisa cuando una hoja CRUZA el
+          // borde, y la que quedó quieta a la vista no cruza nada. Volver a
+          // observarla dispara el aviso inicial con el estado de ahora: la que
+          // está a la vista se redibuja ya con la escala nueva, la lejana queda
+          // suelta hasta que el scroll la acerque.
+          mirador.unobserve(h);
           mirador.observe(h);
         }
 
         pintar();
         pintarCampos();
-        hojas.scrollTop = antes * hojas.scrollHeight;
+        caja.scrollTop = antes * caja.scrollHeight;
         var n2 = document.querySelector('.vis-zoom-n');
         if (n2) n2.textContent = Math.round((estado.escala / escalaAjuste) * 100) + '%';
       }
@@ -268,6 +454,15 @@
       var barraZoom = document.getElementById('visZoom');
       if (barraZoom) {
         barraZoom.addEventListener('click', function (ev) {
+          var ir = ev.target.closest('[data-ir]');
+          if (ir) {
+            ev.preventDefault();
+            // El salto es barato a propósito: con el mirador soltando hojas,
+            // caer al final dibuja sólo las últimas, no las 500 del medio.
+            // En `caja`, que es quien scrollea — no en la tira de hojas.
+            caja.scrollTop = ir.dataset.ir === 'ini' ? 0 : caja.scrollHeight;
+            return;
+          }
           var b = ev.target.closest('[data-z]');
           if (!b) return;
           ev.preventDefault();

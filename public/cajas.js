@@ -119,19 +119,85 @@
       (op.zoomEn || caja.parentElement || caja).appendChild(barra);
 
       // Se miden todas las hojas al abrir —hace falta para convertir coordenadas
-      // en cualquiera— pero se dibuja sólo la que entra en pantalla. Un contrato
-      // de 200 hojas dibujado entero son ~1,6 GB de píxeles.
-      var pendientes = new Map();
+      // en cualquiera— pero se dibuja sólo la que se acerca a la pantalla, y se
+      // SUELTA la que se aleja. Medido el 15/8 en el visor del firmante, que
+      // tenía este mismo mirador sin la mitad de soltar: recorrer el contrato
+      // de prueba de 500 hojas dejaba 515 MB de lienzos vivos. En este editor
+      // el defecto era idéntico — mismo motor, mismo arreglo el mismo día.
+      var tareas = new WeakMap();    // hoja -> render de pdf.js en vuelo
+      var enVentana = new Set();     // hojas dentro de la ventana del mirador
+      var cola = [];                 // hojas esperando su turno de dibujo
+      var dibujando = false;
+
+      function dibujarHoja(hoja, alTerminar) {
+        var i = Number(hoja.dataset.pagina);
+        var pagina = paginasPdf[i], vista = estado.viewports[i];
+        if (!pagina || !vista || hoja.querySelector('canvas')) return alTerminar();
+        var lienzo = document.createElement('canvas');
+        lienzo.width = Math.round(vista.width);
+        lienzo.height = Math.round(vista.height);
+        lienzo.style.cssText = 'display:block;width:100%;height:100%';
+        hoja.insertBefore(lienzo, hoja.firstChild);
+        var t;
+        try {
+          t = pagina.render({ canvasContext: lienzo.getContext('2d'), viewport: vista });
+        } catch (e) { return alTerminar(); }
+        tareas.set(hoja, t);
+        t.promise.catch(function () { /* cancelado: la hoja se fue de la vista */ })
+          .then(function () {
+            if (tareas.get(hoja) === t) tareas.delete(hoja);
+            alTerminar();
+          });
+      }
+
+      function soltarHoja(hoja) {
+        var t = tareas.get(hoja);
+        if (t) { try { t.cancel(); } catch (e) {} tareas.delete(hoja); }
+        var lienzo = hoja.querySelector('canvas');
+        if (lienzo) {
+          // ⚠⚠ ACHICARLO A CERO ANTES DE SACARLO. Safari de iPhone no devuelve
+          // la memoria de un canvas sacado del DOM hasta quién sabe cuándo:
+          // sin esto, cada hoja soltada deja un fantasma del tamaño de la hoja.
+          lienzo.width = 0;
+          lienzo.height = 0;
+          lienzo.remove();
+        }
+        // Y que el worker de pdf.js suelte lo que masticó de esta página.
+        var i = Number(hoja.dataset.pagina);
+        var pagina = paginasPdf[i];
+        if (pagina) {
+          (t ? t.promise.catch(function () {}) : Promise.resolve()).then(function () {
+            if (!enVentana.has(hoja)) { try { pagina.cleanup(); } catch (e) {} }
+          });
+        }
+      }
+
+      // ⚠⚠ DE A UNA HOJA POR VEZ, tirando lo vencido — la razón entera está en
+      // visor.js, donde el iPhone lo cobró dos veces la noche del 15/8. Mismo
+      // motor, misma fila india.
+      function drenar() {
+        if (dibujando) return;
+        var hoja;
+        do { hoja = cola.shift(); }
+        while (hoja && (!enVentana.has(hoja) || hoja.querySelector('canvas')));
+        if (!hoja) return;
+        dibujando = true;
+        dibujarHoja(hoja, function () { dibujando = false; drenar(); });
+      }
+
       var mirador = new IntersectionObserver(function (entradas) {
         entradas.forEach(function (e) {
-          if (!e.isIntersecting) return;
-          var dibujar = pendientes.get(e.target);
-          if (!dibujar) return;
-          pendientes.delete(e.target);
-          mirador.unobserve(e.target);
-          dibujar();
+          var hoja = e.target;
+          if (e.isIntersecting) {
+            enVentana.add(hoja);
+            if (cola.indexOf(hoja) === -1) cola.push(hoja);
+          } else {
+            enVentana.delete(hoja);
+            soltarHoja(hoja);
+          }
         });
-      }, { root: caja, rootMargin: '400px' });
+        drenar();
+      }, { root: caja, rootMargin: '1000px' });
 
       for (var n = 1; n <= doc.numPages; n++) {
         var pag = await doc.getPage(n);
@@ -161,16 +227,6 @@
         hoja.appendChild(num);
         caja.appendChild(hoja);
 
-        pendientes.set(hoja, (function (pagina, vista, destino) {
-          return function () {
-            var lienzo = document.createElement('canvas');
-            lienzo.width = Math.round(vista.width);
-            lienzo.height = Math.round(vista.height);
-            lienzo.style.cssText = 'display:block;width:100%;height:100%';
-            destino.insertBefore(lienzo, destino.firstChild);
-            pagina.render({ canvasContext: lienzo.getContext('2d'), viewport: vista });
-          };
-        })(pag, vp, hoja));
         mirador.observe(hoja);
 
         // ⚠ `click`, no `mousedown` (15/8): con el dedo, desplazarse por el
@@ -202,18 +258,12 @@
           if (!h) continue;
           h.style.width = Math.round(vista.width) + 'px';
           h.style.height = Math.round(vista.height) + 'px';
-          var viejo = h.querySelector('canvas');
-          if (viejo) viejo.remove();
-          pendientes.set(h, (function (pagina, v2, destino) {
-            return function () {
-              var lienzo = document.createElement('canvas');
-              lienzo.width = Math.round(v2.width);
-              lienzo.height = Math.round(v2.height);
-              lienzo.style.cssText = 'display:block;width:100%;height:100%';
-              destino.insertBefore(lienzo, destino.firstChild);
-              pagina.render({ canvasContext: lienzo.getContext('2d'), viewport: v2 });
-            };
-          })(paginasPdf[i], vista, h));
+          soltarHoja(h);
+          // Re-observar de cero: el mirador sólo avisa cuando una hoja CRUZA el
+          // borde. Volver a observarla dispara el aviso inicial con el estado
+          // de ahora: la visible se redibuja ya con la escala nueva, la lejana
+          // queda suelta hasta que el scroll la acerque.
+          mirador.unobserve(h);
           mirador.observe(h);
         }
 

@@ -60,17 +60,28 @@ function tokenDe(req: FastifyRequest): string {
 export function registrarRutasFirma(app: FastifyInstance) {
   // Cambia el token del enlace por la cookie y devuelve todo lo que la pantalla
   // necesita mostrar. Es también el momento en que se anota `documento.abierto`.
+  //
+  // ⚠ `t` es opcional A PROPÓSITO (15/8). La pantalla se saca la llave de la
+  // barra de direcciones apenas entra —para que no quede en el historial— y
+  // Safari en el teléfono recarga pestañas cuando quiere: esa recarga llega
+  // acá SIN token pero CON la cookie del primer ingreso. Rechazarla era echar
+  // al firmante a mitad del documento (pasó en la hoja 36 del contrato de
+  // prueba de 500). La cookie es el mismo token que ya se verificó: usarla de
+  // respaldo no abre ninguna puerta nueva, renueva la que ya estaba abierta.
   app.post('/firmar/abrir', async (req, reply) => {
     const b = z
-      .object({ t: z.string().min(10), zona_horaria: z.string().max(60).optional() })
+      .object({ t: z.string().min(10).optional(), zona_horaria: z.string().max(60).optional() })
       .parse(req.body);
 
-    const datos = await abrirParaFirmar(b.t, {
+    const token = b.t ?? (req as any).cookies?.[COOKIE];
+    if (!token) throw new HttpError(401, 'Volvé a abrir el enlace que te llegó por correo.');
+
+    const datos = await abrirParaFirmar(token, {
       ip: req.ip,
       userAgent: req.headers['user-agent'] ?? null,
       zonaHoraria: b.zona_horaria ?? null,
     });
-    guardarToken(req, reply, b.t);
+    guardarToken(req, reply, token);
     return datos;
   });
 

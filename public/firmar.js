@@ -715,18 +715,27 @@
   // ---------------------------------------------------------------------------
   async function arrancar() {
     var t = tokenDelHash();
-    if (!t) {
-      $('panel').innerHTML =
-        '<h1>Falta el enlace</h1>' +
-        '<p class="lead">Abrí el enlace tal como te llegó por correo. Si lo copiaste a mano, ' +
-        'puede haber quedado cortado.</p>';
-      return;
-    }
 
+    // ⚠ Sin llave en la barra NO es todavía «Falta el enlace»: puede haber una
+    // cookie viva del primer ingreso. La llave se saca de la barra a propósito
+    // (unas líneas más abajo), y Safari en el teléfono recarga pestañas cuando
+    // se le antoja — pasó el 15/8, probando el contrato de 500 hojas: la
+    // recarga aterrizaba sin hash y la pantalla echaba a quien ya estaba
+    // adentro. Primero se le pregunta al servidor con lo que haya —llave o
+    // cookie— y el cartel queda para cuando de verdad no hay con qué entrar.
     try {
-      DATOS = await api('/firmar/abrir', { t: t, zona_horaria: zonaHoraria() });
+      DATOS = await api('/firmar/abrir', t
+        ? { t: t, zona_horaria: zonaHoraria() }
+        : { zona_horaria: zonaHoraria() });
     } catch (e) {
-      $('panel').innerHTML = '<h1>No pudimos abrirlo</h1><p class="lead">' + esc(e.message) + '</p>';
+      if (!t) {
+        $('panel').innerHTML =
+          '<h1>Falta el enlace</h1>' +
+          '<p class="lead">Abrí el enlace tal como te llegó por correo. Si lo copiaste a mano, ' +
+          'puede haber quedado cortado.</p>';
+      } else {
+        $('panel').innerHTML = '<h1>No pudimos abrirlo</h1><p class="lead">' + esc(e.message) + '</p>';
+      }
       return;
     }
 
