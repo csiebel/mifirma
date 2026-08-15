@@ -42,6 +42,21 @@ self.addEventListener('fetch', (e) => {
   if (url.origin !== self.location.origin) return; // fuentes, etc.: pasan derecho
   if (req.mode !== 'navigate') return; // fetch de datos de la app: pasa derecho
 
+  // ⚠⚠ LA CONSOLA DEL OPERADOR NO ES DE ESTA APP, Y ADEMÁS TIENE PUERTA PROPIA.
+  //
+  // `/operador` está detrás de Cloudflare Access. Cuando el worker interceptaba
+  // esa navegación, el pedido salía desde adentro de la app y **no podía seguir
+  // el salto a `…cloudflareaccess.com`**: se caía, el worker servía el respaldo
+  // (`/app`), la consola del cliente veía un 401 y mandaba a `/entrar`.
+  //
+  // Efecto: la pantalla de Access NUNCA aparecía y el código de seis dígitos
+  // NUNCA llegaba. Parecía que Cloudflare estaba mal configurado; Cloudflare
+  // hacía exactamente lo que le pidieron. Encontrado el 15/8/2026.
+  //
+  // > Regla: un service worker manda sobre TODO su origen, incluidas puertas
+  // > que no son suyas. Lo que se autentica afuera, pasa derecho.
+  if (url.pathname === '/operador' || url.pathname.startsWith('/operador/')) return;
+
   // Navegación: red primero (sin pasar por el cache HTTP del navegador, que en
   // iOS a veces ignora no-store), cache como respaldo offline por ruta real.
   e.respondWith(
@@ -51,7 +66,24 @@ self.addEventListener('fetch', (e) => {
         caches.open(CACHE).then((c) => c.put(url.pathname, copia)).catch(() => {});
         return res;
       })
-      .catch(() => caches.match(url.pathname).then((r) => r || caches.match('/app')))
+      .catch(() =>
+        caches.match(url.pathname).then((r) => {
+          if (r) return r;
+          // ⚠⚠ El respaldo sin conexión es SÓLO para las puertas de esta app.
+          //
+          // Antes, cualquier navegación que fallara terminaba mostrando la
+          // consola del cliente (`/app`), viniera de donde viniera. Eso convertía
+          // un problema de red en una pantalla equivocada: quien abría su enlace
+          // de firma sin conexión veía la consola del EMISOR, y quien iba al
+          // operador terminaba en el login del cliente.
+          //
+          // Una pantalla equivocada es peor que un error honesto: el error se
+          // entiende y se reintenta; la pantalla equivocada manda a buscar el
+          // problema a otro lado.
+          if (SHELL.includes(url.pathname)) return caches.match('/app');
+          return Response.error();
+        })
+      )
   );
 });
 
