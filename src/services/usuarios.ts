@@ -153,32 +153,30 @@ export async function darAcceso(
       .onConflict((oc) => oc.columns(['identidad_id', 'cuenta_id', 'rol_id']).doNothing())
       .execute();
 
-    // Nombre para mostrar, sólo si la identidad todavía no tiene uno propio: el
-    // admin de una cuenta no le renombra la identidad a nadie.
-    if (input.nombre) {
-      await trx
-        .updateTable('identidad')
-        .set({ nombre_mostrado: input.nombre })
-        .where('id', '=', destino)
-        .where('nombre_mostrado', 'is', null)
-        .execute();
+    // ── Lo que el admin carga de otra persona ───────────────────────────
+    //
+    // ⚠⚠ Esto era dos `update` sueltos y **ninguno de los dos escribía nunca**.
+    // La RLS de la 009 dice que la identidad y la credencial de una persona las
+    // toca esa persona y nadie más, ni el administrador de su empresa. Un
+    // update que no afecta filas no falla: no hace nada, callado. Se descubrió
+    // el 15/8 mirando la base después de dar un acceso por pantalla.
+    //
+    // La 062 puso una función con la autorización adentro, que escribe el
+    // nombre (sólo si está vacío) y el celular PROPUESTO, y que no sabe
+    // escribir `telefono_e164` — la columna que abre puertas.
+    const nombre = input.nombre?.trim() || null;
+    const tel = input.telefonoPropuesto
+      ? input.telefonoPropuesto.trim().replace(/[\s-]/g, '')
+      : null;
+
+    // La función también valida el formato, pero el mensaje bueno lo da acá:
+    // adentro de la base el error sale en el idioma de Postgres.
+    if (tel && !/^\+[1-9][0-9]{7,14}$/.test(tel)) {
+      throw new HttpError(400, 'El celular va en formato internacional, por ejemplo +59899123456.');
     }
 
-    // El celular que propone el admin. ⚠ A la columna de PROPUESTA, y sólo si
-    // esa persona todavía no tiene un teléfono confirmado: si ya confirmó uno,
-    // una propuesta nueva no pinta nada — el suyo manda, y el trigger de la 061
-    // rechazaría tener las dos cosas si alguien intentara el atajo.
-    if (input.telefonoPropuesto) {
-      const tel = input.telefonoPropuesto.trim().replace(/[\s-]/g, '');
-      if (!/^\+[1-9][0-9]{7,14}$/.test(tel)) {
-        throw new HttpError(400, 'El celular va en formato internacional, por ejemplo +59899123456.');
-      }
-      await trx
-        .updateTable('credencial')
-        .set({ telefono_propuesto_e164: tel })
-        .where('identidad_id', '=', destino)
-        .where('telefono_e164', 'is', null)
-        .execute();
+    if (nombre || tel) {
+      await sql`select app.proponer_datos_de_acceso(${destino}::uuid, ${nombre}::text, ${tel}::text)`.execute(trx);
     }
 
     await registrar(trx, cuentaId, identidadId, {

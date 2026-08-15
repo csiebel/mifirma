@@ -232,9 +232,79 @@ create table valor_campo (
   unique (campo_id, instancia_id)
 );
 
+
+-- ── quién entra a qué cuenta, y con qué rol ─────────────────────────────────
+--
+-- Agregado el 15/8/2026 para poder ejercer la 062. Sin esto, una migración que
+-- decida permisos sobre la gente de una cuenta no se puede probar acá: muere
+-- con «relation "membresia" does not exist», o sea rojo por lo que al banco le
+-- falta y no por lo que la migración hace. Es la misma historia que credencial
+-- en la 061. (Deuda 34.)
+create table membresia (
+  id uuid primary key default gen_random_uuid(),
+  identidad_id uuid not null references identidad(id),
+  cuenta_id uuid not null references cuenta(id),
+  persona_id uuid,
+  estado text not null default 'activa',
+  desde timestamptz not null default now(),
+  hasta timestamptz
+);
+
+create table rol (
+  id uuid primary key default gen_random_uuid(),
+  cuenta_id uuid references cuenta(id),
+  nombre text not null
+);
+
+create table capacidad (
+  id uuid primary key default gen_random_uuid(),
+  recurso text not null,
+  accion text not null,
+  unique (recurso, accion)
+);
+
+create table rol_capacidad (
+  rol_id uuid not null references rol(id),
+  capacidad_id uuid not null references capacidad(id),
+  primary key (rol_id, capacidad_id)
+);
+
+create table usuario_rol (
+  identidad_id uuid not null references identidad(id),
+  cuenta_id uuid not null references cuenta(id),
+  rol_id uuid not null references rol(id),
+  asignado_por uuid references identidad(id),
+  primary key (identidad_id, cuenta_id, rol_id)
+);
+
 -- ── las funciones de contexto que la política nueva llama ───────────────────
-create function app.actor() returns text language sql stable as $$ select 'cuenta'::text $$;
-create function app.cuenta_actual() returns uuid language sql stable as $$ select null::uuid $$;
+--
+-- ⚠ Leen `current_setting` con el MISMO valor por omisión que tenían cuando
+-- eran constantes ('cuenta' y null), así que los `ejerce` anteriores no cambian
+-- de comportamiento. Lo que se gana: un `ejerce` puede pararse en los zapatos
+-- de un actor concreto con `set local app.cuenta = '...'` y ejercer una función
+-- que decide permisos, en vez de mirar el catálogo y creerle.
+create function app.actor() returns text language sql stable as $$
+  select coalesce(nullif(current_setting('app.actor', true), ''), 'cuenta') $$;
+create function app.cuenta_actual() returns uuid language sql stable as $$
+  select nullif(current_setting('app.cuenta', true), '')::uuid $$;
+create function app.identidad_actual() returns uuid language sql stable as $$
+  select nullif(current_setting('app.identidad', true), '')::uuid $$;
+
+-- Copia fiel de la de la 004: misma consulta, para que lo que se ejerce acá sea
+-- lo que corre en la base de verdad.
+create function app.tiene_capacidad(p_recurso text, p_accion text) returns boolean
+language sql stable as $$
+  select exists (
+    select 1
+      from usuario_rol ur
+      join rol_capacidad rc on rc.rol_id = ur.rol_id
+      join capacidad c on c.id = rc.capacidad_id
+     where ur.identidad_id = app.identidad_actual()
+       and ur.cuenta_id    = app.cuenta_actual()
+       and c.recurso = p_recurso
+       and c.accion  = p_accion
+  ) $$;
 create function app.identidades_del_actor() returns uuid[] language sql stable as $$ select '{}'::uuid[] $$;
 create function app.tiene_otorgamiento(uuid, uuid, text) returns boolean
   language sql stable as $$ select false $$;

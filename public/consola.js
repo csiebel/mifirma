@@ -3237,6 +3237,19 @@
     });
   }
 
+  // La característica del país de la empresa, para que nadie la escriba de
+  // memoria. Es una PROPUESTA: el admin la borra o la cambia si esa persona
+  // está en otro país.
+  //
+  // ⚠ Si no sabemos el país, no se propone ninguna. Un valor por omisión que
+  // parece dato es peor que un campo vacío: pasó con el país sugerido del
+  // firmante, que caía a 'UY' por un coalesce, y un brasileño veía Uruguay
+  // preseleccionado en la pantalla que decide qué ley aplica.
+  var CARACTERISTICA = { UY: '+598', PY: '+595', BR: '+55' };
+  function caracteristicaDelPais() {
+    return CARACTERISTICA[(CUENTA && CUENTA.pais) || ''] || '';
+  }
+
   function abrirNuevoAcceso() {
     if (!ROLES.length) return msg('msgAccesos', 'Primero cargá los roles.', 'err');
     abrirModal(
@@ -3247,6 +3260,10 @@
       '<input id="mEmail" type="email" placeholder="persona@empresa.com" />' +
       '<label class="campo" for="mNombre">Nombre <span style="font-weight:400;color:var(--mut)">(opcional)</span></label>' +
       '<input id="mNombre" maxlength="120" />' +
+      '<label class="campo" for="mTelefono">Celular <span style="font-weight:400;color:var(--mut)">(opcional)</span></label>' +
+      '<input id="mTelefono" inputmode="tel" maxlength="24" value="' + caracteristicaDelPais() + '" />' +
+      '<p class="pista">Lo sugerís vos. Esa persona lo confirma desde su cuenta, y recién ahí ' +
+      'puede recibir el código de entrada por ese número. Hasta entonces no sirve para entrar.</p>' +
       '<label class="campo" for="mRol">Rol</label>' +
       '<select id="mRol">' + opcionesRol(null) + '</select>' +
       '<p class="pista">Después, en Carpetas, decidís sobre qué documentos aplica ese rol.</p>' +
@@ -3258,12 +3275,17 @@
     $('mOk').addEventListener('click', async function () {
       var email = $('mEmail').value.trim();
       if (!email) return msg('msgModal', 'Falta el correo.', 'err');
+      // Si quedó sólo la característica que propusimos nosotros, no hay
+      // celular: mandarla suelta haría fallar el alta por formato inválido.
+      var tel = $('mTelefono').value.trim().replace(/[\s-]/g, '');
+      if (tel === caracteristicaDelPais() || tel === '+') tel = '';
       $('mOk').disabled = true;
       try {
         await api('/usuarios', 'POST', {
           email: email,
           nombre: $('mNombre').value.trim() || undefined,
           rol_id: $('mRol').value,
+          telefono_propuesto: tel || undefined,
         });
         cerrarModal();
         cargarUsuarios();
