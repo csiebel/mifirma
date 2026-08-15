@@ -194,7 +194,13 @@
         })(pag, vp, caja));
         mirador.observe(caja);
 
-        caja.addEventListener('mousedown', hacerClicEnHoja);
+        // ⚠ `click`, no `mousedown` ni `pointerdown` (15/8, el editor pisa un
+        // teléfono por primera vez): con el dedo, DESPLAZARSE por el documento
+        // también empieza apoyándolo en la hoja, y crear la marca en ese
+        // instante sembraría una por cada scroll. `click` sólo llega si el dedo
+        // bajó y subió sin moverse — un toque de verdad — y con el mouse se
+        // comporta como siempre.
+        caja.addEventListener('click', hacerClicEnHoja);
       }
     } catch (e) {
       $('mErr').innerHTML =
@@ -257,6 +263,20 @@
       var t = TAMANO[estado.tipo];
       var vp = estado.viewports[pagina];
 
+      // ⚠ El dedo no es una punta (15/8, iPhone; el mismo guardia que en
+      // cajas.js): un toque que quiso agarrar la marca y cayó unos píxeles
+      // afuera no puede crear otra. En táctil, cerca de una marca = nada.
+      if (window.matchMedia('(pointer:coarse)').matches) {
+        var xT = ev.clientX - r.left, yT = ev.clientY - r.top, M = 18;
+        var erroPorPoco = estado.marcas.some(function (m2) {
+          if (m2.pagina !== pagina) return false;
+          var q = aPantalla(pagina, m2);
+          return xT >= q.x - M && xT <= q.x + q.ancho + M &&
+                 yT >= q.y - M && yT <= q.y + q.alto + M;
+        });
+        if (erroPorPoco) return;
+      }
+
       // Dos del mismo tipo en la misma hoja las rechaza la base (índice único).
       // Que lo diga la pantalla antes, y no un 500 después de veinte clics.
       var ya = estado.marcas.some(function (m) {
@@ -303,7 +323,12 @@
           'position:absolute;left:' + p.x + 'px;top:' + p.y + 'px;width:' + p.ancho +
           'px;height:' + p.alto + 'px;border:1.5px solid var(--brand-600);border-radius:6px;' +
           'background:rgba(37,99,235,.13);cursor:move;display:grid;place-items:center;' +
-          'font-size:11px;font-weight:600;color:var(--brand-600);user-select:none;z-index:3';
+          'font-size:11px;font-weight:600;color:var(--brand-600);user-select:none;z-index:3;' +
+          // El arrastre es NUESTRO, no del scroll: sin `touch-action:none` iOS
+          // corta el gesto a mitad de camino para desplazar la hoja (manda un
+          // pointercancel y la marca queda donde la agarró la interrupción).
+          // Los otros dos callan el menú de selección del toque largo.
+          'touch-action:none;-webkit-user-select:none;-webkit-touch-callout:none';
         el.textContent = m.tipo === 'firma' ? 'Firma' : 'Rúbrica';
         // ⚠ EL TIRADOR TIENE QUE VERSE.
         //
@@ -324,7 +349,10 @@
           'border-radius:50%;background:var(--danger);color:#fff;font-size:11px;line-height:16px;' +
           'text-align:center;cursor:pointer">×</span>';
         caja.appendChild(el);
-        el.addEventListener('mousedown', arrastrar);
+        // Puntero, no mouse: el mismo camino sirve para el dedo y para el
+        // mouse. Es el modelo que rubrica.js usa desde siempre — y por eso
+        // dibujar la firma a mano andaba en el teléfono y esto no.
+        el.addEventListener('pointerdown', arrastrar);
       });
       $('mCuenta').textContent = estado.marcas.length
         ? estado.marcas.length + ' marca(s) · ' + estado.paginas + ' hoja(s)'
@@ -342,10 +370,18 @@
         aviso('');
         return pintar();
       }
+      // Ya es nuestro gesto: que iOS no arranque una selección ni un menú.
+      ev.preventDefault();
       var redimensionar = ev.target.classList.contains('tirador');
       var vp = estado.viewports[m.pagina];
       var p0 = aPantalla(m.pagina, m);
       var x0 = ev.clientX, y0 = ev.clientY;
+
+      // ⚠ El resto del gesto se CAPTURA: apenas el dedo (o el mouse rápido) se
+      // sale del recuadro, sin captura los eventos dejan de llegarle y la
+      // marca queda muerta a mitad de camino. Capturado, llega todo hasta
+      // soltar, caiga donde caiga el puntero.
+      try { el.setPointerCapture(ev.pointerId); } catch (e) { /* mouse viejo */ }
 
       function mover(e2) {
         var dx = e2.clientX - x0, dy = e2.clientY - y0;
@@ -363,12 +399,18 @@
         el.style.width = na + 'px'; el.style.height = nl + 'px';
       }
       function soltar() {
-        document.removeEventListener('mousemove', mover);
-        document.removeEventListener('mouseup', soltar);
+        el.removeEventListener('pointermove', mover);
+        el.removeEventListener('pointerup', soltar);
+        el.removeEventListener('pointercancel', soltar);
         pintar();
       }
-      document.addEventListener('mousemove', mover);
-      document.addEventListener('mouseup', soltar);
+      // En el propio elemento, no en `document`: la captura ya le trae todo.
+      // `pointercancel` también suelta — si el sistema interrumpe el gesto (una
+      // llamada, un gesto del borde), la marca queda donde llegó, no colgada
+      // del puntero fantasma.
+      el.addEventListener('pointermove', mover);
+      el.addEventListener('pointerup', soltar);
+      el.addEventListener('pointercancel', soltar);
     }
 
     // ---- los atajos que resuelven el contrato largo ----

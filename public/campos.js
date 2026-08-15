@@ -383,8 +383,17 @@
       $('cpCuerpo').innerHTML = html;
       enganchar(sinAdoptar);
 
+      // ⚠ Acercar la ficha del campo seleccionado, SÓLO en el escritorio. Ahí
+      // la lista es una columna lateral con su propio scroll y el gesto es
+      // imperceptible. En el teléfono (15/8) todo es UNA columna con la lista
+      // abajo de la hoja: este scroll llevaba el modal entero hasta la ficha y
+      // le arrancaba la hoja de las manos a quien estaba tocando un campo —
+      // «me lleva a la pantalla del campo en lugar de dejarlo arrastrarlo».
+      // 860 es el mismo umbral en el que `.cp-dos` se parte en dos columnas.
       var s = $('cpSel');
-      if (s) s.scrollIntoView({ block: 'nearest' });
+      if (s && window.matchMedia('(min-width:860px)').matches) {
+        s.scrollIntoView({ block: 'nearest' });
+      }
     }
 
     /** De quién es el próximo campo. Una sola copia, en `estado`. */

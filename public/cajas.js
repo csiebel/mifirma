@@ -173,7 +173,11 @@
         })(pag, vp, hoja));
         mirador.observe(hoja);
 
-        hoja.addEventListener('mousedown', clicEnHoja);
+        // ⚠ `click`, no `mousedown` (15/8): con el dedo, desplazarse por el
+        // documento también empieza apoyándolo en la hoja, y crear un campo en
+        // ese instante sembraría uno por cada scroll. `click` sólo llega con un
+        // toque de verdad. Ver el mismo cambio en marcas.js.
+        hoja.addEventListener('click', clicEnHoja);
       }
 
       // =====================================================================
@@ -269,21 +273,40 @@
             ev.target.classList.contains('cj-tirador') ||
             ev.target.classList.contains('cj-quitar')) return;
 
-        // ⚠ Sin esto, el campo nuevo se crea y el cursor NO queda en su nombre.
-        //
-        // El navegador mueve el foco al elemento tocado cuando termina el
-        // `mousedown`, o sea DESPUÉS de este handler. Así que el `focus()` que
-        // hace el editor sobre la casilla del nombre se aplica y se pierde un
-        // instante más tarde, sin dejar rastro.
-        //
-        // El síntoma no era «no quedó el foco»: era que la primera letra que
-        // escribías desaparecía. «Número de póliza» quedaba «úmero de póliza».
-        ev.preventDefault();
+        // Historia del foco, para que nadie la reviva: cuando esto corría en
+        // `mousedown`, el navegador movía el foco DESPUÉS del handler y se
+        // comía el `focus()` del editor — la primera letra desaparecía y
+        // «Número de póliza» quedaba «úmero de póliza». Hacía falta un
+        // `preventDefault` acá. Con `click` (15/8) el orden juega a favor: el
+        // foco por defecto ya se movió ANTES, en el mousedown, así que el
+        // `focus()` del editor corre último y gana solo. El preventDefault se
+        // fue con el problema.
 
         var hoja = ev.currentTarget;
         var pagina = Number(hoja.dataset.pagina);
         var vp = estado.viewports[pagina];
         var r = hoja.getBoundingClientRect();
+
+        // ⚠ El dedo no es una punta (15/8, iPhone): al ir a agarrar un campo o
+        // su tirador, el toque cae a veces unos píxeles AFUERA — en la hoja — y
+        // acá nacía un campo nuevo sin querer, uno por cada errada. En pantalla
+        // táctil, un toque cerca de un campo existente lo SELECCIONA, que es lo
+        // que la mano estaba intentando. Con mouse el margen es cero: la punta
+        // del cursor no yerra, y pegado a un campo se puede querer crear otro.
+        if (window.matchMedia('(pointer:coarse)').matches) {
+          var xT = ev.clientX - r.left, yT = ev.clientY - r.top, M = 18;
+          for (var k = 0; k < campos.length; k++) {
+            if (campos[k].pagina !== pagina) continue;
+            var q = aPantalla(pagina, campos[k]);
+            if (xT >= q.x - M && xT <= q.x + q.ancho + M &&
+                yT >= q.y - M && yT <= q.y + q.alto + M) {
+              estado.sel = k;
+              pintar();
+              if (op.alTocar) op.alTocar(k);
+              return;
+            }
+          }
+        }
 
         var quien = (op.quienNueva && op.quienNueva()) || 'emisor';
         var t = NUEVA;
@@ -413,7 +436,9 @@
             el.style.cursor = 'not-allowed';
             el.style.opacity = '.7';
             el.title += ' · ya completado, no se mueve';
-            el.addEventListener('mousedown', function (ev) {
+            // `click`, no `pointerdown`: tocarlo para VER qué es, sí; que se
+            // seleccione solo porque el scroll pasó por encima, no.
+            el.addEventListener('click', function (ev) {
               ev.stopPropagation();
               if (op.alTocar) op.alTocar(i);
             });
@@ -431,7 +456,13 @@
               '<span class="cj-quitar" style="position:absolute;right:-7px;top:-7px;width:16px;' +
               'height:16px;border-radius:50%;background:var(--danger);color:#fff;font-size:11px;' +
               'line-height:16px;text-align:center;cursor:pointer">×</span>';
-            el.addEventListener('mousedown', arrastrar);
+            // El arrastre es NUESTRO, no del scroll: sin `touch-action:none`
+            // iOS corta el gesto a mitad de camino para desplazar la hoja.
+            // Sólo en los campos que se pueden mover — sobre uno ya completado
+            // el dedo tiene que poder seguir scrolleando como si nada.
+            el.style.touchAction = 'none';
+            el.style.webkitTouchCallout = 'none';
+            el.addEventListener('pointerdown', arrastrar);
           }
           hoja.appendChild(el);
         });
@@ -451,15 +482,33 @@
           return;
         }
 
+        // Ya es nuestro gesto: que iOS no arranque una selección ni un menú.
+        ev.preventDefault();
+
         estado.sel = i;
-        pintar();
-        if (op.alTocar) op.alTocar(i);
+        // ⚠⚠ Acá había un `pintar()` y NO puede volver: redibuja todos los
+        // recuadros, o sea DESTRUYE el elemento que el dedo está agarrando — y
+        // el puntero capturado muere con él. Con los viejos eventos de mouse
+        // colgados de `document` no se notaba; con captura, el arrastre nacía
+        // muerto. La selección se pinta a mano, sobre los elementos vivos, y el
+        // `pintar()` completo queda para `soltar`, cuando el gesto terminó.
+        caja.querySelectorAll('.cj-caja.sel').forEach(function (s) {
+          s.classList.remove('sel');
+          s.style.boxShadow = '';
+        });
+        el.classList.add('sel');
+        el.style.boxShadow = '0 0 0 3px rgba(37,99,235,.4)';
+        if (op.alTocar) op.alTocar(i); // repinta la LISTA lateral, no las cajas
 
         var redimensionar = ev.target.classList.contains('cj-tirador');
         var vp = estado.viewports[c.pagina];
         var p0 = aPantalla(c.pagina, c);
         var x0 = ev.clientX, y0 = ev.clientY;
-        var vivo = caja.querySelector('.cj-caja[data-i="' + i + '"]');
+        var vivo = el;
+
+        // La captura: sin ella, apenas el dedo se sale del recuadro los
+        // eventos dejan de llegarle y el campo queda muerto a mitad de camino.
+        try { el.setPointerCapture(ev.pointerId); } catch (e) { /* mouse viejo */ }
 
         function mover(e2) {
           var dx = e2.clientX - x0, dy = e2.clientY - y0;
@@ -481,13 +530,18 @@
           }
         }
         function soltar() {
-          document.removeEventListener('mousemove', mover);
-          document.removeEventListener('mouseup', soltar);
+          el.removeEventListener('pointermove', mover);
+          el.removeEventListener('pointerup', soltar);
+          el.removeEventListener('pointercancel', soltar);
           pintar();
           if (op.alMover) op.alMover();
         }
-        document.addEventListener('mousemove', mover);
-        document.addEventListener('mouseup', soltar);
+        // En el elemento, no en `document`: la captura le trae todo. Y
+        // `pointercancel` también suelta — si el sistema interrumpe el gesto,
+        // el campo queda donde llegó, no colgado de un puntero fantasma.
+        el.addEventListener('pointermove', mover);
+        el.addEventListener('pointerup', soltar);
+        el.addEventListener('pointercancel', soltar);
       }
 
       pintar();

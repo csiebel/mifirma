@@ -434,6 +434,13 @@
     nav.menu.abajo button[aria-current="true"]{background:none;color:var(--brand);font-weight:600}
     nav.menu.abajo button[aria-current="true"] svg{stroke-width:2.1}
     nav.menu.abajo button:active{opacity:.55}
+    /* ⚠ Con un modal abierto, la barra se esconde: quedaba flotando ENCIMA del
+       editor de campos, cruzada en mitad de la pantalla con el teclado abierto
+       (visto el 15/8 en el iPhone). Navegar con un modal abierto no es algo
+       que deba poder pasar, así que taparlo no alcanza: se va.
+       La clase la pone un observador (ver el script de la hoja): la primera
+       versión usó `#modal:has(*)` y en el iPhone de Claudio quedó «igual». */
+    body.conModal nav.menu.abajo{display:none}
 
     /* La hoja de «Más», que sube desde abajo. */
     #veloHoja{position:fixed;inset:0;background:rgba(11,43,74,.45);z-index:70;
@@ -468,6 +475,19 @@
 
   /* En el escritorio la hoja no existe, y nada se enrolla. */
   @media(min-width:900px){#hojaMas,#veloHoja,.enrollar{display:none}}
+
+  /* Los agarres de los editores (mover/agrandar/quitar marcas y campos) miden
+     14–16 px, pensados para la punta del mouse. Con el dedo no se aciertan:
+     acá se agrandan SÓLO cuando el puntero es grueso — en la computadora
+     siguen chicos, que sobre un recuadro de 55 pt un agarre de 28 px tapa
+     media marca. El !important es porque esos estilos viajan inline. */
+  @media(pointer:coarse){
+    .marca .tirador,.cj-tirador{width:28px!important;height:28px!important;
+      right:-14px!important;bottom:-14px!important}
+    .marca .quitar,.cj-quitar{width:28px!important;height:28px!important;
+      right:-14px!important;top:-14px!important;font-size:16px!important;
+      line-height:28px!important}
+  }
 
   /* =========================================================================
      EL TELÉFONO — etapa 2: que la lista aparezca de entrada
@@ -920,6 +940,15 @@
         var p = document.getElementById(id);
         if (p) p.classList.add('enrollado');
       });
+    }
+    // Marca el body cuando hay un modal abierto, para que el CSS esconda la
+    // barra de abajo. Un observador y no `:has()`: consola.js escribe el modal
+    // con innerHTML y esto reacciona a cualquier cambio, en cualquier Safari.
+    var modal = document.getElementById('modal');
+    if (modal) {
+      new MutationObserver(function(){
+        document.body.classList.toggle('conModal', modal.children.length > 0);
+      }).observe(modal, { childList: true });
     }
   });
 
