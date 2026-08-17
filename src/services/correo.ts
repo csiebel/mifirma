@@ -131,7 +131,12 @@ async function transporte() {
     secure: c.seguridad === 'tls', // 465 = TLS directo (true); 587 = STARTTLS (false)
     auth: { user: c.usuario, pass },
   });
-  return { t, from: `"${c.remitente_nombre}" <${c.remitente_email}>` };
+  return {
+    t,
+    from: `"${c.remitente_nombre}" <${c.remitente_email}>`,
+    remitenteNombre: c.remitente_nombre,
+    remitenteEmail: c.remitente_email,
+  };
 }
 
 /** Envía un correo. Corre en el servidor del usuario (necesita salida a internet). */
@@ -155,11 +160,30 @@ export async function enviarCorreo(opts: {
    * de esta etiqueta.
    */
   etiqueta?: string;
+  /**
+   * Nombre de la empresa emisora. Cuando viene, el remitente VISIBLE pasa a ser
+   * «<empresa> vía <nombre del operador>».
+   *
+   * ⚠ La DIRECCIÓN no cambia nunca: es la que sostiene DKIM. Lo único que se
+   * toca es el nombre que el firmante lee. Deuda 38, primera mitad; el Reply-To
+   * al emisor es la segunda y todavía no está.
+   */
+  deParte?: string;
 }) {
-  const { t, from } = await transporte();
+  const { t, from, remitenteNombre, remitenteEmail } = await transporte();
+  // ⚠ Este nombre lo carga un usuario: se le sacan los saltos de línea ANTES de
+  // que toque una cabecera —si no, es inyección de cabeceras— y se recorta. Va
+  // como objeto {name, address} y no como texto armado a mano, para que sea
+  // nodemailer el que codifique acentos y comillas.
+  const deParte = (opts.deParte ?? '').replace(/[\r\n]+/g, ' ').trim().slice(0, 64);
+  // Si la empresa se llama igual que el operador, «X vía X» sobra.
+  const remitente =
+    deParte && deParte.toLowerCase() !== remitenteNombre.toLowerCase()
+      ? { name: `${deParte} vía ${remitenteNombre}`, address: remitenteEmail }
+      : from;
   try {
     const info = await t.sendMail({
-      from,
+      from: remitente,
       to: opts.para,
       subject: opts.asunto,
       html: opts.html,

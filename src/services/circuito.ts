@@ -1625,6 +1625,7 @@ async function notificar(
 
     const enviado = await enviarCorreo({
       para: e.email,
+      deParte: info.cuentaNombre,
       asunto: `${info.cuentaNombre} te pide que firmes: ${info.titulo}`,
       html:
         `<p>${quien}</p>` +
@@ -2004,6 +2005,7 @@ export async function avisarCompletado(circuitoId: string, instanciaId: string) 
     try {
       const enviado = await enviarCorreo({
         para: d.email,
+        deParte: datos.cuenta_nombre,
         asunto: `Firmado: ${datos.titulo}`,
         html:
           `<p>${d.nombre ? `Hola ${escapar(d.nombre)},` : 'Hola,'}</p>` +
