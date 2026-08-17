@@ -85,6 +85,7 @@ En el servicio de la app → **Variables**:
 | `GATEWAY_ENC_KEY` | un secreto fuerte (**no lo cambies después**: rompe lo guardado) |
 | `ANTHROPIC_API_KEY` | tu key (opcional; sin esto el asistente no anda) |
 | `AUTH_DEV_SECRET` | un secreto fuerte (mientras uses el login propio) |
+| `BREVO_WEBHOOK_SECRET` | un secreto fuerte. Es lo que autentica los eventos de entrega que manda Brevo a `/correo/webhook/brevo`. ⚠ Sin esta variable el receptor **no procesa nada** (falla cerrado) y lo dice en el log |
 
 `${{Postgres.PGHOST}}` y compañía son **referencias** a las variables del servicio Postgres; Railway las resuelve a la red privada (entre servicios). Si preferís, pegá los valores literales del host/puerto/base privados.
 

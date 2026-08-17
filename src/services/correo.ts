@@ -141,6 +141,20 @@ export async function enviarCorreo(opts: {
   html: string;
   texto?: string;
   adjuntos?: { filename: string; content: Buffer; contentType?: string }[];
+  /**
+   * Etiqueta propia que viaja con el mensaje y que el relay devuelve en sus
+   * eventos. Es lo que permitiría atar «este correo se entregó» al documento y
+   * al firmante correctos del expediente, que hoy no se puede: los ocho lugares
+   * que llaman a esta funcion descartan el identificador que devuelve.
+   *
+   * Ver `http/routes/correo_webhook.ts`.
+   *
+   * ⚠ TODAVÍA NO ESTÁ COMPROBADO que Brevo la devuelva cuando el mensaje entra
+   * por SMTP RELAY en vez de por su API. Eso es exactamente lo que mide la fase
+   * 1 del receptor. Hasta que el log lo confirme, nadie construye nada encima
+   * de esta etiqueta.
+   */
+  etiqueta?: string;
 }) {
   const { t, from } = await transporte();
   try {
@@ -151,6 +165,9 @@ export async function enviarCorreo(opts: {
       html: opts.html,
       text: opts.texto,
       attachments: opts.adjuntos,
+      // La cabecera va SÓLO si hay etiqueta: mandarla vacía en todos los correos
+      // del producto es una cabecera de más que no distingue nada.
+      ...(opts.etiqueta ? { headers: { 'X-Mailin-custom': opts.etiqueta } } : {}),
     });
     return { ok: true, id: info.messageId };
   } catch (e) {
@@ -162,11 +179,17 @@ export async function enviarCorreo(opts: {
 /** Correo de prueba para validar la conexión. */
 export async function enviarPrueba(para: string) {
   if (!para || !/.+@.+\..+/.test(para)) throw new HttpError(400, 'Indicá un email de destino válido.');
-  await enviarCorreo({
+  // Etiqueta única por prueba: es la mitad del experimento de la fase 1.
+  // La otra mitad la mira el log del receptor. Que la pantalla la devuelva
+  // permite comparar lo que SALIÓ con lo que VOLVIÓ sin adivinar cuál prueba
+  // fue: dos pruebas seguidas serían indistinguibles sin esto.
+  const etiqueta = `mifirma-prueba-${Date.now().toString(36)}`;
+  const enviado = await enviarCorreo({
+    etiqueta,
     para,
     asunto: 'Prueba de conexión · MiFirma',
     html: '<p>Este es un correo de prueba de <b>MiFirma</b>.</p><p>Si lo recibiste, la conexión de correo de la plataforma quedó funcionando.</p>',
     texto: 'Correo de prueba de MiFirma. Si lo recibiste, la conexión funciona.',
   });
-  return { ok: true, para };
+  return { ok: true, para, etiqueta, id: enviado.id };
 }

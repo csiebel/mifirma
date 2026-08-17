@@ -19,6 +19,7 @@ import { registrarRutasPerfil } from './http/routes/perfil';
 import { registrarRutasOperador } from './http/routes/operador';
 import { registrarRutasPublico } from './http/routes/publico';
 import { registrarRutasPagosWebhook } from './http/routes/pagos_webhook';
+import { registrarRutasCorreoWebhook } from './http/routes/correo_webhook';
 import { registrarRutasAyuda } from './http/routes/ayuda';
 import { registrarRutasDocumentos } from './http/routes/documentos';
 import { registrarRutasRepositorio } from './http/routes/repositorio';
@@ -569,6 +570,10 @@ export function construirServidor(): FastifyInstance {
     }
     // Webhooks de pasarelas de pago: público (sin sesión), validado por la FIRMA del proveedor.
     if (path.startsWith('/pagos/webhook/')) return;
+    // Eventos del relay de correo: público (sin sesión), validado por un secreto
+    // propio dentro del handler. ⚠ Va acá y NO en PUBLICAS porque PUBLICAS compara
+    // la ruta EXACTA, y esto es un prefijo — mismo motivo que el webhook de pagos.
+    if (path.startsWith('/correo/webhook/')) return;
     if (PUBLICAS.has(path)) return;
     req.identidad = await autenticar(req.headers.authorization);
     // Los anclajes probados y el nivel de garantía viajan firmados en el token
@@ -650,6 +655,10 @@ export function construirServidor(): FastifyInstance {
     registrarRutasOperador(app);
     registrarRutasPublico(app);
     registrarRutasPagosWebhook(app);
+    // Eventos de entrega del relay de correo (Brevo). Fase 1: sólo escucha y
+    // anota en el log; todavía no escribe `notificacion.entregada`. Público
+    // (sin sesión): lo autentica un secreto propio, no una sesión de cuenta.
+    registrarRutasCorreoWebhook(app);
     registrarRutasAyuda(app);
     registrarRutasDocumentos(app);
     registrarRutasRepositorio(app);
