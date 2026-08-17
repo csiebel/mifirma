@@ -421,6 +421,11 @@ const ETIQUETA: Record<string, string> = {
   'notificacion.entregada': 'Aviso entregado al destinatario',
   'notificacion.fallida': 'El aviso NO salió',
   'notificacion.no_entregada': 'El aviso salió pero NO se pudo entregar',
+  // ⚠ NO es una notificación: no hubo correo. El emisor se llevó el enlace para
+  // entregarlo él mismo, y eso es un hecho sobre la CADENA DE CUSTODIA del
+  // enlace personal de firma. Hasta la 065 compartía código con los correos de
+  // verdad y salía rotulado como si hubiera salido uno.
+  'enlace.obtenido_por_el_emisor': 'El emisor se llevó el enlace personal de firma',
   'documento.abierto': 'Abrió el enlace',
   'documento.visto': 'Vio el documento',
   'documento.campo_completado': 'Completó un dato',

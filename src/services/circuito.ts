@@ -1522,7 +1522,20 @@ export async function enlaceDeFirma(
       instanciaId: p.instancia_id,
       circuitoId,
       cuentaPropietariaId: p.cuenta_propietaria_id,
-      tipo: 'notificacion.enviada',
+      // ⚠⚠ ESTO NO ES UNA NOTIFICACIÓN, Y HASTA LA 065 DECÍA QUE LO ERA.
+      //
+      // Acá no hay servidor de correo, no hay envío y no hay notificación: el
+      // emisor apretó un botón y se llevó el enlace personal de firma para
+      // entregarlo él mismo. Mientras compartió código con los correos de
+      // verdad, el expediente y el certificado rotulaban este hecho como «El
+      // servidor de correo aceptó la notificación», que es sencillamente falso.
+      //
+      // Era la deuda 39 y era el más grave de sus tres casos, porque el hecho
+      // que tapaba es de los que un perito busca: **a partir de acá el enlace
+      // estuvo en manos del emisor**, no sólo en la casilla del firmante. Los
+      // `datos` ya lo decían; lo que faltaba era que lo dijera el RÓTULO, que es
+      // lo único que lee una persona.
+      tipo: 'enlace.obtenido_por_el_emisor',
       actorTipo: 'emisor',
       identidadId,
       participacionId: p.id,
