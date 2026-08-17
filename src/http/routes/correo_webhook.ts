@@ -1,6 +1,6 @@
 import type { FastifyInstance } from 'fastify';
 import { timingSafeEqual } from 'node:crypto';
-import { registrarEntrega } from '../../services/entregas';
+import { registrarEntrega, registrarNoEntrega } from '../../services/entregas';
 
 // =============================================================================
 // Receptor de eventos de correo de Brevo.
@@ -128,6 +128,32 @@ interface EventoBrevo {
   ts_event?: number;
 }
 
+// ⚠⚠ EL VOCABULARIO DEL PROVEEDOR VIVE ACÁ, Y SÓLO ACÁ.
+//
+// `services/entregas.ts` no sabe qué es un `hard_bounce`: sabe anotar uno de
+// dos veredictos. Quién traduce los nombres de Brevo a esos dos veredictos es
+// este archivo, que es el único que tiene por qué conocerlos. El día que se
+// sume otro proveedor, se suma otra tabla como ésta y nada más.
+
+/**
+ * Fracasos DEFINITIVOS: el mensaje salió, el relay lo aceptó, y no llegó ni va
+ * a llegar. Éstos sí escriben en el expediente.
+ */
+const FRACASOS_DEFINITIVOS = new Set(['hard_bounce', 'blocked', 'invalid_email', 'error']);
+
+/**
+ * ⚠⚠ Fracasos TEMPORALES: NO escriben nada, y es deliberado.
+ *
+ * Un mensaje aplazado o con rebote blando todavía puede terminar entregado —el
+ * relay reintenta— y anotar «no llegó» sobre algo que puede llegar es
+ * sobreafirmar, que es exactamente el pecado que la migración 058 vino a
+ * corregir. El expediente dice lo que se COMPROBÓ.
+ *
+ * Están nombrados en vez de caer en el «cualquier otra cosa» para que se vea
+ * que la decisión se tomó, y no que alguien se olvidó de ellos.
+ */
+const FRACASOS_TEMPORALES = new Set(['soft_bounce', 'deferred']);
+
 /**
  * Cuándo se entregó, según el proveedor — NO cuándo nos enteramos.
  *
@@ -226,41 +252,65 @@ export function registrarRutasCorreoWebhook(app: FastifyInstance) {
         'Correo: evento de Brevo recibido',
       );
 
-      // ⚠⚠ SÓLO `delivered` escribe en el expediente.
-      //
-      // Los fracasos —bloqueado, rebote, diferido— se anotan en el log y nada
-      // más, a propósito: `notificacion.fallida` hoy significa «NO SALIÓ», y un
-      // bloqueo es «salió y no se entregó», que es un hecho distinto. Darles el
-      // mismo nombre sería meter en el expediente exactamente el problema que
-      // la deuda 39 describe, y en un juicio la diferencia entre esas dos
-      // frases es la que se discute. Los fracasos van con su propio evento del
-      // catálogo, en su propia vuelta.
-      if (e.event !== 'delivered') continue;
+      // ── Qué hace este evento en el expediente ────────────────────────────
+      const tipoEvento = e.event ?? '';
+      const esEntrega = tipoEvento === 'delivered';
+      const esFracasoFinal = FRACASOS_DEFINITIVOS.has(tipoEvento);
+
+      if (!esEntrega && !esFracasoFinal) {
+        // Ni entrega ni fracaso definitivo. Se deja constancia en el log de que
+        // NO se anotó y por qué, para que la ausencia no parezca un olvido.
+        req.log.info(
+          {
+            evento_correo: 'sin_veredicto',
+            tipo: tipoEvento,
+            temporal: FRACASOS_TEMPORALES.has(tipoEvento),
+            destino: enmascararEmail(e.email ?? ''),
+          },
+          FRACASOS_TEMPORALES.has(tipoEvento)
+            ? 'Correo: fracaso TEMPORAL — todavía puede llegar, no se anota nada en el expediente'
+            : 'Correo: evento que no cambia el veredicto del mensaje — no se anota nada en el expediente',
+        );
+        continue;
+      }
 
       const messageId = e['message-id'];
       if (!messageId) {
         req.log.warn(
-          { evento_correo: 'entrega_sin_identificador', destino: enmascararEmail(e.email ?? '') },
-          'Correo: entrega confirmada pero SIN message-id — no se puede saber de qué aviso es',
+          { evento_correo: 'veredicto_sin_identificador', tipo: tipoEvento, destino: enmascararEmail(e.email ?? '') },
+          'Correo: el relay dio un veredicto pero SIN message-id — no se puede saber de qué aviso es',
         );
         continue;
       }
 
       try {
-        const r = await registrarEntrega({
+        const comun = {
           messageId,
           proveedor: 'brevo',
           ocurridoEn: fechaDelEvento(e),
           destino: enmascararEmail(e.email ?? ''),
-        });
-        // Tres resultados, tres mensajes: mandan a mirar lugares distintos.
+        };
+        const r = esEntrega
+          ? await registrarEntrega(comun)
+          : await registrarNoEntrega({ ...comun, motivoProveedor: tipoEvento, detalle: e.reason ?? null });
+
+        // Cada resultado manda a mirar un lugar distinto, así que cada uno tiene
+        // su propia frase.
         req.log.info(
-          { evento_correo: 'entrega_' + r, message_id: messageId, destino: enmascararEmail(e.email ?? '') },
-          r === 'anotada'
-            ? 'Correo: ENTREGA anotada en el expediente'
-            : r === 'repetida'
-              ? 'Correo: entrega ya anotada — el relay repitió el evento, no se hizo nada'
-              : 'Correo: entrega de un mensaje que no es nuestro (la cuenta de Brevo es compartida con payroll) — no se anotó nada',
+          {
+            evento_correo: (esEntrega ? 'entrega_' : 'no_entrega_') + r,
+            tipo: tipoEvento,
+            message_id: messageId,
+            destino: enmascararEmail(e.email ?? ''),
+            motivo: e.reason ?? undefined,
+          },
+          r === 'repetida'
+            ? 'Correo: el mensaje ya tenía veredicto — el relay repitió el evento, no se hizo nada'
+            : r === 'sin_correspondencia'
+              ? 'Correo: aviso de un mensaje que no es nuestro (la cuenta de Brevo es compartida con payroll) — no se anotó nada'
+              : esEntrega
+                ? 'Correo: ENTREGA anotada en el expediente'
+                : 'Correo: NO ENTREGA anotada en el expediente — a este firmante NO le llegó el aviso y el documento va a quedar esperándolo',
         );
       } catch (err) {
         // ⚠ Nunca romper la respuesta por un problema nuestro: Brevo NO
@@ -268,11 +318,12 @@ export function registrarRutasCorreoWebhook(app: FastifyInstance) {
         // siempre. Se anota fuerte en el log y se sigue.
         req.log.error(
           {
-            evento_correo: 'entrega_no_anotada',
+            evento_correo: 'veredicto_no_anotado',
+            tipo: tipoEvento,
             message_id: messageId,
             error: err instanceof Error ? err.message : String(err),
           },
-          'Correo: NO se pudo anotar una entrega confirmada en el expediente',
+          'Correo: NO se pudo anotar en el expediente el veredicto que dio el relay',
         );
       }
     }

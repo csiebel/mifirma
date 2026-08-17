@@ -55,6 +55,19 @@ import { anotar } from './evidencia';
 // instancia para que dos eventos concurrentes no bifurquen la cadena. Acá el
 // candado es por Message-ID. Con él, el «¿ya está?» deja de tener carrera: los
 // dos avisos del mismo mensaje se serializan y el segundo ve lo del primero.
+//
+// ═══ LOS DOS VEREDICTOS, Y POR QUÉ SON EXCLUYENTES (064) ═══
+//
+// Un mensaje termina de UNA sola manera: entregado, o no entregado. Los dos
+// eventos son terminales y se excluyen, así que el «¿ya está?» pregunta por los
+// DOS: si el mensaje ya tiene veredicto, no se anota otro encima.
+//
+//   · `notificacion.entregada`    → llegó.
+//   · `notificacion.no_entregada` → salió, el relay lo aceptó, y no llegó.
+//
+// ⚠ Los avisos TEMPORALES del relay —rebote blando, aplazado— no llaman acá.
+// Un mensaje aplazado todavía puede terminar entregado, y anotar «no llegó»
+// sobre algo que puede llegar es sobreafirmar. Ver `correo_webhook.ts`.
 // =============================================================================
 
 /** Contexto de sistema: sin cuenta ni identidad. Para lo que ocurre después de
@@ -79,57 +92,68 @@ export function normalizarMessageId(id: string | null | undefined): string {
 }
 
 export type ResultadoEntrega =
-  /** Se anotó `notificacion.entregada` en el expediente. */
+  /** Se anotó el veredicto en el expediente. */
   | 'anotada'
   /** Ese Message-ID no corresponde a ningún aviso nuestro. */
   | 'sin_correspondencia'
-  /** Ya estaba anotada. El relay repitió el evento. */
+  /** El mensaje ya tenía veredicto. El relay repitió el evento. */
   | 'repetida';
 
-/**
- * Anota en el expediente que un correo se entregó.
- *
- * Devuelve qué pasó en vez de lanzar: al webhook le sirve para el log, y ninguno
- * de los tres casos es un error del que haya que defenderse. Un Message-ID
- * desconocido es lo NORMAL mientras la cuenta de Brevo sea compartida con
- * payroll: sus entregas también llegan acá.
- */
-export async function registrarEntrega(e: {
+/** Los dos veredictos posibles. Un mensaje tiene UNO, y excluye al otro. */
+const VEREDICTOS = ['notificacion.entregada', 'notificacion.no_entregada'] as const;
+type Veredicto = (typeof VEREDICTOS)[number];
+
+interface AvisoDelRelay {
   /** Ya normalizado o no: se normaliza igual. */
   messageId: string;
   /** Quién lo afirma. Va al expediente. */
   proveedor: string;
-  /** Cuándo se entregó, según el proveedor. */
+  /** Cuándo pasó, según el proveedor. */
   ocurridoEn: Date;
   /** Enmascarado. ⚠ NUNCA la dirección completa ni el asunto. */
   destino?: string | null;
-}): Promise<ResultadoEntrega> {
+}
+
+/**
+ * Anota el veredicto de un mensaje en el expediente del documento al que
+ * pertenece.
+ *
+ * Devuelve qué pasó en vez de lanzar: al webhook le sirve para el log, y ninguno
+ * de los tres casos es un error del que haya que defenderse. Un Message-ID
+ * desconocido es lo NORMAL mientras la cuenta de Brevo sea compartida con
+ * payroll: sus avisos también llegan acá.
+ */
+async function anotarVeredicto(
+  tipo: Veredicto,
+  e: AvisoDelRelay,
+  datosExtra: Record<string, unknown> = {},
+): Promise<ResultadoEntrega> {
   const messageId = normalizarMessageId(e.messageId);
   if (!messageId) return 'sin_correspondencia';
 
   return enSistema(async (trx) => {
     // ⚠⚠ EL CANDADO VA PRIMERO, ANTES DE MIRAR NADA.
     //
-    // Dura lo que la transacción y es por mensaje, así que dos entregas de
+    // Dura lo que la transacción y es por mensaje, así que dos avisos de
     // documentos distintos siguen escribiendo en paralelo. Sin él, dos avisos
     // simultáneos del MISMO mensaje leen los dos «no está» y anotan los dos —
     // y el expediente no admite borrar, así que la duplicación sería para
     // siempre. Ver la nota de arriba sobre por qué no alcanza un índice único.
     await sql`select pg_advisory_xact_lock(hashtextextended(${messageId}::text, 0))`.execute(trx);
 
-    // ¿Ya lo anotamos? El relay repite eventos, y con el candado tomado esta
-    // pregunta ya no tiene carrera.
+    // ¿Este mensaje ya tiene veredicto? Se pregunta por los DOS, no sólo por el
+    // que se quiere anotar: son excluyentes.
     const yaEsta = await sql`
       select 1
         from evidencia
-       where tipo = 'notificacion.entregada'
+       where tipo in ('notificacion.entregada', 'notificacion.no_entregada')
          and datos->>'message_id' = ${messageId}
        limit 1
     `.execute(trx);
     if (yaEsta.rows.length > 0) return 'repetida' as ResultadoEntrega;
 
-    // De qué aviso es. El índice de la 063 hace que esto no recorra la tabla
-    // entera de evidencia por cada correo entregado del producto.
+    // De qué aviso es. El índice de la 063/064 hace que esto no recorra la
+    // tabla entera de evidencia por cada aviso del relay.
     const r = await sql<{
       instancia_id: string;
       circuito_id: string;
@@ -153,23 +177,51 @@ export async function registrarEntrega(e: {
       instanciaId: aviso.instancia_id,
       circuitoId: aviso.circuito_id,
       cuentaPropietariaId: aviso.cuenta_propietaria_id,
-      tipo: 'notificacion.entregada',
+      tipo,
       // ⚠ Lo afirma el proveedor, no nosotros. Ver la nota de arriba.
       actorTipo: 'proveedor',
       identidadId: aviso.identidad_id,
       participacionId: aviso.participacion_id,
       // ⚠ Sin el asunto: dice la empresa emisora y el título del documento, y
-      // no aporta nada al hecho «llegó».
+      // no aporta nada a ninguno de los dos veredictos.
       datos: {
         canal: 'email',
         proveedor: e.proveedor,
         message_id: messageId,
         destino: e.destino ?? null,
+        ...datosExtra,
       },
       ocurridoEn: e.ocurridoEn,
       canal: 'webhook',
     });
 
     return 'anotada' as ResultadoEntrega;
+  });
+}
+
+/** El aviso llegó a destino. */
+export async function registrarEntrega(e: AvisoDelRelay): Promise<ResultadoEntrega> {
+  return anotarVeredicto('notificacion.entregada', e);
+}
+
+/**
+ * El aviso salió, el relay lo aceptó, y no se pudo entregar.
+ *
+ * ⚠ SÓLO para fracasos DEFINITIVOS (rebote duro, bloqueado, dirección
+ * inválida). Un rebote blando o un aplazamiento todavía pueden terminar
+ * entregados, y anotar «no llegó» sobre eso sería sobreafirmar. El filtro está
+ * en `correo_webhook.ts`, que es quien conoce el vocabulario del proveedor.
+ */
+export async function registrarNoEntrega(
+  e: AvisoDelRelay & {
+    /** El nombre del evento tal como lo manda el proveedor: `hard_bounce`, `blocked`… */
+    motivoProveedor: string;
+    /** La explicación que dio el proveedor, si dio alguna. */
+    detalle?: string | null;
+  },
+): Promise<ResultadoEntrega> {
+  return anotarVeredicto('notificacion.no_entregada', e, {
+    motivo_proveedor: e.motivoProveedor,
+    detalle: e.detalle ?? null,
   });
 }

@@ -405,12 +405,22 @@ const ETIQUETA: Record<string, string> = {
   'documento.subido': 'Documento subido',
   'documento.copiado': 'Se creó su copia del documento',
   'circuito.despachado': 'Enviado a firmar',
-  // ⚠ Dice lo que se comprobó: el relay ACEPTÓ el mensaje. Que haya llegado es
-  // otra cosa, y su evento es `notificacion.entregada`, que todavía no escribe
-  // nadie. Ver migración 058 — y ⚠ el mismo texto vive en `tipo_evento`.
+  // ⚠⚠ CUATRO HECHOS DISTINTOS, Y LOS CUATRO TEXTOS TIENEN QUE PODER
+  // DISTINGUIRSE A SIMPLE VISTA. Es lo que un perito va a leer.
+  //
+  //   · enviada      → el relay lo ACEPTÓ. No dice que haya llegado.
+  //   · entregada    → llegó. Lo escribe el webhook desde la migración 063.
+  //   · fallida      → NO SALIÓ del sistema. Falló nuestro despacho.
+  //   · no_entregada → salió, el relay lo aceptó, y NO llegó (064).
+  //
+  // ⚠ El mismo texto vive en `tipo_evento` y los dos se cambian juntos. Que
+  // este certificado no lea del catálogo es deuda anotada: además de duplicar
+  // la afirmación, es lo que hoy impide que salga en portugués o en inglés.
+  // Ver migraciones 058, 063 y 064.
   'notificacion.enviada': 'Aviso aceptado por el servidor de correo',
   'notificacion.entregada': 'Aviso entregado al destinatario',
   'notificacion.fallida': 'El aviso NO salió',
+  'notificacion.no_entregada': 'El aviso salió pero NO se pudo entregar',
   'documento.abierto': 'Abrió el enlace',
   'documento.visto': 'Vio el documento',
   'documento.campo_completado': 'Completó un dato',
