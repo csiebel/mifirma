@@ -113,8 +113,14 @@ async function main() {
   if (cmd === 'probar') {
     const para = args[1];
     if (!para) throw new Error('Indicá a qué dirección mandar la prueba.');
-    await enviarPrueba(para);
+    const r = await enviarPrueba(para);
     console.log(`Correo de prueba enviado a ${para}. Si no llega, mirá la carpeta de spam.`);
+    // Los dos candidatos a amarre entre el evento de entrega y el expediente.
+    // Se imprimen para poder comparar lo que SALIÓ con lo que VUELVE en el
+    // webhook: ver si viene «un» message-id no alcanza, hay que saber si es el
+    // nuestro o uno que puso el relay. Ver `http/routes/correo_webhook.ts`.
+    console.log(`  etiqueta que salió   : ${r.etiqueta}`);
+    console.log(`  message-id que salió : ${r.id}`);
     return;
   }
 

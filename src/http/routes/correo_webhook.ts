@@ -78,7 +78,19 @@ function secretoDelPedido(authorization: string | undefined): string {
     const i = crudo.indexOf(':');
     return i === -1 ? crudo : crudo.slice(i + 1);
   }
+  // Último recurso: el valor pelado, sin esquema. No todos los proveedores
+  // anteponen `Bearer`, y aceptar el valor exacto no debilita nada — sigue
+  // habiendo que acertar el secreto entero.
+  if (!/\s/.test(h)) return h;
   return '';
+}
+
+/** El esquema declarado en la cabecera (`Bearer`, `Basic`, …), para el diagnóstico. */
+function esquemaDelPedido(authorization: string | undefined): string {
+  const h = (authorization || '').trim();
+  if (!h) return '(sin cabecera Authorization)';
+  const primera = h.split(/\s+/)[0];
+  return /\s/.test(h) ? primera : '(valor pelado, sin esquema)';
 }
 
 /**
@@ -124,10 +136,34 @@ export function registrarRutasCorreoWebhook(app: FastifyInstance) {
       return reply.code(503).send({ ok: false });
     }
 
-    if (!igualSeguro(secretoDelPedido(req.headers.authorization), esperado)) {
+    // ⚠⚠ TRES CAUSAS DISTINTAS, TRES MENSAJES DISTINTOS.
+    //
+    // La primera versión de esto decía «el secreto no coincide» para las tres, y
+    // cuando Brevo empezó a llamar de verdad el log no alcanzó para saber cuál
+    // era: el instrumento no distinguía «no mandó credenciales» de «las mandó
+    // con otro formato» de «el valor está mal». Cada una se arregla en un lugar
+    // distinto de la pantalla de Brevo.
+    //
+    // ⚠ El secreto NO se loguea, ni entero ni en pedazos. Se comparan LARGOS,
+    // que alcanza para distinguir las tres causas sin revelar nada — misma idea
+    // que el control de secretos del arranque.
+    const traido = secretoDelPedido(req.headers.authorization);
+    if (!igualSeguro(traido, esperado)) {
       req.log.warn(
-        { evento_correo: 'webhook_rechazado' },
-        'Correo: evento de Brevo rechazado — el secreto no coincide',
+        {
+          evento_correo: 'webhook_rechazado',
+          esquema: esquemaDelPedido(req.headers.authorization),
+          largo_recibido: traido.length,
+          largo_esperado: esperado.length,
+          // Los NOMBRES de las cabeceras que llegaron, nunca sus valores: es lo
+          // que dice si el proveedor manda las credenciales por otro lado.
+          cabeceras: Object.keys(req.headers).sort(),
+        },
+        traido.length === 0
+          ? 'Correo: evento de Brevo rechazado — NO VINO NINGUNA CREDENCIAL que se pueda leer. Revisá la autenticación del webhook en Brevo'
+          : traido.length !== esperado.length
+            ? 'Correo: evento de Brevo rechazado — vino una credencial de LARGO DISTINTO al secreto. Se pegó mal, o quedó otro valor'
+            : 'Correo: evento de Brevo rechazado — vino una credencial del largo correcto pero con OTRO CONTENIDO',
       );
       return reply.code(401).send({ ok: false });
     }
