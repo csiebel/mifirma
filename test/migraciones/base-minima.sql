@@ -488,6 +488,150 @@ insert into campo (circuito_id, cuenta_propietaria_id, codigo, etiqueta_i18n, ti
    'acepto', '{"es":"Acepto"}', 'texto', false, 1, 0, 10, 100, 100, 20);
 update circuito set estado = 'enviado' where id = '88888888-8888-8888-8888-888888888888';
 
+
+-- ── lo que necesita la 063: EL EXPEDIENTE ───────────────────────────────────
+--
+-- ⚠⚠ `evidencia` faltaba, y sin ella el banco no podía probar NINGUNA de las
+-- dieciocho migraciones que la tocan — incluidas la 020, que la crea, y la 021,
+-- que arregló que la cadena se bifurcaba. La única tabla del producto con valor
+-- probatorio era la única sin banco. Se agregó el 17/8/2026, al descubrirlo
+-- desde la 063.
+--
+-- Va con las DOS cosas que la hacen distinta de cualquier otra tabla de acá, y
+-- que son justamente las que una migración nueva se puede llevar por delante:
+--
+--   1. **ESTÁ PARTICIONADA POR MES.** Eso ya mordió el mismo día: el primer
+--      intento de la 063 traía un índice UNIQUE que Postgres rechaza sobre una
+--      tabla particionada si no incluye la columna de partición.
+--   2. **TIENE EL TRIGGER DE LA CADENA.** El número de orden y los hashes no
+--      los elige la aplicación. Una migración que inserte evidencia a mano y no
+--      cuente con eso da resultados que no se parecen a la realidad.
+--
+-- ⚠ Es una copia FIEL de la 020 en lo estructural. Si la 020 cambiara, esto
+-- también. No se "simplifica": un banco que no se parece a la base real da
+-- verde sobre una historia que no existe.
+
+create extension if not exists pgcrypto;
+
+-- Sólo por la FK de `evidencia.sello_tiempo_id`. No se sella nada acá.
+create table sello_tiempo (
+  id            uuid primary key default gen_random_uuid(),
+  estado        text not null default 'pendiente',
+  solicitado_en timestamptz not null default now()
+);
+
+create table evidencia (
+  id                      uuid not null default gen_random_uuid(),
+  instancia_id            uuid not null references instancia(id),
+  circuito_id             uuid not null references circuito(id),
+  cuenta_propietaria_id   uuid not null references cuenta(id),
+  identidad_id            uuid references identidad(id),
+  participacion_id        uuid references participacion(id),
+  actor_tipo              text not null check (actor_tipo in
+                            ('firmante','emisor','sistema','proveedor','operador')),
+  tipo                    text not null references tipo_evento(codigo),
+  datos                   jsonb not null default '{}'::jsonb,
+  ocurrido_en             timestamptz not null,
+  registrado_en           timestamptz not null default now(),
+  zona_horaria_mostrada   text,
+  sello_tiempo_id         uuid references sello_tiempo(id),
+  ip                      inet,
+  user_agent              text,
+  huella_dispositivo      text,
+  canal                   text check (canal in ('web','email','sms','whatsapp','api','webhook','sistema')),
+  sha256_documento        bytea,
+  numero_orden            bigint not null,
+  hash_contenido          bytea not null,
+  hash_anterior           bytea,
+  hash_propio             bytea not null,
+  purgado_en              timestamptz,
+  primary key (id, registrado_en)
+) partition by range (registrado_en);
+
+create table evidencia_default partition of evidencia default;
+
+create index evidencia_por_instancia on evidencia (instancia_id, numero_orden);
+create index evidencia_por_identidad on evidencia (identidad_id) where identidad_id is not null;
+create index evidencia_por_tipo on evidencia (tipo, registrado_en);
+create index evidencia_sin_sello on evidencia (registrado_en) where sello_tiempo_id is null;
+
+-- Copia fiel del trigger de la 020: el número de orden y los hashes NO los
+-- elige quien inserta.
+create or replace function evidencia_encadenar() returns trigger
+language plpgsql as $$
+declare v_ant record;
+begin
+  perform pg_advisory_xact_lock(hashtextextended(new.instancia_id::text, 0));
+  select numero_orden, hash_propio into v_ant
+    from evidencia
+   where instancia_id = new.instancia_id
+   order by numero_orden desc
+   limit 1;
+  new.numero_orden   := coalesce(v_ant.numero_orden, 0) + 1;
+  new.hash_anterior  := v_ant.hash_propio;
+  new.registrado_en  := now();
+  new.hash_contenido := digest(
+      new.instancia_id::text ||'|'|| new.numero_orden::text ||'|'||
+      new.tipo ||'|'|| new.datos::text ||'|'||
+      to_char(new.ocurrido_en at time zone 'UTC','YYYY-MM-DD"T"HH24:MI:SS.USOF') ||'|'||
+      coalesce(new.identidad_id::text,'') ||'|'||
+      coalesce(host(new.ip),'') ||'|'||
+      coalesce(new.user_agent,'') ||'|'||
+      coalesce(encode(new.sha256_documento,'hex'),'')
+    , 'sha256');
+  new.hash_propio := digest(
+      coalesce(encode(new.hash_anterior,'hex'),'') ||'|'||
+      encode(new.hash_contenido,'hex')
+    , 'sha256');
+  return new;
+end $$;
+
+create trigger evidencia_cadena before insert on evidencia
+  for each row execute function evidencia_encadenar();
+
+-- Los tipos que mira la 063. `notificacion.entregada` existe en el catálogo
+-- real desde la 020 y NO LA ESCRIBÍA NADIE hasta la 063.
+insert into tipo_evento (codigo, categoria, peso, orden, descripcion_i18n) values
+  ('notificacion.enviada',   'envio',   'normal', 30, '{"es":"El servidor de correo aceptó la notificación"}'),
+  ('notificacion.entregada', 'entrega', 'normal', 31, '{"es":"Aviso entregado al destinatario"}'),
+  ('notificacion.fallida',   'entrega', 'normal', 32, '{"es":"El aviso NO salió"}')
+on conflict (codigo) do nothing;
+
+-- ── DATOS QUE ROMPEN ────────────────────────────────────────────────────────
+--
+-- El punto de este archivo no es tener las tablas: es tener FILAS INCÓMODAS.
+-- Las tres de acá abajo son las que una migración sobre el amarre del
+-- Message-ID se puede llevar por delante:
+--
+--   1. Un aviso CON Message-ID — el caso normal desde la 063.
+--   2. Un aviso SIN Message-ID — **todos los avisos anteriores a la 063**, que
+--      son los que ya están en la base real. Un índice o una consulta que no
+--      los tolere se rompe contra producción y no acá.
+--   3. Un evento de OTRO tipo que igual trae un `message_id` en sus datos — si
+--      la búsqueda se olvida de filtrar por tipo, encuentra éste y ata la
+--      entrega al evento equivocado.
+insert into evidencia (
+  instancia_id, circuito_id, cuenta_propietaria_id, identidad_id, participacion_id,
+  actor_tipo, tipo, datos, ocurrido_en, canal, numero_orden, hash_contenido, hash_propio
+) values
+  ('88888888-0000-0000-0000-000000000001', '88888888-8888-8888-8888-888888888888',
+   '22222222-2222-2222-2222-222222222222', 'aaaaaaaa-0000-0000-0000-000000000001', null,
+   'sistema', 'notificacion.enviada',
+   '{"canal":"email","destino":"an•••@ejemplo.com","message_id":"con-id@mi-firma.digital"}'::jsonb,
+   '2026-08-10 10:00:00+00', 'email', 0, ''::bytea, ''::bytea),
+
+  ('88888888-0000-0000-0000-000000000001', '88888888-8888-8888-8888-888888888888',
+   '22222222-2222-2222-2222-222222222222', 'aaaaaaaa-0000-0000-0000-000000000002', null,
+   'sistema', 'notificacion.enviada',
+   '{"canal":"email","destino":"be•••@ejemplo.com"}'::jsonb,
+   '2026-08-10 10:01:00+00', 'email', 0, ''::bytea, ''::bytea),
+
+  ('88888888-0000-0000-0000-000000000002', '88888888-8888-8888-8888-888888888888',
+   '22222222-2222-2222-2222-222222222222', null, null,
+   'sistema', 'documento.subido',
+   '{"message_id":"con-id@mi-firma.digital"}'::jsonb,
+   '2026-08-10 09:00:00+00', 'web', 0, ''::bytea, ''::bytea);
+
 -- ── LA MARCA DEL BANCO ──────────────────────────────────────────────────────
 -- Existe para una sola cosa: que un script de prueba pueda negarse a correr si
 -- no está. La base de producción también se llama `mifirma`, así que el guard

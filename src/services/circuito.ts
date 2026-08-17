@@ -7,6 +7,7 @@ import { anotar } from './evidencia';
 import { registrar, registrarSistema } from './auditoria';
 import { emitirEnlaceFirma, urlDeFirma } from '../auth/enlace_firma';
 import { enviarCorreo } from './correo';
+import { normalizarMessageId } from './entregas';
 import { avisar, armar } from './mensajes';
 import { notificarUsuario } from './push';
 import { almacen } from '../almacenamiento/almacen';
@@ -1596,6 +1597,10 @@ async function notificar(
   e: { participacionId: string; otorgamientoId: string; identidadId: string; instanciaId: string; email: string; nombre: string | null },
 ): Promise<{ ok: boolean; email: string; error?: string }> {
   let error: string | null = null;
+  // ⚠ El número del mensaje, que hasta la 063 se descartaba. Es lo único que
+  // permite atar el aviso de entrega del relay a ESTE firmante y ESTE
+  // documento. Ver `services/entregas.ts`.
+  let messageId: string | null = null;
   try {
     const token = await emitirEnlaceFirma({
       otorgamientoId: e.otorgamientoId,
@@ -1605,7 +1610,7 @@ async function notificar(
     const url = urlDeFirma(token);
     const quien = e.nombre ? `Hola ${escapar(e.nombre)},` : 'Hola,';
 
-    await enviarCorreo({
+    const enviado = await enviarCorreo({
       para: e.email,
       asunto: `${info.cuentaNombre} te pide que firmes: ${info.titulo}`,
       html:
@@ -1620,6 +1625,7 @@ async function notificar(
         `${info.cuentaNombre} te envió un documento para firmar: ${info.titulo}\n\n${url}\n\n` +
         `No hace falta crear una cuenta. Este enlace es personal.`,
     });
+    messageId = normalizarMessageId(enviado.id);
   } catch (err) {
     error = err instanceof Error ? err.message : 'error desconocido';
   }
@@ -1649,7 +1655,7 @@ async function notificar(
       actorTipo: 'sistema',
       identidadId: e.identidadId,
       participacionId: e.participacionId,
-      datos: { canal: 'email', destino: enmascarar(e.email), error },
+      datos: { canal: 'email', destino: enmascarar(e.email), message_id: messageId, error },
       canal: 'email',
     });
     if (!error) {
@@ -1979,8 +1985,11 @@ export async function avisarCompletado(circuitoId: string, instanciaId: string) 
   let avisados = 0;
   for (const d of destinos.values()) {
     let error: string | null = null;
+    // Igual que en la invitación: sin esto, el aviso de entrega del relay no se
+    // puede atar a nada. Ver `services/entregas.ts`.
+    let messageId: string | null = null;
     try {
-      await enviarCorreo({
+      const enviado = await enviarCorreo({
         para: d.email,
         asunto: `Firmado: ${datos.titulo}`,
         html:
@@ -2011,6 +2020,7 @@ export async function avisarCompletado(circuitoId: string, instanciaId: string) 
             : []),
         ],
       });
+      messageId = normalizarMessageId(enviado.id);
       avisados += 1;
       // El cartelito, además del correo. Va acá adentro a propósito: si el
       // correo —que es el que lleva el PDF firmado y el certificado— no salió,
@@ -2035,6 +2045,7 @@ export async function avisarCompletado(circuitoId: string, instanciaId: string) 
           canal: 'email',
           motivo: 'documento_completo',
           destino: enmascarar(d.email),
+          message_id: messageId,
           adjunto: !!pdf,
           certificado_adjunto: !!certificado,
           sin_adjunto_porque: pdf ? null : motivoSinAdjunto,

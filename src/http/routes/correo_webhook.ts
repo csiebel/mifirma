@@ -1,9 +1,16 @@
 import type { FastifyInstance } from 'fastify';
 import { timingSafeEqual } from 'node:crypto';
+import { registrarEntrega } from '../../services/entregas';
 
 // =============================================================================
-// Receptor de eventos de correo de Brevo — FASE 1: sólo escucha.
+// Receptor de eventos de correo de Brevo.
 // =============================================================================
+//
+// ⚠ Historia, porque explica la forma que tiene esto: nació como fase 1 —«sólo
+// escucha y loguea»— justamente para MEDIR con qué se podía atar un evento de
+// entrega al expediente, en vez de deducirlo de la documentación. Medido el
+// 17/8/2026 con un correo real: Brevo conserva nuestro Message-ID. Desde la
+// migración 063 este archivo ya escribe `notificacion.entregada`.
 //
 // ═══ PARA QUÉ EXISTE ═══
 //
@@ -115,9 +122,28 @@ interface EventoBrevo {
   'message-id'?: string;
   'X-Mailin-custom'?: string;
   tags?: unknown;
+  date?: string;
   reason?: string;
   subject?: string;
   ts_event?: number;
+}
+
+/**
+ * Cuándo se entregó, según el proveedor — NO cuándo nos enteramos.
+ *
+ * Un webhook puede llegar tarde o quedar encolado, y lo que vale para el
+ * expediente es cuándo ocurrió el hecho. Si el proveedor no manda una fecha
+ * usable, se cae a ahora: es peor que la real, pero mentir menos que inventar
+ * un cero.
+ */
+function fechaDelEvento(e: EventoBrevo): Date {
+  // `ts_event` viene en SEGUNDOS desde epoch, no en milisegundos.
+  if (typeof e.ts_event === 'number' && e.ts_event > 0) return new Date(e.ts_event * 1000);
+  if (e.date) {
+    const d = new Date(e.date);
+    if (!Number.isNaN(d.getTime())) return d;
+  }
+  return new Date();
 }
 
 export function registrarRutasCorreoWebhook(app: FastifyInstance) {
@@ -197,8 +223,58 @@ export function registrarRutasCorreoWebhook(app: FastifyInstance) {
           motivo: e.reason ?? undefined,
           claves: Object.keys(e ?? {}).sort(),
         },
-        'Correo: evento de Brevo recibido (fase 1: sólo se anota en el log, no toca la base)',
+        'Correo: evento de Brevo recibido',
       );
+
+      // ⚠⚠ SÓLO `delivered` escribe en el expediente.
+      //
+      // Los fracasos —bloqueado, rebote, diferido— se anotan en el log y nada
+      // más, a propósito: `notificacion.fallida` hoy significa «NO SALIÓ», y un
+      // bloqueo es «salió y no se entregó», que es un hecho distinto. Darles el
+      // mismo nombre sería meter en el expediente exactamente el problema que
+      // la deuda 39 describe, y en un juicio la diferencia entre esas dos
+      // frases es la que se discute. Los fracasos van con su propio evento del
+      // catálogo, en su propia vuelta.
+      if (e.event !== 'delivered') continue;
+
+      const messageId = e['message-id'];
+      if (!messageId) {
+        req.log.warn(
+          { evento_correo: 'entrega_sin_identificador', destino: enmascararEmail(e.email ?? '') },
+          'Correo: entrega confirmada pero SIN message-id — no se puede saber de qué aviso es',
+        );
+        continue;
+      }
+
+      try {
+        const r = await registrarEntrega({
+          messageId,
+          proveedor: 'brevo',
+          ocurridoEn: fechaDelEvento(e),
+          destino: enmascararEmail(e.email ?? ''),
+        });
+        // Tres resultados, tres mensajes: mandan a mirar lugares distintos.
+        req.log.info(
+          { evento_correo: 'entrega_' + r, message_id: messageId, destino: enmascararEmail(e.email ?? '') },
+          r === 'anotada'
+            ? 'Correo: ENTREGA anotada en el expediente'
+            : r === 'repetida'
+              ? 'Correo: entrega ya anotada — el relay repitió el evento, no se hizo nada'
+              : 'Correo: entrega de un mensaje que no es nuestro (la cuenta de Brevo es compartida con payroll) — no se anotó nada',
+        );
+      } catch (err) {
+        // ⚠ Nunca romper la respuesta por un problema nuestro: Brevo NO
+        // reintenta, así que devolver un error acá sólo perdería el evento para
+        // siempre. Se anota fuerte en el log y se sigue.
+        req.log.error(
+          {
+            evento_correo: 'entrega_no_anotada',
+            message_id: messageId,
+            error: err instanceof Error ? err.message : String(err),
+          },
+          'Correo: NO se pudo anotar una entrega confirmada en el expediente',
+        );
+      }
     }
 
     // Siempre 200 cuando el secreto es bueno: un error nuestro no tiene por qué
