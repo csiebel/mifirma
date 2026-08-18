@@ -115,16 +115,23 @@ interface AvisoDelRelay {
 }
 
 /**
- * Anota el veredicto de un mensaje en el expediente del documento al que
- * pertenece.
+ * Anota en el expediente un hecho del relay amarrado a un mensaje: uno de los
+ * dos veredictos, o la baja del destinatario (066).
  *
  * Devuelve qué pasó en vez de lanzar: al webhook le sirve para el log, y ninguno
  * de los tres casos es un error del que haya que defenderse. Un Message-ID
  * desconocido es lo NORMAL mientras la cuenta de Brevo sea compartida con
  * payroll: sus avisos también llegan acá.
  */
-async function anotarVeredicto(
-  tipo: Veredicto,
+async function anotarAmarradoAlMensaje(
+  tipo: Veredicto | 'correo.baja_del_destinatario',
+  /**
+   * Tipos cuya presencia sobre el mismo mensaje convierte este aviso en una
+   * repetición. Para un veredicto son LOS DOS veredictos —se excluyen entre
+   * sí—; para la baja es sólo la propia baja, porque la baja CONVIVE con la
+   * entrega (ver `registrarBajaDelDestinatario`).
+   */
+  repiteSi: readonly string[],
   e: AvisoDelRelay,
   datosExtra: Record<string, unknown> = {},
 ): Promise<ResultadoEntrega> {
@@ -141,12 +148,13 @@ async function anotarVeredicto(
     // siempre. Ver la nota de arriba sobre por qué no alcanza un índice único.
     await sql`select pg_advisory_xact_lock(hashtextextended(${messageId}::text, 0))`.execute(trx);
 
-    // ¿Este mensaje ya tiene veredicto? Se pregunta por los DOS, no sólo por el
-    // que se quiere anotar: son excluyentes.
+    // ¿Este mensaje ya tiene anotado algo que convierta este aviso en una
+    // repetición? Qué cuenta como repetición lo decide el que llama: los
+    // veredictos se excluyen entre sí; la baja sólo se repite a sí misma.
     const yaEsta = await sql`
       select 1
         from evidencia
-       where tipo in ('notificacion.entregada', 'notificacion.no_entregada')
+       where tipo = any(${[...repiteSi]})
          and datos->>'message_id' = ${messageId}
        limit 1
     `.execute(trx);
@@ -201,7 +209,7 @@ async function anotarVeredicto(
 
 /** El aviso llegó a destino. */
 export async function registrarEntrega(e: AvisoDelRelay): Promise<ResultadoEntrega> {
-  return anotarVeredicto('notificacion.entregada', e);
+  return anotarAmarradoAlMensaje('notificacion.entregada', VEREDICTOS, e);
 }
 
 /**
@@ -220,8 +228,38 @@ export async function registrarNoEntrega(
     detalle?: string | null;
   },
 ): Promise<ResultadoEntrega> {
-  return anotarVeredicto('notificacion.no_entregada', e, {
+  return anotarAmarradoAlMensaje('notificacion.no_entregada', VEREDICTOS, e, {
     motivo_proveedor: e.motivoProveedor,
     detalle: e.detalle ?? null,
   });
+}
+
+/**
+ * El destinatario canceló la recepción de correos — el «Cancelar suscripción»
+ * que Brevo agrega solo (List-Unsubscribe) y que el cliente de correo muestra
+ * arriba del mensaje.
+ *
+ * ⚠⚠ NO es un veredicto, y es deliberado: para tocar «cancelar suscripción»
+ * normalmente hubo que RECIBIR el correo, así que este hecho CONVIVE con
+ * `notificacion.entregada` sobre el mismo mensaje. No entra en `VEREDICTOS`
+ * ni los excluye; su «¿ya está?» pregunta sólo por su propio tipo. El banco
+ * lo prueba (ejerce/066): sobre un mismo mensaje, entrega y baja encadenadas.
+ *
+ * ⚠ Medido el 17/8/2026 antes de escribir esto: el evento `unsubscribed`
+ * vuelve por SMTP relay CON nuestro Message-ID, así que se amarra igual que
+ * los veredictos. Y el cartel del cliente de correo dispara el webhook.
+ *
+ * ⚠⚠ La consecuencia práctica, para quien llegue acá buscando un fantasma:
+ * desde la baja, Brevo SUPRIME los envíos futuros a esa dirección — incluido
+ * el correo con el PDF firmado. Esos futuros van a aparecer como `blocked` →
+ * `notificacion.no_entregada`, cada uno en su expediente. Este evento es la
+ * CAUSA; aquéllos son los efectos.
+ */
+export async function registrarBajaDelDestinatario(e: AvisoDelRelay): Promise<ResultadoEntrega> {
+  return anotarAmarradoAlMensaje(
+    'correo.baja_del_destinatario',
+    ['correo.baja_del_destinatario'],
+    e,
+    { motivo_proveedor: 'unsubscribed' },
+  );
 }

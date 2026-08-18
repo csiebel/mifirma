@@ -591,10 +591,18 @@ create trigger evidencia_cadena before insert on evidencia
 
 -- Los tipos que mira la 063. `notificacion.entregada` existe en el catálogo
 -- real desde la 020 y NO LA ESCRIBÍA NADIE hasta la 063.
+-- ⚠ Con los textos REALES de la 020, en los tres idiomas — no con resúmenes.
+-- El ejerce/066 cuenta textos distintos en es/pt/en, y contra una siembra
+-- inventada estaría afirmando sobre un mundo que no existe. `enviada` y
+-- `fallida` arrancan con su texto viejo A PROPÓSITO: la 058 y la 064 los
+-- corrigen durante la corrida, igual que pasó en la base real.
 insert into tipo_evento (codigo, categoria, peso, orden, descripcion_i18n) values
-  ('notificacion.enviada',   'envio',   'normal', 30, '{"es":"El servidor de correo aceptó la notificación"}'),
-  ('notificacion.entregada', 'entrega', 'normal', 31, '{"es":"Aviso entregado al destinatario"}'),
-  ('notificacion.fallida',   'entrega', 'normal', 32, '{"es":"El aviso NO salió"}')
+  ('notificacion.enviada',   'envio',   'normal', 30,
+   '{"es":"Se envió la notificación","pt":"Notificação enviada","en":"Notification sent"}'),
+  ('notificacion.entregada', 'entrega', 'normal', 31,
+   '{"es":"La notificación fue entregada","pt":"Notificação entregue","en":"Notification delivered"}'),
+  ('notificacion.fallida',   'entrega', 'normal', 32,
+   '{"es":"La notificación no se pudo entregar","pt":"A notificação não pôde ser entregue","en":"Notification could not be delivered"}')
 on conflict (codigo) do nothing;
 
 -- ── DATOS QUE ROMPEN ────────────────────────────────────────────────────────

@@ -1,6 +1,6 @@
 import type { FastifyInstance } from 'fastify';
 import { timingSafeEqual } from 'node:crypto';
-import { registrarEntrega, registrarNoEntrega } from '../../services/entregas';
+import { registrarBajaDelDestinatario, registrarEntrega, registrarNoEntrega } from '../../services/entregas';
 
 // =============================================================================
 // Receptor de eventos de correo de Brevo.
@@ -155,6 +155,18 @@ const FRACASOS_DEFINITIVOS = new Set(['hard_bounce', 'blocked', 'invalid_email',
 const FRACASOS_TEMPORALES = new Set(['soft_bounce', 'deferred']);
 
 /**
+ * La baja: el destinatario canceló la recepción de correos (List-Unsubscribe).
+ *
+ * NO es un fracaso del mensaje —para darse de baja normalmente hubo que
+ * recibirlo— así que no es un veredicto: convive con «entregada». Pero al
+ * expediente va, con hecho propio (066): desde acá Brevo suprime los envíos
+ * futuros a esa dirección —incluido el PDF firmado— y esos futuros van a
+ * llegar como `blocked`. Este evento es la causa; sin él, aquéllos parecen
+ * fallas de infraestructura.
+ */
+const BAJA = 'unsubscribed';
+
+/**
  * Cuándo se entregó, según el proveedor — NO cuándo nos enteramos.
  *
  * Un webhook puede llegar tarde o quedar encolado, y lo que vale para el
@@ -256,8 +268,9 @@ export function registrarRutasCorreoWebhook(app: FastifyInstance) {
       const tipoEvento = e.event ?? '';
       const esEntrega = tipoEvento === 'delivered';
       const esFracasoFinal = FRACASOS_DEFINITIVOS.has(tipoEvento);
+      const esBaja = tipoEvento === BAJA;
 
-      if (!esEntrega && !esFracasoFinal) {
+      if (!esEntrega && !esFracasoFinal && !esBaja) {
         // Ni entrega ni fracaso definitivo. Se deja constancia en el log de que
         // NO se anotó y por qué, para que la ausencia no parezca un olvido.
         req.log.info(
@@ -292,25 +305,31 @@ export function registrarRutasCorreoWebhook(app: FastifyInstance) {
         };
         const r = esEntrega
           ? await registrarEntrega(comun)
-          : await registrarNoEntrega({ ...comun, motivoProveedor: tipoEvento, detalle: e.reason ?? null });
+          : esBaja
+            ? await registrarBajaDelDestinatario(comun)
+            : await registrarNoEntrega({ ...comun, motivoProveedor: tipoEvento, detalle: e.reason ?? null });
 
         // Cada resultado manda a mirar un lugar distinto, así que cada uno tiene
         // su propia frase.
         req.log.info(
           {
-            evento_correo: (esEntrega ? 'entrega_' : 'no_entrega_') + r,
+            evento_correo: (esEntrega ? 'entrega_' : esBaja ? 'baja_' : 'no_entrega_') + r,
             tipo: tipoEvento,
             message_id: messageId,
             destino: enmascararEmail(e.email ?? ''),
             motivo: e.reason ?? undefined,
           },
-          r === 'repetida'
-            ? 'Correo: el mensaje ya tenía veredicto — el relay repitió el evento, no se hizo nada'
-            : r === 'sin_correspondencia'
-              ? 'Correo: aviso de un mensaje que no es nuestro (la cuenta de Brevo es compartida con payroll) — no se anotó nada'
+          r === 'sin_correspondencia'
+            ? 'Correo: aviso de un mensaje que no es nuestro (la cuenta de Brevo es compartida con payroll) — no se anotó nada'
+            : r === 'repetida'
+              ? (esBaja
+                  ? 'Correo: la baja ya estaba anotada — el relay repitió el evento, no se hizo nada'
+                  : 'Correo: el mensaje ya tenía veredicto — el relay repitió el evento, no se hizo nada')
               : esEntrega
                 ? 'Correo: ENTREGA anotada en el expediente'
-                : 'Correo: NO ENTREGA anotada en el expediente — a este firmante NO le llegó el aviso y el documento va a quedar esperándolo',
+                : esBaja
+                  ? 'Correo: BAJA anotada en el expediente — el destinatario canceló la recepción de correos; los próximos correos a esa dirección van a volver rechazados, cada uno a su expediente'
+                  : 'Correo: NO ENTREGA anotada en el expediente — a este firmante NO le llegó el aviso y el documento va a quedar esperándolo',
         );
       } catch (err) {
         // ⚠ Nunca romper la respuesta por un problema nuestro: Brevo NO
