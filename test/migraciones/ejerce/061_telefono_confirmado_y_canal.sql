@@ -34,9 +34,9 @@ end $guard$;
 
 begin;
 
-insert into identidad (id, email_mostrado, nombre_mostrado) values
-  ('ffff0000-0000-0000-0000-0000000610a1', 'ana.061@ejemplo.com',  'Ana 061'),
-  ('ffff0000-0000-0000-0000-0000000610b2', 'beto.061@ejemplo.com', 'Beto 061');
+insert into identidad (id, email_normalizado, email_mostrado, nombre_mostrado) values
+  ('ffff0000-0000-0000-0000-0000000610a1', 'ana.061@ejemplo.com',  'ana.061@ejemplo.com',  'Ana 061'),
+  ('ffff0000-0000-0000-0000-0000000610b2', 'beto.061@ejemplo.com', 'beto.061@ejemplo.com', 'Beto 061');
 
 -- Ana: el administrador le propuso un número. Nadie lo confirmó todavía.
 insert into credencial (identidad_id, hash_password, telefono_propuesto_e164) values

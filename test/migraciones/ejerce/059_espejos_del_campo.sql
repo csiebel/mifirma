@@ -31,8 +31,12 @@ do $espejos$
 declare
   v_cuenta uuid; v_circuito uuid; v_campo uuid; v_esp jsonb; v_ok boolean;
 begin
-  insert into cuenta (nombre_mostrado) values ('Banco 059') returning id into v_cuenta;
-  insert into circuito (cuenta_propietaria_id, titulo) values (v_cuenta, 'Banco 059')
+  insert into cuenta (tipo, nombre_mostrado, pais, moneda)
+    values ('empresa', 'Banco 059', 'UY', 'UYU') returning id into v_cuenta;
+  insert into circuito (cuenta_propietaria_id, creado_por_identidad_id, archivo_base_id,
+                        titulo, modo, pais_marco, nivel_firma)
+    values (v_cuenta, '11111111-1111-1111-1111-111111111111',
+            'a4c41111-0000-0000-0000-000000000001', 'Banco 059', 'serie', 'UY', 'simple')
     returning id into v_circuito;
 
   -- ── 1. Un campo insertado como siempre queda SIN espejos, no sin valor ────

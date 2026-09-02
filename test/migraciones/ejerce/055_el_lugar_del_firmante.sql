@@ -32,13 +32,15 @@ end $guard$;
 begin;
 
 -- ── el escenario: un acta en paralelo, dos firmantes, un campo de cada uno ───
-insert into identidad (id, email_mostrado, nombre_mostrado) values
-  ('eeee0000-0000-0000-0000-00000000000a', 'ana.e@ejemplo.com',  'Ana ejerce'),
-  ('eeee0000-0000-0000-0000-00000000000b', 'beto.e@ejemplo.com', 'Beto ejerce');
+insert into identidad (id, email_normalizado, email_mostrado, nombre_mostrado) values
+  ('eeee0000-0000-0000-0000-00000000000a', 'ana.e@ejemplo.com',  'ana.e@ejemplo.com',  'Ana ejerce'),
+  ('eeee0000-0000-0000-0000-00000000000b', 'beto.e@ejemplo.com', 'beto.e@ejemplo.com', 'Beto ejerce');
 
-insert into circuito (id, cuenta_propietaria_id, titulo, estado, modo) values
+insert into circuito (id, cuenta_propietaria_id, creado_por_identidad_id, archivo_base_id,
+                      titulo, estado, modo, pais_marco, nivel_firma) values
   ('eeee1111-0000-0000-0000-000000000001', '22222222-2222-2222-2222-222222222222',
-   'Acta para ejercer', 'borrador', 'paralelo');
+   '11111111-1111-1111-1111-111111111111', 'a4c41111-0000-0000-0000-000000000001',
+   'Acta para ejercer', 'borrador', 'paralelo', 'UY', 'simple');
 
 insert into instancia (id, circuito_id, cuenta_propietaria_id, numero, estado) values
   ('eeee2222-0000-0000-0000-000000000001', 'eeee1111-0000-0000-0000-000000000001',
@@ -71,7 +73,7 @@ commit;
 -- Se reemplazan los dos stubs de contexto que trae `base-minima.sql`. El
 -- otorgamiento se da por bueno: lo que se está probando no es quién tiene
 -- permiso de firmar, es a QUIÉN pertenece cada campo.
-create or replace function app.tiene_otorgamiento(uuid, uuid, text) returns boolean
+create or replace function app.tiene_otorgamiento(p_circuito uuid, p_instancia uuid, p_alcance text) returns boolean
   language sql stable as $$ select true $$;
 
 do $ejerce$

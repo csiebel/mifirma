@@ -36,15 +36,15 @@ end $guard$;
 begin;
 
 -- ── El reparto ──────────────────────────────────────────────────────────────
-insert into cuenta (id, nombre_mostrado) values
-  ('cccc0000-0000-0000-0000-000000062002', 'Otra Empresa S.A.');
+insert into cuenta (id, tipo, nombre_mostrado, pais, moneda) values
+  ('cccc0000-0000-0000-0000-000000062002', 'empresa', 'Otra Empresa S.A.', 'UY', 'UYU');
 
-insert into identidad (id, email_mostrado, nombre_mostrado) values
-  ('ffff0000-0000-0000-0000-0000000620ad', 'admin.062@ejemplo.com', 'Admin 062'),
-  ('ffff0000-0000-0000-0000-0000000620a1', 'ana.062@ejemplo.com',   null),
-  ('ffff0000-0000-0000-0000-0000000620b2', 'beto.062@ejemplo.com',  'Beto 062'),
-  ('ffff0000-0000-0000-0000-0000000620c3', 'carla.062@ejemplo.com', null),
-  ('ffff0000-0000-0000-0000-0000000620d4', 'pedro.062@ejemplo.com', null);
+insert into identidad (id, email_normalizado, email_mostrado, nombre_mostrado) values
+  ('ffff0000-0000-0000-0000-0000000620ad', 'admin.062@ejemplo.com', 'admin.062@ejemplo.com', 'Admin 062'),
+  ('ffff0000-0000-0000-0000-0000000620a1', 'ana.062@ejemplo.com',   'ana.062@ejemplo.com',   null),
+  ('ffff0000-0000-0000-0000-0000000620b2', 'beto.062@ejemplo.com',  'beto.062@ejemplo.com',  'Beto 062'),
+  ('ffff0000-0000-0000-0000-0000000620c3', 'carla.062@ejemplo.com', 'carla.062@ejemplo.com', null),
+  ('ffff0000-0000-0000-0000-0000000620d4', 'pedro.062@ejemplo.com', 'pedro.062@ejemplo.com', null);
 
 -- Ana, Beto y Pedro son de la empresa del admin. Carla es de la otra.
 insert into membresia (identidad_id, cuenta_id) values
@@ -56,13 +56,15 @@ insert into membresia (identidad_id, cuenta_id) values
 
 -- El permiso de gestionar accesos, sólo para el admin. Pedro entra igual a la
 -- consola; lo que no tiene es esta capacidad.
-insert into capacidad (id, recurso, accion) values
-  ('caca0000-0000-0000-0000-000000062001', 'usuario', 'administrar');
-insert into rol (id, cuenta_id, nombre) values
-  ('0000d000-0000-0000-0000-000000062001', '22222222-2222-2222-2222-222222222222', 'Administrador 062'),
-  ('0000d000-0000-0000-0000-000000062002', '22222222-2222-2222-2222-222222222222', 'Mirón 062');
-insert into rol_capacidad (rol_id, capacidad_id) values
-  ('0000d000-0000-0000-0000-000000062001', 'caca0000-0000-0000-0000-000000062001');
+-- ⚠ La capacidad 'usuario'/'administrar' YA la siembra una migración: el catálogo
+-- viene del esquema real, no del banco. Se referencia por (recurso, accion) más
+-- abajo; insertarla choca contra la unique del catálogo.
+insert into rol (id, cuenta_id, codigo, nombre_i18n) values
+  ('0000d000-0000-0000-0000-000000062001', '22222222-2222-2222-2222-222222222222', 'admin_062', '{"es":"Administrador 062"}'),
+  ('0000d000-0000-0000-0000-000000062002', '22222222-2222-2222-2222-222222222222', 'miron_062', '{"es":"Mirón 062"}');
+insert into rol_capacidad (rol_id, capacidad_id)
+  select '0000d000-0000-0000-0000-000000062001', id
+    from capacidad where recurso = 'usuario' and accion = 'administrar';
 insert into usuario_rol (identidad_id, cuenta_id, rol_id) values
   ('ffff0000-0000-0000-0000-0000000620ad', '22222222-2222-2222-2222-222222222222', '0000d000-0000-0000-0000-000000062001'),
   ('ffff0000-0000-0000-0000-0000000620d4', '22222222-2222-2222-2222-222222222222', '0000d000-0000-0000-0000-000000062002');
@@ -85,8 +87,8 @@ declare
 begin
   -- Nos paramos en los zapatos del admin.
   perform set_config('app.actor',     'cuenta',        true);
-  perform set_config('app.cuenta',    v_cuenta::text,  true);
-  perform set_config('app.identidad', v_admin::text,   true);
+  perform set_config('app.cuenta_id',    v_cuenta::text,  true);
+  perform set_config('app.identidad_id', v_admin::text,   true);
 
   -- ═══ 1. LO QUE CLAUDIO PIDIÓ: cargarle el celular a su gente ═══
   perform app.proponer_datos_de_acceso(v_ana, 'Ana 062', '+59899000001');
@@ -133,7 +135,7 @@ begin
   end if;
 
   -- ═══ 5. SIN EL PERMISO DE ACCESOS: NO ═══
-  perform set_config('app.identidad', v_pedro::text, true);
+  perform set_config('app.identidad_id', v_pedro::text, true);
   v_paso := false;
   begin
     perform app.proponer_datos_de_acceso(v_ana, null, '+59899000004');
@@ -143,7 +145,7 @@ begin
   if v_paso then
     v_mal := v_mal || E'\n  ⚠⚠ alguien sin permiso de gestionar accesos pudo proponer un celular';
   end if;
-  perform set_config('app.identidad', v_admin::text, true);
+  perform set_config('app.identidad_id', v_admin::text, true);
 
   -- ═══ 6. UN CELULAR MAL ESCRITO NO ENTRA ═══
   v_paso := false;
@@ -157,7 +159,7 @@ begin
   end if;
 
   -- ═══ 7. Y SIN CONTEXTO DE CUENTA, NADA ═══
-  perform set_config('app.cuenta', '', true);
+  perform set_config('app.cuenta_id', '', true);
   v_paso := false;
   begin
     perform app.proponer_datos_de_acceso(v_ana, null, '+59899000005');

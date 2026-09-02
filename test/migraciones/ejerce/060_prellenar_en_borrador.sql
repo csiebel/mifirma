@@ -30,9 +30,9 @@ end $guard$;
 
 begin;
 
-insert into identidad (id, email_mostrado, nombre_mostrado) values
-  ('ffff0000-0000-0000-0000-00000000000e', 'emisora.f@ejemplo.com', 'Emisora ejerce'),
-  ('ffff0000-0000-0000-0000-00000000000a', 'ana.f@ejemplo.com',     'Ana ejerce 060');
+insert into identidad (id, email_normalizado, email_mostrado, nombre_mostrado) values
+  ('ffff0000-0000-0000-0000-00000000000e', 'emisora.f@ejemplo.com', 'emisora.f@ejemplo.com', 'Emisora ejerce'),
+  ('ffff0000-0000-0000-0000-00000000000a', 'ana.f@ejemplo.com',     'ana.f@ejemplo.com',     'Ana ejerce 060');
 
 -- Un circuito EN BORRADOR y otro que se va a despachar, con la misma forma: un
 -- campo del emisor, uno del firmante (lugar 1) y uno de cualquiera.
@@ -41,11 +41,14 @@ insert into identidad (id, email_mostrado, nombre_mostrado) values
 -- porque así es el ciclo real y la base lo exige: el trigger
 -- `campo_solo_en_borrador` rechaza definir campos sobre un circuito enviado —
 -- lo descubrió este mismo archivo al intentar el atajo.
-insert into circuito (id, cuenta_propietaria_id, titulo, estado, modo) values
+insert into circuito (id, cuenta_propietaria_id, creado_por_identidad_id, archivo_base_id,
+                      titulo, estado, modo, pais_marco, nivel_firma) values
   ('ffff1111-0000-0000-0000-000000000001', '22222222-2222-2222-2222-222222222222',
-   'Borrador para prellenar', 'borrador', 'copias'),
+   '11111111-1111-1111-1111-111111111111', 'a4c41111-0000-0000-0000-000000000001',
+   'Borrador para prellenar', 'borrador', 'copias', 'UY', 'simple'),
   ('ffff1111-0000-0000-0000-000000000002', '22222222-2222-2222-2222-222222222222',
-   'Enviado: la ventana cerrada', 'borrador', 'copias');
+   '11111111-1111-1111-1111-111111111111', 'a4c41111-0000-0000-0000-000000000001',
+   'Enviado: la ventana cerrada', 'borrador', 'copias', 'UY', 'simple');
 
 insert into instancia (id, circuito_id, cuenta_propietaria_id, numero, estado) values
   ('ffff2222-0000-0000-0000-000000000001', 'ffff1111-0000-0000-0000-000000000001',
@@ -94,14 +97,14 @@ insert into valor_campo (campo_id, instancia_id, cuenta_propietaria_id,
    '22222222-2222-2222-2222-222222222222', 'sin observaciones',
    'ffff0000-0000-0000-0000-00000000000e', now(), 'planilla');
 
-update circuito set estado = 'en_curso'
+update circuito set estado = 'enviado'
  where id = 'ffff1111-0000-0000-0000-000000000002';
 
 commit;
 
 -- El otorgamiento se da por bueno: lo que se prueba es de quién es cada campo
 -- y cuándo, no el circuito de otorgamientos.
-create or replace function app.tiene_otorgamiento(uuid, uuid, text) returns boolean
+create or replace function app.tiene_otorgamiento(p_circuito uuid, p_instancia uuid, p_alcance text) returns boolean
   language sql stable as $$ select true $$;
 
 do $ejerce$

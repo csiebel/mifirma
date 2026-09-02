@@ -15,6 +15,20 @@
 #
 # ⚠ Borra y recrea la base `mifirma` del servidor al que apunte. Nunca apuntarlo
 # al túnel de Railway: `$MIFIRMA_DB` es la base REAL.
+#
+# ═══ CÓMO SE CONSTRUYE LA BASE (deudas 34 y 77, 21/8/2026) ═══
+#
+# Antes se cargaba `base-minima.sql`: un esqueleto de 21 tablas escrito a mano.
+# No se parecía a la base real —67 tablas, RLS en 51, 153 políticas— así que una
+# migración que rompiera una POLÍTICA pasaba el banco en verde. La regla de oro
+# nº2 (la autorización vive en la capa de datos) era lo único que el banco no
+# probaba.
+#
+# Ahora el esquema se construye CORRIENDO LAS MIGRACIONES REALES, de la 001 hasta
+# la marca de `previas.txt` (la 050), y recién ahí se cargan los DATOS incómodos
+# (`base-fixtures.sql`). Dos ventajas: el esquema del banco ES el de producción a
+# la 050, y `tipo_evento` viene sembrado por las migraciones —con el texto del
+# momento— en vez de a mano, que ya mordió una vez (siembra inventada, 17/8).
 # =============================================================================
 set -euo pipefail
 
@@ -40,35 +54,19 @@ if [ -f "$AQUI/../../db/.env.tunel" ]; then
   fi
 fi
 
-echo "── base limpia"
-psql -q -d postgres -c 'drop database if exists mifirma'
-psql -q -d postgres -c 'drop role if exists app_rw' 2>/dev/null || true
-psql -q -d postgres -c 'create database mifirma'
-psql -q -d mifirma -v ON_ERROR_STOP=1 -f "$AQUI/base-minima.sql" >/dev/null
-
-# ── LAS MIGRACIONES ANTERIORES ──────────────────────────────────────────────
+# ── HASTA DÓNDE LLEGA EL ESQUEMA BASE, Y DESDE DÓNDE VAN LAS PREVIAS ─────────
 #
-# ⚠⚠ ESTO SE CALCULA. Antes era una lista escrita a mano en `previas.txt`, y
-# **se desactualizó las dos veces que se pudo desactualizar**: le faltó la 054
-# en agosto, se arregló, y para cuando llegó la 057 le faltaba la 056. Una lista
-# de «todas las anteriores» que hay que acordarse de tocar cada vez que se
-# agrega una migración no es un invariante: es una convención, y las
-# convenciones se olvidan.
-#
-# Y el modo en que falla es el peor: **el banco da verde**. Corre una historia
-# incompleta, la migración entra contra un esquema que no existe en ningún lado,
-# y la que revienta es la base real.
-#
-# Ahora `previas.txt` guarda UN dato que sí es estable —hasta dónde llega
-# `base-minima.sql`— y el resto sale de `migrations/`: todo lo que está después
-# de esa marca y antes de la que se está probando. Agregar una migración no
-# requiere acordarse de nada.
+# `previas.txt` guarda UN dato estable: `desde: NNN`. Es la primera migración que
+# corre como «previa». Todo lo ANTERIOR (001..NNN-1) construye el esquema base;
+# todo lo que va de NNN hasta la que se prueba (exclusive) son las previas. Un
+# solo número gobierna las dos mitades: agregar una migración no requiere tocar
+# nada acá.
 MARCA="$AQUI/previas.txt"
 DESDE=""
 [ -f "$MARCA" ] && DESDE="$(sed -n 's/^[[:space:]]*desde:[[:space:]]*\([0-9]\{3\}\).*/\1/p' "$MARCA" | head -1)"
 if [ -z "$DESDE" ]; then
   echo "ABORTADO: falta la línea 'desde: NNN' en test/migraciones/previas.txt." >&2
-  echo "Es hasta dónde llega base-minima.sql. Sin eso no se sabe qué correr antes." >&2
+  echo "Es la primera migración que corre como previa; lo anterior arma el esquema base." >&2
   exit 1
 fi
 
@@ -79,11 +77,47 @@ if [ -z "$HASTA" ]; then
   exit 1
 fi
 
+MIGDIR="$AQUI/../../migrations"
+
+echo "── base limpia"
+psql -q -d postgres -c 'drop database if exists mifirma'
+psql -q -d postgres -c 'create database mifirma'
+
+# ── LOS ROLES ───────────────────────────────────────────────────────────────
+# ⚠ Un rol es del CLÚSTER, no de la base: no se va con el `drop database`. Las
+# migraciones les hacen GRANT, así que tienen que existir ANTES. Se crean sólo si
+# faltan —un `drop` allá depende de permisos y de quién más lo use; un `create if
+# not exists` no depende de nada— y por eso el banco andaba en una máquina y
+# moría en otra con «role app_rw already exists». `app_operador` también: el
+# centinela de la 026 llama a `has_table_privilege('app_operador', …)`, que
+# revienta si el rol no existe.
+psql -q -d postgres -c "do \$r\$ begin
+  if not exists (select 1 from pg_roles where rolname='app_rw')       then create role app_rw;       end if;
+  if not exists (select 1 from pg_roles where rolname='app_operador') then create role app_operador; end if;
+end \$r\$;"
+
+# ── EL ESQUEMA: las migraciones reales, de la 001 hasta ANTES de DESDE ───────
+BASE=0
+for m in "$MIGDIR"/[0-9][0-9][0-9]_*.sql; do
+  [ -e "$m" ] || continue
+  n="$(basename "$m" | cut -c1-3)"
+  # `10#` fuerza base decimal: sin eso, «050» se lee como octal y «008» explota.
+  if [ "$((10#$n))" -lt "$((10#$DESDE))" ]; then
+    psql -q -d mifirma -v ON_ERROR_STOP=1 -f "$m" >/dev/null
+    BASE=$((BASE + 1))
+  fi
+done
+echo "── esquema: $BASE migración$([ "$BASE" -eq 1 ] || echo es) (001 → $(printf '%03d' $((10#$DESDE - 1))))"
+
+# ── LOS DATOS INCÓMODOS ─────────────────────────────────────────────────────
+echo "── datos: base-fixtures.sql"
+psql -q -d mifirma -v ON_ERROR_STOP=1 -f "$AQUI/base-fixtures.sql" >/dev/null
+
+# ── LAS PREVIAS: de DESDE hasta ANTES de la que se prueba ────────────────────
 CORRIDAS=0
-for previa in "$AQUI/../../migrations/"[0-9][0-9][0-9]_*.sql; do
+for previa in "$MIGDIR"/[0-9][0-9][0-9]_*.sql; do
   [ -e "$previa" ] || continue
   n="$(basename "$previa" | cut -c1-3)"
-  # `10#` fuerza base decimal: sin eso, «050» se lee como octal y «008» explota.
   if [ "$((10#$n))" -ge "$((10#$DESDE))" ] && [ "$((10#$n))" -lt "$((10#$HASTA))" ]; then
     echo "── previa: $(basename "$previa")"
     psql -q -d mifirma -v ON_ERROR_STOP=1 -f "$previa" >/dev/null
