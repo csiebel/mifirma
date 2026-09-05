@@ -28,7 +28,7 @@
   var DATOS = null;       // respuesta de /operador/planes
   var PLAN_SEL = null;
 
-  var VISTAS = ['correo', 'twilio', 'planes', 'paises', 'proveedores', 'pasarelas', 'operadores', 'bitacora'];
+  var VISTAS = ['correo', 'twilio', 'planes', 'paises', 'proveedores', 'pasarelas', 'operadores', 'plata', 'bitacora'];
 
   // El catálogo de países, tal como lo devuelve la base. Antes acá había un
   // `{ UY:'UYU', PY:'PYG', BR:'BRL' }` escrito a mano: agregar Chile era editar
@@ -234,6 +234,7 @@
     if (vista === 'proveedores') cargarProveedores();
     if (vista === 'pasarelas') cargarPasarelas();
     if (vista === 'operadores') cargarOperadores();
+    if (vista === 'plata') cargarPlata();
     if (vista === 'bitacora') cargarBitacora();
   }
 
@@ -1650,6 +1651,228 @@
     }
   }
 
+
+  // ⚠ INDUSTRIAS: la pantalla se sacó el 5/9. Es un catálogo heredado de payroll
+  // —allá el rubro decidía convenio y aportes— que en MiFirma no lo mira nadie.
+  // La API sigue existiendo y `cuenta.industria_id` sigue teniendo datos, así que
+  // no se borró nada: sólo se dejó de ofrecer una pantalla para administrar algo
+  // que no se usa.
+  //
+  // ⚠ PENDIENTE, y es lo que de verdad importa: el formulario de ALTA sigue
+  // pidiendo el rubro. Sacar la pantalla y dejar el campo es lo peor de los dos
+  // mundos — se le sigue preguntando al que se registra un dato que ya nadie
+  // puede administrar. Eso pide su propia pasada, con migración.
+
+  // ===========================================================================
+  // PLATA — tres cosas chicas que van juntas porque son del mismo mundo
+  //
+  // Catálogos bancarios, lo que cuesta la IA, y la conexión con facturación. Cada
+  // una sola no justifica un ítem en el menú; las tres desparramadas en la API y
+  // sin pantalla, sí justificaban una.
+  // ===========================================================================
+
+  var TAB_PLATA = 'catalogos';
+  var TABLA_CAT = 'banco';
+
+  function irPlata(tab) {
+    TAB_PLATA = tab;
+    ['catalogos', 'ia', 'facturacion'].forEach(function (t) {
+      var el = $('plata_' + t);
+      if (el) el.classList.toggle('hidden', t !== tab);
+      var b = $('tabPlata_' + t);
+      if (b) b.setAttribute('aria-current', String(t === tab));
+    });
+    cargarPlata();
+  }
+
+  async function cargarPlata() {
+    if (TAB_PLATA === 'catalogos') return cargarCatalogos();
+    if (TAB_PLATA === 'ia') return cargarTarifasIa();
+    if (TAB_PLATA === 'facturacion') return cargarFacturacion();
+  }
+
+  // ---- Catálogos bancarios ----
+  async function cargarCatalogos() {
+    TABLA_CAT = $('catTabla') ? $('catTabla').value : 'banco';
+    try {
+      var j = await api('/operador/catalogos-pago/' + TABLA_CAT);
+      var it = j.items || [];
+      $('tCatalogos').innerHTML = !it.length
+        ? '<tr><td colspan="4" class="mut">Sin filas.</td></tr>'
+        : it.map(function (x) {
+            return '<tr><td>' + esc(x.pais) + '</td><td>' + esc(x.nombre) + '</td>' +
+              '<td>' + (x.activo ? 'Sí' : '<span class="mut">No</span>') + '</td>' +
+              '<td><button class="btn chico" onclick="borrarCatalogo(\'' + esc(x.id) + '\')">Borrar</button></td></tr>';
+          }).join('');
+    } catch (e) {
+      msg('msgPlata', e.message, 'err');
+    }
+  }
+
+  function agregarCatalogo() {
+    var que = TABLA_CAT === 'banco' ? 'banco' : 'tipo de cuenta';
+    abrirModal(
+      '<h2>Agregar ' + que + '</h2>' +
+      '<p class="sub">Es lo que la empresa cliente va a elegir de una lista al cargar un medio de ' +
+      'pago. Escribirlo bien una vez evita tener «BROU», «Banco República» y «B.R.O.U.» conviviendo.</p>' +
+      '<div class="dos">' +
+      '<div><label>País (2 letras)</label><input id="caPais" maxlength="2" /></div>' +
+      '<div><label>Orden</label><input id="caOrden" type="number" value="100" /></div>' +
+      '</div>' +
+      '<div><label>Nombre</label><input id="caNom" /></div>' +
+      '<div id="msgModalCa" style="margin-top:10px"></div>' +
+      '<div class="acciones">' +
+      '<button class="btn btn-s" onclick="cerrarModal()">Cancelar</button>' +
+      '<button class="btn btn-p" onclick="guardarCatalogoForm()">Agregar</button>' +
+      '</div>',
+    );
+  }
+
+  async function guardarCatalogoForm() {
+    try {
+      await api('/operador/catalogos-pago/' + TABLA_CAT, 'POST', {
+        pais: $('caPais').value.trim().toUpperCase(),
+        nombre: $('caNom').value.trim(),
+        orden: Number($('caOrden').value || 100),
+      });
+      cerrarModal();
+      cargarCatalogos();
+      ok('msgPlata', 'Agregado.');
+    } catch (e) {
+      msg('msgModalCa', e.message, 'err');
+    }
+  }
+
+  async function borrarCatalogo(id) {
+    if (!confirm('Borrar esta fila?')) return;
+    try {
+      await api('/operador/catalogos-pago/' + TABLA_CAT + '/' + encodeURIComponent(id), 'DELETE');
+      cargarCatalogos();
+    } catch (e) { msg('msgPlata', e.message, 'err'); }
+  }
+
+  // ---- Tarifas de IA ----
+  async function cargarTarifasIa() {
+    try {
+      var j = await api('/operador/tarifas-ia');
+      var t = j.tarifas || [];
+      $('tTarifasIa').innerHTML = !t.length
+        ? '<tr><td colspan="5" class="mut">Sin tarifas cargadas. Sin esto el consumo de IA no se puede costear.</td></tr>'
+        : t.map(function (x) {
+            return '<tr><td><b>' + esc(x.modelo) + '</b></td>' +
+              '<td>' + esc(x.moneda) + '</td>' +
+              '<td>' + esc(String(x.precio_input_millon)) + '</td>' +
+              '<td>' + esc(String(x.precio_output_millon)) + '</td>' +
+              '<td>' + esc(String(x.vigente_desde || '').slice(0, 10)) +
+              '<button class="btn chico" style="margin-left:8px" onclick="borrarTarifaIa(\'' + esc(x.id) + '\')">Borrar</button></td></tr>';
+          }).join('');
+    } catch (e) {
+      msg('msgPlata', e.message, 'err');
+    }
+  }
+
+  function abrirTarifaIa() {
+    var hoy = new Date().toISOString().slice(0, 10);
+    abrirModal(
+      '<h2>Nueva tarifa de IA</h2>' +
+      '<p class="sub">Lo que <b>cuesta</b> el modelo, no lo que se cobra. El precio de venta va ' +
+      'en el plan, como cualquier otra métrica.</p>' +
+      '<div><label>Modelo</label><input id="tiMod" placeholder="claude-sonnet-4-6" />' +
+      '<span class="mut">Tal cual lo reporta el proveedor: es la llave con la que se casa el ' +
+      'consumo registrado. Si no coincide, el consumo queda sin costear y nadie se entera.</span></div>' +
+      '<div class="dos" style="margin-top:12px">' +
+      '<div><label>Precio de entrada por millón</label><input id="tiIn" type="number" step="0.0001" /></div>' +
+      '<div><label>Precio de salida por millón</label><input id="tiOut" type="number" step="0.0001" /></div>' +
+      '</div>' +
+      '<div style="margin-top:12px"><label>Vigente desde</label>' +
+      '<input id="tiDesde" type="date" value="' + hoy + '" />' +
+      '<span class="mut">No pisa la tarifa anterior: la sucede. Lo consumido antes de esta fecha ' +
+      'se sigue costeando con la que regía entonces.</span></div>' +
+      '<div id="msgModalTi" style="margin-top:10px"></div>' +
+      '<div class="acciones">' +
+      '<button class="btn btn-s" onclick="cerrarModal()">Cancelar</button>' +
+      '<button class="btn btn-p" onclick="guardarTarifaIaForm()">Guardar</button>' +
+      '</div>',
+    );
+  }
+
+  async function guardarTarifaIaForm() {
+    try {
+      await api('/operador/tarifas-ia', 'POST', {
+        modelo: $('tiMod').value.trim(),
+        precio_input_millon: $('tiIn').value,
+        precio_output_millon: $('tiOut').value,
+        vigente_desde: $('tiDesde').value || undefined,
+      });
+      cerrarModal();
+      cargarTarifasIa();
+      ok('msgPlata', 'Tarifa guardada.');
+    } catch (e) {
+      msg('msgModalTi', e.message, 'err');
+    }
+  }
+
+  async function borrarTarifaIa(id) {
+    if (!confirm('Borrar esta tarifa?')) return;
+    try {
+      await api('/operador/tarifas-ia/' + encodeURIComponent(id), 'DELETE');
+      cargarTarifasIa();
+    } catch (e) { msg('msgPlata', e.message, 'err'); }
+  }
+
+  // ---- Integración de facturación ----
+  async function cargarFacturacion() {
+    var pais = $('facPais') ? $('facPais').value.trim().toUpperCase() : 'UY';
+    if (!pais || pais.length !== 2) return;
+    try {
+      var f = await api('/operador/integracion-facturacion?pais=' + encodeURIComponent(pais));
+      $('facModo').value = f.modo || 'archivo';
+      $('facUrl').value = f.api_url || '';
+      $('facFormato').value = f.archivo_formato || '';
+      $('facEstado').innerHTML = (f.activo ? '<b>activa</b>' : '<span class="mut">inactiva</span>') +
+        ' · credencial: ' + (f.tiene_credencial ? esc(f.credencial_mask) : '<span class="mut">sin cargar</span>');
+      // El botón dice lo que va a hacer, no el estado actual: es la diferencia
+      // entre apagar la facturación de un país sin querer y no hacerlo.
+      $('facToggle').textContent = f.activo ? 'Desactivar en ' + pais : 'Activar en ' + pais;
+      $('facToggle').dataset.activo = f.activo ? '1' : '';
+    } catch (e) {
+      msg('msgPlata', e.message, 'err');
+    }
+  }
+
+  async function togglearFacturacion() {
+    var pais = $('facPais').value.trim().toUpperCase();
+    var activar = !$('facToggle').dataset.activo;
+    // ⚠ Apagar la integración de un país significa que las facturas de ese país
+    // dejan de emitirse. No es un interruptor de configuración: es dejar de
+    // facturar. Se pregunta.
+    if (!activar && !confirm('Vas a DESACTIVAR la facturación de ' + pais + '. Las facturas de ese país dejan de emitirse. ¿Seguir?')) return;
+    try {
+      await api('/operador/integracion-facturacion', 'PATCH', { pais: pais, activo: activar });
+      cargarFacturacion();
+    } catch (e) {
+      msg('msgPlata', e.message, 'err');
+    }
+  }
+
+  async function guardarFacturacion() {
+    var cred = $('facCred').value;
+    try {
+      await api('/operador/integracion-facturacion', 'POST', {
+        pais: $('facPais').value.trim().toUpperCase(),
+        modo: $('facModo').value,
+        api_url: $('facUrl').value.trim(),
+        archivo_formato: $('facFormato').value.trim(),
+        api_credencial: cred ? cred : undefined,
+      });
+      $('facCred').value = '';
+      cargarFacturacion();
+      ok('msgPlata', 'Guardado.');
+    } catch (e) {
+      msg('msgPlata', e.message, 'err');
+    }
+  }
+
   window.entrar = entrar;
   window.salir = salir;
   window.ir = ir;
@@ -1680,6 +1903,17 @@
   window.crearOperadorForm = crearOperadorForm;
   window.togglearOperador = togglearOperador;
   window.resetPasswordOperador = resetPasswordOperador;
+  window.irPlata = irPlata;
+  window.cargarCatalogos = cargarCatalogos;
+  window.agregarCatalogo = agregarCatalogo;
+  window.borrarCatalogo = borrarCatalogo;
+  window.borrarTarifaIa = borrarTarifaIa;
+  window.cargarFacturacion = cargarFacturacion;
+  window.guardarFacturacion = guardarFacturacion;
+  window.togglearFacturacion = togglearFacturacion;
+  window.abrirTarifaIa = abrirTarifaIa;
+  window.guardarTarifaIaForm = guardarTarifaIaForm;
+  window.guardarCatalogoForm = guardarCatalogoForm;
 
   arrancar();
 })();

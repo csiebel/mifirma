@@ -182,6 +182,10 @@
       <svg viewBox="0 0 24 24"><circle cx="9" cy="8" r="3"/><path d="M3 20a6 6 0 0112 0"/><path d="M16 8h5M18.5 5.5v5"/></svg>
       Operadores
     </button>
+    <button onclick="ir('plata')" data-v="plata">
+      <svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="9"/><path d="M12 7v10M9.5 9.5h5M9.5 14.5h5"/></svg>
+      Bancos, IA y facturación
+    </button>
     <button onclick="ir('bitacora')" data-v="bitacora">
       <svg viewBox="0 0 24 24"><path d="M12 8v4l3 2"/><circle cx="12" cy="12" r="9"/></svg>
       Bitácora
@@ -448,6 +452,76 @@
         <tbody id="tOperadores"></tbody>
       </table>
       <div id="msgOperadores" style="padding:0 18px 18px"></div>
+    </div>
+  </section>
+
+  <!-- ============ Bancos, IA y facturación ============ -->
+  <section id="vPlata" class="hidden">
+    <div class="cab"><div>
+      <h1>Bancos, IA y facturación</h1>
+      <p>Tres parametrías chicas del mismo mundo. Cada una sola no justifica un lugar en el menú;
+         las tres sin pantalla, sí.</p>
+    </div></div>
+
+    <div class="panel">
+      <div class="cabPanel">
+        <div class="acc">
+          <button class="btn btn-s" id="tabPlata_catalogos" onclick="irPlata('catalogos')">Catálogos bancarios</button>
+          <button class="btn btn-s" id="tabPlata_ia" onclick="irPlata('ia')">Tarifas de IA</button>
+          <button class="btn btn-s" id="tabPlata_facturacion" onclick="irPlata('facturacion')">Facturación</button>
+        </div>
+      </div>
+
+      <div class="cuerpo" id="plata_catalogos">
+        <div class="acc" style="margin-bottom:12px">
+          <select id="catTabla" onchange="cargarCatalogos()" style="max-width:240px">
+            <option value="banco">Bancos</option>
+            <option value="tipo_cuenta_bancaria">Tipos de cuenta</option>
+          </select>
+          <button class="btn btn-s" onclick="agregarCatalogo()">Agregar</button>
+        </div>
+        <table>
+          <thead><tr><th>País</th><th>Nombre</th><th>Activo</th><th></th></tr></thead>
+          <tbody id="tCatalogos"></tbody>
+        </table>
+      </div>
+
+      <div class="cuerpo hidden" id="plata_ia">
+        <div class="acc" style="margin-bottom:12px">
+          <button class="btn btn-s" onclick="abrirTarifaIa()">Nueva tarifa</button>
+        </div>
+        <p class="mut">Lo que <b>cuesta</b> cada modelo por millón de tokens — no lo que se cobra.
+           Sin esto el consumo de IA no se puede costear y se factura a ciegas.</p>
+        <table>
+          <thead><tr><th>Modelo</th><th>Moneda</th><th>Entrada /M</th><th>Salida /M</th><th>Desde</th></tr></thead>
+          <tbody id="tTarifasIa"></tbody>
+        </table>
+      </div>
+
+      <div class="cuerpo hidden" id="plata_facturacion">
+        <div class="dos">
+          <div><label>País</label>
+            <input id="facPais" maxlength="2" value="UY" onchange="cargarFacturacion()" /></div>
+          <div><label>Modo</label>
+            <select id="facModo">
+              <option value="archivo">Archivo</option>
+              <option value="api">API</option>
+            </select></div>
+        </div>
+        <div class="dos">
+          <div><label>URL de la API</label><input id="facUrl" /></div>
+          <div><label>Formato de archivo</label><input id="facFormato" /></div>
+        </div>
+        <div><label>Credencial</label>
+          <input id="facCred" type="password" autocomplete="new-password" placeholder="Dejar vacío para no cambiarla" /></div>
+        <p class="mut" id="facEstado"></p>
+        <div class="acciones">
+          <button class="btn btn-s" id="facToggle" onclick="togglearFacturacion()">Activar</button>
+          <button class="btn btn-p" onclick="guardarFacturacion()">Guardar</button>
+        </div>
+      </div>
+
+      <div id="msgPlata" style="padding:0 18px 18px"></div>
     </div>
   </section>
 
