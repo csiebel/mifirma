@@ -28,7 +28,7 @@
   var DATOS = null;       // respuesta de /operador/planes
   var PLAN_SEL = null;
 
-  var VISTAS = ['correo', 'twilio', 'planes', 'paises', 'proveedores', 'bitacora'];
+  var VISTAS = ['correo', 'twilio', 'planes', 'paises', 'proveedores', 'pasarelas', 'operadores', 'bitacora'];
 
   // El catálogo de países, tal como lo devuelve la base. Antes acá había un
   // `{ UY:'UYU', PY:'PYG', BR:'BRL' }` escrito a mano: agregar Chile era editar
@@ -232,6 +232,8 @@
     if (vista === 'planes') cargarPlanes();
     if (vista === 'paises') cargarPaises();
     if (vista === 'proveedores') cargarProveedores();
+    if (vista === 'pasarelas') cargarPasarelas();
+    if (vista === 'operadores') cargarOperadores();
     if (vista === 'bitacora') cargarBitacora();
   }
 
@@ -1275,6 +1277,379 @@
     }
   }
 
+
+  // ===========================================================================
+  // PASARELAS DE PAGO
+  //
+  // La API existía desde antes y no tenía pantalla: las credenciales de PayPal y
+  // compañía se cargaban a mano. Es el mismo problema que proveedores de firma,
+  // con una diferencia que sí importa:
+  //
+  // ⚠ ACÁ EL SECRETO SÍ SE MUESTRA ENMASCARADO. `pasarela_pago` no tiene el grano
+  // fino de permisos de la 067: el operador puede leer el cifrado, y el servidor
+  // manda `client_secret_mask`. No es mejor ni peor por sí solo — es una decisión
+  // distinta, tomada antes. Vale la pena saber que las dos pantallas se ven
+  // parecidas y protegen cosas distintas.
+  // ===========================================================================
+
+  var PASARELAS = [];
+
+  var CONOCIDAS = {
+    paypal: 'PayPal',
+    stripe: 'Stripe',
+    mercadopago: 'MercadoPago',
+    dlocal: 'dLocal',
+  };
+
+  async function cargarPasarelas() {
+    try {
+      var j = await api('/operador/pasarelas');
+      PASARELAS = j.pasarelas || [];
+      pintarPasarelas();
+    } catch (e) {
+      msg('msgPasarelas', e.message, 'err');
+    }
+  }
+
+  function pintarPasarelas() {
+    var t = $('tPasarelas');
+    if (!PASARELAS.length) {
+      t.innerHTML = '<tr><td colspan="6" class="mut">Ninguna pasarela configurada. Sin esto no se puede cobrar.</td></tr>';
+      return;
+    }
+    t.innerHTML = PASARELAS.map(function (p) {
+      var cred = p.tiene_secret
+        ? '<span class="mut">' + esc(p.client_secret_mask || '••••••••') + '</span>'
+        : '<span class="msg err" style="display:inline-block;padding:1px 6px">falta</span>';
+      // El modo importa tanto como la credencial: una pasarela en sandbox parece
+      // andar y no cobra nada. Se muestra al lado del estado, no escondido.
+      var modo = p.modo === 'produccion'
+        ? '<b>producción</b>'
+        : '<span class="mut">sandbox — no cobra de verdad</span>';
+      return '<tr>' +
+        '<td><b>' + esc(CONOCIDAS[p.proveedor] || p.nombre) + '</b><br><span class="mut">' + esc(p.proveedor) + '</span></td>' +
+        '<td>' + modo + '</td>' +
+        '<td>' + esc(p.client_id || '') + '</td>' +
+        '<td>' + cred + '</td>' +
+        '<td>' + (p.activo ? 'Encendida' : '<span class="mut">Apagada</span>') + '</td>' +
+        '<td><button class="btn chico" onclick="abrirPasarela(\'' + esc(p.proveedor) + '\')">Editar</button> ' +
+        '<button class="btn chico" onclick="togglearPasarela(\'' + esc(p.proveedor) + '\',' +
+          (p.activo ? 'false' : 'true') + ')">' + (p.activo ? 'Apagar' : 'Encender') + '</button> ' +
+        (p.proveedor === 'paypal'
+          ? '<button class="btn chico" onclick="probarPasarela(\'' + esc(p.proveedor) + '\')">Orden de prueba</button>'
+          : '') +
+        '</td>' +
+        '</tr>';
+    }).join('');
+  }
+
+  function pasarelaPor(cod) {
+    for (var i = 0; i < PASARELAS.length; i++) if (PASARELAS[i].proveedor === cod) return PASARELAS[i];
+    return null;
+  }
+
+  function abrirPasarela(cod) {
+    var p = cod ? pasarelaPor(cod) : null;
+    var opciones = Object.keys(CONOCIDAS).map(function (k) {
+      return '<option value="' + k + '"' + (p && p.proveedor === k ? ' selected' : '') + '>' + CONOCIDAS[k] + '</option>';
+    }).join('');
+
+    abrirModal(
+      '<h2>' + (p ? esc(CONOCIDAS[p.proveedor] || p.nombre) : 'Agregar pasarela') + '</h2>' +
+      '<p class="sub">Las credenciales se guardan cifradas. Un campo vacío significa «no la cambies», ' +
+      'nunca «borrala».</p>' +
+
+      '<div class="dos">' +
+      '<div><label>Proveedor</label><select id="paProv"' + (p ? ' disabled' : '') + '>' + opciones + '</select></div>' +
+      '<div><label>Nombre</label><input id="paNom" value="' + esc(p ? p.nombre : '') + '" /></div>' +
+      '</div>' +
+
+      '<div><label>Modo</label><select id="paModo">' +
+      '<option value="sandbox"' + (!p || p.modo !== 'produccion' ? ' selected' : '') + '>Sandbox (pruebas)</option>' +
+      '<option value="produccion"' + (p && p.modo === 'produccion' ? ' selected' : '') + '>Producción</option>' +
+      '</select>' +
+      '<span class="mut">En sandbox el cobro parece funcionar y no entra un peso. Es la confusión ' +
+      'más cara de esta pantalla.</span></div>' +
+
+      '<div style="margin-top:14px"><label>Client ID</label>' +
+      '<input id="paCli" value="' + esc(p ? p.client_id : '') + '" /></div>' +
+
+      '<div style="margin-top:14px"><label>Client Secret</label>' +
+      (p && p.tiene_secret
+        ? '<div class="mut" style="margin-bottom:6px">Guardado: ' + esc(p.client_secret_mask || '••••••••') + '</div>'
+        : '') +
+      '<input id="paSec" type="password" autocomplete="new-password" placeholder="' +
+        (p && p.tiene_secret ? 'Dejar vacío para no cambiarlo' : 'Pegá el secreto') + '" /></div>' +
+
+      '<div style="margin-top:14px"><label>Webhook Secret</label>' +
+      '<input id="paWeb" type="password" autocomplete="new-password" placeholder="' +
+        (p && p.tiene_secret ? 'Dejar vacío para no cambiarlo' : 'Opcional') + '" />' +
+      '<span class="mut">Es lo que prueba que un aviso de pago viene de la pasarela y no de ' +
+      'cualquiera. Sin esto, un aviso de «pago aprobado» se puede falsificar.</span></div>' +
+
+      '<div id="msgModalPa" style="margin-top:10px"></div>' +
+      '<div class="acciones">' +
+      '<button class="btn btn-s" onclick="cerrarModal()">Cancelar</button>' +
+      '<button class="btn btn-p" onclick="guardarPasarelaForm(' + (p ? "'" + esc(p.proveedor) + "'" : 'null') + ')">Guardar</button>' +
+      '</div>',
+    );
+  }
+
+  async function guardarPasarelaForm(cod) {
+    var sec = $('paSec').value;
+    var web = $('paWeb').value;
+    try {
+      await api('/operador/pasarelas', 'POST', {
+        proveedor: cod || $('paProv').value,
+        nombre: $('paNom').value.trim() || $('paProv').value,
+        modo: $('paModo').value,
+        client_id: $('paCli').value.trim(),
+        client_secret: sec ? sec : undefined,
+        webhook_secret: web ? web : undefined,
+      });
+      cerrarModal();
+      cargarPasarelas();
+      ok('msgPasarelas', 'Pasarela guardada.');
+    } catch (e) {
+      msg('msgModalPa', e.message, 'err');
+    }
+  }
+
+  async function togglearPasarela(cod, activo) {
+    // ⚠ Encender una pasarela en modo producción es lo que hace que se le empiece
+    // a cobrar a gente de verdad. Se pregunta una vez; apagar no pregunta nada.
+    var p = pasarelaPor(cod);
+    if (activo && p && p.modo === 'produccion') {
+      if (!confirm('Vas a encender ' + (CONOCIDAS[cod] || cod) + ' en modo PRODUCCIÓN. Se van a cobrar pagos reales. ¿Seguir?')) return;
+    }
+    try {
+      await api('/operador/pasarelas/' + encodeURIComponent(cod), 'PATCH', { activo: activo });
+      cargarPasarelas();
+    } catch (e) {
+      msg('msgPasarelas', e.message, 'err');
+    }
+  }
+
+  async function probarPasarela(cod) {
+    msg('msgPasarelas', 'Creando la orden de prueba…', 'ok');
+    try {
+      var r = await api('/operador/pasarelas/' + encodeURIComponent(cod) + '/orden-prueba', 'POST',
+        { monto: '10.00', moneda: 'USD' });
+      var el = $('msgPasarelas');
+      el.innerHTML = '<div class="msg ok">Orden ' + esc(r.order_id || '') + ' · estado ' + esc(r.estado || '') +
+        (r.link_aprobacion
+          ? ' · <a href="' + esc(r.link_aprobacion) + '" target="_blank" rel="noopener">abrir el link de aprobación</a>'
+          : '') +
+        '</div>';
+    } catch (e) {
+      msg('msgPasarelas', e.message, 'err');
+    }
+  }
+
+
+  // ===========================================================================
+  // OPERADORES — quién entra a esta consola y con qué privilegios
+  //
+  // ⚠ Es la pantalla más delicada de la consola, y hasta hoy no existía: se
+  // administraba por API. Para un producto en proceso de certificación ISO 27001
+  // la gestión de accesos privilegiados es de lo primero que mira un auditor, y
+  // «se hace con curl» no es una respuesta.
+  //
+  // Todo lo que se hace acá queda en la bitácora de plataforma. No es un detalle
+  // de implementación: es la razón por la que existe la bitácora.
+  // ===========================================================================
+
+  var OPERADORES = [];
+
+  // El texto de cada privilegio. La lista de códigos la manda el servidor con
+  // cada operador; acá sólo se traduce y se explica QUÉ PUEDE HACER quien lo
+  // tiene — que es lo que hay que entender antes de tildar una casilla.
+  var PRIVILEGIOS = {
+    gestionar_planes:     ['Planes y precios', 'Cambia lo que se le cobra a todas las cuentas.'],
+    gestionar_empresas:   ['Empresas', 'Ve y ajusta las cuentas cliente.'],
+    gestionar_operadores: ['Operadores', 'Da de alta a otros operadores. Quien lo tiene puede darse cualquier otro privilegio.'],
+    gestionar_pagos:      ['Pagos y proveedores', 'Pasarelas de cobro y proveedores de firma, con sus credenciales.'],
+    gestionar_mensajeria: ['Correo y mensajería', 'Las credenciales por las que sale TODO: códigos de acceso, invitaciones, avisos de firma.'],
+    gestionar_ofertas:    ['Ofertas', 'Promociones y descuentos.'],
+    gestionar_firma:      ['Firma', 'Parámetros del motor de firma.'],
+    gestionar_industrias: ['Industrias', 'El catálogo de rubros.'],
+    gestionar_creditos:   ['Créditos', 'Ajustes de saldo de las cuentas.'],
+    ver_auditoria:        ['Auditoría', 'Lee la bitácora de la plataforma.'],
+  };
+
+  // Los que pueden hacer daño de verdad si se los da de más.
+  var SENSIBLES = ['gestionar_operadores', 'gestionar_mensajeria', 'gestionar_pagos', 'gestionar_creditos'];
+
+  async function cargarOperadores() {
+    try {
+      var j = await api('/operador/operadores');
+      OPERADORES = j.operadores || [];
+      pintarOperadores();
+    } catch (e) {
+      msg('msgOperadores', e.message, 'err');
+    }
+  }
+
+  function pintarOperadores() {
+    var t = $('tOperadores');
+    if (!OPERADORES.length) {
+      t.innerHTML = '<tr><td colspan="5" class="mut">Sin operadores.</td></tr>';
+      return;
+    }
+    t.innerHTML = OPERADORES.map(function (o) {
+      var caps = o.es_superadmin
+        ? '<b>todos</b> <span class="mut">(superadmin)</span>'
+        : (o.capacidades || []).length
+          ? (o.capacidades || []).map(function (c) {
+              var p = PRIVILEGIOS[c];
+              var txt = esc(p ? p[0] : c);
+              return SENSIBLES.indexOf(c) >= 0 ? '<b>' + txt + '</b>' : txt;
+            }).join(', ')
+          : '<span class="mut">ninguno</span>';
+
+      var yoMismo = YO && YO.usuario === o.usuario;
+
+      return '<tr>' +
+        '<td><b>' + esc(o.usuario) + '</b>' + (yoMismo ? ' <span class="mut">(vos)</span>' : '') +
+          '<br><span class="mut">' + esc(o.nombre || '') + '</span></td>' +
+        '<td>' + (o.activo ? 'Activo' : '<span class="mut">Inactivo</span>') + '</td>' +
+        '<td>' + caps + '</td>' +
+        '<td><span class="mut">' + esc(String(o.creado_en || '').slice(0, 10)) + '</span></td>' +
+        '<td>' +
+          '<button class="btn chico" onclick="abrirOperador(\'' + esc(o.id) + '\')">Privilegios</button> ' +
+          // ⚠ No se puede desactivar a sí mismo: es la forma más fácil de quedarse
+          // afuera de la consola sin nadie que pueda volver a entrar.
+          (yoMismo || o.es_superadmin
+            ? ''
+            : '<button class="btn chico" onclick="togglearOperador(\'' + esc(o.id) + '\',' +
+              (o.activo ? 'false' : 'true') + ')">' + (o.activo ? 'Desactivar' : 'Activar') + '</button> ') +
+          '<button class="btn chico" onclick="resetPasswordOperador(\'' + esc(o.id) + '\',\'' + esc(o.usuario) + '\')">Contraseña</button>' +
+        '</td>' +
+        '</tr>';
+    }).join('');
+  }
+
+  function opPorId(id) {
+    for (var i = 0; i < OPERADORES.length; i++) if (OPERADORES[i].id === id) return OPERADORES[i];
+    return null;
+  }
+
+  function casillasPrivilegios(marcadas, prefijo) {
+    return Object.keys(PRIVILEGIOS).map(function (c) {
+      var p = PRIVILEGIOS[c];
+      var sens = SENSIBLES.indexOf(c) >= 0;
+      return '<label style="display:flex;gap:8px;align-items:flex-start;margin-top:8px;font-size:13.5px">' +
+        '<input type="checkbox" id="' + prefijo + c + '" style="width:auto;margin-top:3px"' +
+        (marcadas.indexOf(c) >= 0 ? ' checked' : '') + ' />' +
+        '<span>' + esc(p[0]) + (sens ? ' <b>·  sensible</b>' : '') +
+        '<br><span class="mut">' + esc(p[1]) + '</span></span></label>';
+    }).join('');
+  }
+
+  function leerPrivilegios(prefijo) {
+    var out = [];
+    Object.keys(PRIVILEGIOS).forEach(function (c) {
+      var el = $(prefijo + c);
+      if (el && el.checked) out.push(c);
+    });
+    return out;
+  }
+
+  function abrirOperador(id) {
+    var o = opPorId(id);
+    if (!o) return;
+    if (o.es_superadmin) {
+      alert('Es superadmin: tiene todos los privilegios y no se editan de a uno.');
+      return;
+    }
+    abrirModal(
+      '<h2>Privilegios de ' + esc(o.usuario) + '</h2>' +
+      '<p class="sub">Cada privilegio abre una parte de la consola. Los marcados como ' +
+      '<b>sensibles</b> permiten cambiar cosas que afectan a todas las cuentas o a la seguridad ' +
+      'de la plataforma.</p>' +
+      casillasPrivilegios(o.capacidades || [], 'op_') +
+      '<div id="msgModalOp" style="margin-top:10px"></div>' +
+      '<div class="acciones">' +
+      '<button class="btn btn-s" onclick="cerrarModal()">Cancelar</button>' +
+      '<button class="btn btn-p" onclick="guardarPrivilegios(\'' + esc(o.id) + '\')">Guardar</button>' +
+      '</div>',
+    );
+  }
+
+  async function guardarPrivilegios(id) {
+    try {
+      await api('/operador/operadores/' + encodeURIComponent(id), 'PATCH',
+        { capacidades: leerPrivilegios('op_') });
+      cerrarModal();
+      cargarOperadores();
+      ok('msgOperadores', 'Privilegios actualizados.');
+    } catch (e) {
+      msg('msgModalOp', e.message, 'err');
+    }
+  }
+
+  function abrirNuevoOperador() {
+    abrirModal(
+      '<h2>Nuevo operador</h2>' +
+      '<p class="sub">Alguien que va a poder entrar a esta consola. Empezá por lo mínimo: ' +
+      'agregar un privilegio después es fácil, y darlo de más no se nota hasta que pasa algo.</p>' +
+      '<div class="dos">' +
+      '<div><label>Usuario</label><input id="noUsr" autocomplete="off" /></div>' +
+      '<div><label>Nombre</label><input id="noNom" /></div>' +
+      '</div>' +
+      '<div><label>Contraseña inicial</label>' +
+      '<input id="noPass" type="password" autocomplete="new-password" />' +
+      '<span class="mut">Pasásela por un canal aparte, nunca por el mismo correo donde le ' +
+      'avisás que tiene acceso.</span></div>' +
+      '<h3 style="margin-top:18px;font-size:14px">Privilegios</h3>' +
+      casillasPrivilegios([], 'no_') +
+      '<div id="msgModalOp" style="margin-top:10px"></div>' +
+      '<div class="acciones">' +
+      '<button class="btn btn-s" onclick="cerrarModal()">Cancelar</button>' +
+      '<button class="btn btn-p" onclick="crearOperadorForm()">Crear</button>' +
+      '</div>',
+    );
+  }
+
+  async function crearOperadorForm() {
+    try {
+      await api('/operador/operadores', 'POST', {
+        usuario: $('noUsr').value.trim(),
+        nombre: $('noNom').value.trim(),
+        password: $('noPass').value,
+        es_superadmin: false,
+        capacidades: leerPrivilegios('no_'),
+      });
+      cerrarModal();
+      cargarOperadores();
+      ok('msgOperadores', 'Operador creado.');
+    } catch (e) {
+      msg('msgModalOp', e.message, 'err');
+    }
+  }
+
+  async function togglearOperador(id, activo) {
+    var o = opPorId(id);
+    if (!activo && o && !confirm('Desactivar a ' + o.usuario + '. No va a poder entrar más a la consola. ¿Seguir?')) return;
+    try {
+      await api('/operador/operadores/' + encodeURIComponent(id), 'PATCH', { activo: activo });
+      cargarOperadores();
+    } catch (e) {
+      msg('msgOperadores', e.message, 'err');
+    }
+  }
+
+  async function resetPasswordOperador(id, usuario) {
+    var nueva = prompt('Nueva contraseña para ' + usuario + ':');
+    if (!nueva) return;
+    try {
+      await api('/operador/operadores/' + encodeURIComponent(id) + '/password', 'POST', { nueva: nueva });
+      ok('msgOperadores', 'Contraseña cambiada. Pasásela por un canal aparte.');
+    } catch (e) {
+      msg('msgOperadores', e.message, 'err');
+    }
+  }
+
   window.entrar = entrar;
   window.salir = salir;
   window.ir = ir;
@@ -1295,6 +1670,16 @@
   window.abrirAcuerdo = abrirAcuerdo;
   window.guardarAcuerdoForm = guardarAcuerdoForm;
   window.cerrarAcuerdoForm = cerrarAcuerdoForm;
+  window.abrirPasarela = abrirPasarela;
+  window.guardarPasarelaForm = guardarPasarelaForm;
+  window.togglearPasarela = togglearPasarela;
+  window.probarPasarela = probarPasarela;
+  window.abrirOperador = abrirOperador;
+  window.abrirNuevoOperador = abrirNuevoOperador;
+  window.guardarPrivilegios = guardarPrivilegios;
+  window.crearOperadorForm = crearOperadorForm;
+  window.togglearOperador = togglearOperador;
+  window.resetPasswordOperador = resetPasswordOperador;
 
   arrancar();
 })();
