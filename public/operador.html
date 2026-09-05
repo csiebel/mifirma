@@ -170,6 +170,10 @@
       <svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="9"/><path d="M3 12h18M12 3c2.5 2.7 2.5 15.3 0 18M12 3c-2.5 2.7-2.5 15.3 0 18"/></svg>
       Países
     </button>
+    <button onclick="ir('proveedores')" data-v="proveedores">
+      <svg viewBox="0 0 24 24"><path d="M12 3l7 4v5c0 4.4-3 8.3-7 9-4-0.7-7-4.6-7-9V7z"/><path d="M9 12l2 2 4-4"/></svg>
+      Proveedores de firma
+    </button>
     <button onclick="ir('bitacora')" data-v="bitacora">
       <svg viewBox="0 0 24 24"><path d="M12 8v4l3 2"/><circle cx="12" cy="12" r="9"/></svg>
       Bitácora
@@ -348,6 +352,50 @@
         <tbody id="tPaises"></tbody>
       </table>
       <div id="msgPaises" style="padding:0 18px 18px"></div>
+    </div>
+  </section>
+
+  <!-- ============ Proveedores de firma e identidad ============ -->
+  <section id="vProveedores" class="hidden">
+    <div class="cab">
+      <div>
+        <h1>Proveedores de firma e identidad</h1>
+        <p>Quiénes pueden firmar y verificar identidad, en qué país y con qué credenciales.
+           <b>Todo se administra desde acá, sin tocar código.</b> Lo que sí es código es el
+           protocolo: cómo se le habla a cada proveedor.</p>
+        <p class="mut" id="claveEnUso"></p>
+      </div>
+      <button class="btn btn-p" onclick="abrirProveedor(null)">Agregar proveedor</button>
+    </div>
+
+    <div class="panel">
+      <table>
+        <thead><tr>
+          <th>Proveedor</th><th>Ambiente</th><th>Credencial</th>
+          <th>Países y capacidades</th><th>Estado</th><th></th><th></th>
+        </tr></thead>
+        <tbody id="tProveedores"></tbody>
+      </table>
+      <div id="msgProveedores" style="padding:0 18px 18px"></div>
+    </div>
+
+    <div class="cab" style="margin-top:26px">
+      <div>
+        <h2 style="font-size:17px">Exclusividad por país</h2>
+        <p>Mientras un acuerdo está vigente, en ese país sólo se ofrece el socio, y sus logos
+           aparecen en el sitio, en la pantalla de firma y en los correos de las cuentas de ese
+           país. <b>Al vencer se apaga solo.</b></p>
+      </div>
+      <button class="btn btn-s" onclick="abrirAcuerdo()">Nuevo acuerdo</button>
+    </div>
+
+    <div class="panel">
+      <table>
+        <thead><tr>
+          <th>País</th><th>Socio</th><th>Vigencia</th><th>Capacidades</th><th>Estado</th><th></th>
+        </tr></thead>
+        <tbody id="tAcuerdos"></tbody>
+      </table>
     </div>
   </section>
 

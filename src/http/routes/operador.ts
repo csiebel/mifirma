@@ -33,6 +33,21 @@ import {
   setPasarelaActiva,
   eliminarPasarela,
 } from '../../services/pasarelas';
+// ⚠ `CAPACIDADES` se renombra al importarlo: `services/operadores` ya exporta uno
+// con ese nombre —las capacidades de los OPERADORES— y son cosas distintas. Sin
+// el alias, el segundo import pisa al primero y los privilegios de la consola
+// pasarían a validarse contra la lista de capacidades de los proveedores.
+import {
+  listarProveedores,
+  guardarProveedor,
+  guardarCapacidades,
+  habilitarEnPais,
+  setProveedorActivo,
+  listarAcuerdos,
+  crearAcuerdo,
+  cerrarAcuerdo,
+  CAPACIDADES as CAPACIDADES_PROVEEDOR,
+} from '../../services/proveedores';
 import { adaptadorDe } from '../../services/pagos/registro';
 import { formatearMonto } from '../../services/pagos/moneda';
 import {
@@ -722,5 +737,148 @@ export function registrarRutasOperador(app: FastifyInstance) {
     exigirCap(s, 'gestionar_industrias');
     const { id } = req.params as { id: string };
     return borrarIndustria(s.operadorId, id);
+  });
+
+  // ---- Proveedores de firma e identidad (catálogo global) ----
+  //
+  // ⚠ Va con `gestionar_pagos` y no con una capacidad nueva. Es discutible y lo
+  // dejo escrito: encender un proveedor de firma tiene consecuencia económica
+  // —cada firma tiene un costo por proveedor— y de cumplimiento, así que por
+  // ahora lo ve quien ya administra pagos. Si mañana se separa el rol de
+  // cumplimiento del de finanzas, esto pide su propia capacidad.
+  app.get('/operador/proveedores', async (req) => {
+    const s = await sesion(req);
+    exigirCap(s, 'gestionar_pagos');
+    return listarProveedores();
+  });
+
+  const guardarProveedorSchema = z.object({
+    codigo: z.string().min(1).max(40),
+    nombre_mostrado: z.string().min(1).max(120),
+    entorno: z.string().min(1).max(40),
+    endpoints: z.record(z.string(), z.record(z.string(), z.string())),
+    parametros: z.record(z.string(), z.unknown()).default({}),
+    orden_preferencia: z.number().int().min(0).max(9999).optional(),
+    // ⚠ Opcional a propósito: vacío significa «no lo toques», no «borralo».
+    credencial: z.string().optional(),
+  });
+
+  app.post('/operador/proveedores', async (req) => {
+    const s = await sesion(req);
+    exigirCap(s, 'gestionar_pagos');
+    const b = guardarProveedorSchema.parse(req.body);
+    return guardarProveedor({
+      codigo: b.codigo,
+      nombreMostrado: b.nombre_mostrado,
+      entorno: b.entorno,
+      endpoints: b.endpoints,
+      parametros: b.parametros,
+      ordenPreferencia: b.orden_preferencia,
+      credencial: b.credencial,
+      porQuien: s.operadorId,
+    });
+  });
+
+  app.put('/operador/proveedores/:id/capacidades', async (req) => {
+    const s = await sesion(req);
+    exigirCap(s, 'gestionar_pagos');
+    const { id } = req.params as { id: string };
+    const b = z
+      .object({
+        firma_hash: z.boolean().optional(),
+        identifica_titular: z.boolean().optional(),
+        sellado_tiempo: z.boolean().optional(),
+        devuelve_documento_id: z.boolean().optional(),
+        alcance_por_firma: z.boolean().optional(),
+        requiere_presencia: z.boolean().optional(),
+        soporta_lote: z.boolean().optional(),
+        formatos_devueltos: z.array(z.string()).optional(),
+      })
+      .parse(req.body);
+    return guardarCapacidades(id, b);
+  });
+
+  app.put('/operador/proveedores/:id/paises/:pais', async (req) => {
+    const s = await sesion(req);
+    exigirCap(s, 'gestionar_pagos');
+    const { id, pais } = req.params as { id: string; pais: string };
+    const b = z
+      .object({
+        capacidades: z.array(z.enum(CAPACIDADES_PROVEEDOR)),
+        activo: z.boolean().optional(),
+        preferido: z.boolean().optional(),
+        acreditado_por: z.string().max(120).nullable().optional(),
+        costo_por_firma: z.string().nullable().optional(),
+        moneda_costo: z.string().length(3).nullable().optional(),
+      })
+      .parse(req.body);
+    return habilitarEnPais(id, pais, {
+      capacidades: b.capacidades,
+      activo: b.activo,
+      preferido: b.preferido,
+      acreditadoPor: b.acreditado_por,
+      costoPorFirma: b.costo_por_firma,
+      monedaCosto: b.moneda_costo,
+    });
+  });
+
+  app.patch('/operador/proveedores/:codigo/activo', async (req) => {
+    const s = await sesion(req);
+    exigirCap(s, 'gestionar_pagos');
+    const { codigo } = req.params as { codigo: string };
+    const b = z.object({ activo: z.boolean() }).parse(req.body);
+    return setProveedorActivo(codigo, b.activo);
+  });
+
+  // ---- Acuerdos de exclusividad por país ----
+  //
+  // ⚠ No hay DELETE, y es deliberado. Un acuerdo vigente tuvo consecuencias:
+  // hubo documentos firmados bajo él y hubo un logo en la portada. Borrarlo
+  // haría que el sistema no pudiera contestar «qué acuerdo regía en marzo». Se
+  // cierra con fecha; no se borra.
+  app.get('/operador/exclusividad', async (req) => {
+    const s = await sesion(req);
+    exigirCap(s, 'gestionar_pagos');
+    return listarAcuerdos();
+  });
+
+  app.post('/operador/exclusividad', async (req) => {
+    const s = await sesion(req);
+    exigirCap(s, 'gestionar_pagos');
+    const b = z
+      .object({
+        pais: z.string().length(2),
+        proveedor_id: z.string().uuid(),
+        socio_nombre: z.string().min(1).max(200),
+        vigente_desde: z.string().min(8),
+        vigente_hasta: z.string().min(8).nullable().optional(),
+        capacidades: z.array(z.enum(CAPACIDADES_PROVEEDOR)).optional(),
+        logo_producto_url: z.string().max(500).nullable().optional(),
+        logo_socio_url: z.string().max(500).nullable().optional(),
+        autorizacion_marca: z.boolean().optional(),
+        nota: z.string().max(1000).nullable().optional(),
+      })
+      .parse(req.body);
+    return crearAcuerdo({
+      pais: b.pais,
+      proveedorId: b.proveedor_id,
+      socioNombre: b.socio_nombre,
+      vigenteDesde: b.vigente_desde,
+      vigenteHasta: b.vigente_hasta,
+      capacidades: b.capacidades,
+      logoProductoUrl: b.logo_producto_url,
+      logoSocioUrl: b.logo_socio_url,
+      autorizacionMarca: b.autorizacion_marca,
+      nota: b.nota,
+      porQuien: s.operadorId,
+    });
+  });
+
+  app.patch('/operador/exclusividad/:id/cerrar', async (req) => {
+    const s = await sesion(req);
+    exigirCap(s, 'gestionar_pagos');
+    const { id } = req.params as { id: string };
+    const b = z.object({ vigente_hasta: z.string().min(8) }).parse(req.body);
+    return cerrarAcuerdo(id, b.vigente_hasta);
   });
 }

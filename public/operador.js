@@ -28,7 +28,7 @@
   var DATOS = null;       // respuesta de /operador/planes
   var PLAN_SEL = null;
 
-  var VISTAS = ['correo', 'twilio', 'planes', 'paises', 'bitacora'];
+  var VISTAS = ['correo', 'twilio', 'planes', 'paises', 'proveedores', 'bitacora'];
 
   // El catálogo de países, tal como lo devuelve la base. Antes acá había un
   // `{ UY:'UYU', PY:'PYG', BR:'BRL' }` escrito a mano: agregar Chile era editar
@@ -231,6 +231,7 @@
     if (vista === 'twilio') cargarTwilio();
     if (vista === 'planes') cargarPlanes();
     if (vista === 'paises') cargarPaises();
+    if (vista === 'proveedores') cargarProveedores();
     if (vista === 'bitacora') cargarBitacora();
   }
 
@@ -977,6 +978,303 @@
     }
   }
 
+
+  // ===========================================================================
+  // PROVEEDORES DE FIRMA E IDENTIDAD
+  //
+  // ⚠ Esta pantalla NO muestra el secreto enmascarado, a diferencia de correo y
+  // Twilio. No es una omisión: la migración 067 no le da permiso de lectura
+  // sobre `credenciales_cif` a nadie, ni al operador. El servidor no puede
+  // mandarlo aunque quisiera. Lo que se muestra es CUÁNDO y QUIÉN lo cargó, que
+  // es la única información honesta que existe.
+  // ===========================================================================
+
+  var PROVEEDORES = [];
+  var ACUERDOS = [];
+  var CLAVE_EN_USO = '';
+
+  async function cargarProveedores() {
+    try {
+      var j = await api('/operador/proveedores');
+      PROVEEDORES = j.proveedores || [];
+      CLAVE_EN_USO = j.clave_en_uso || '';
+      var a = await api('/operador/exclusividad');
+      ACUERDOS = a.acuerdos || [];
+      pintarProveedores();
+      pintarAcuerdos();
+    } catch (e) {
+      msg('msgProveedores', e.message, 'err');
+    }
+  }
+
+  function pintarProveedores() {
+    var t = $('tProveedores');
+    if (!PROVEEDORES.length) {
+      t.innerHTML = '<tr><td colspan="7" class="mut">Todavía no hay ningún proveedor configurado.</td></tr>';
+    } else {
+      t.innerHTML = PROVEEDORES.map(function (p) {
+        var caps = (p.paises || []).map(function (x) {
+          return esc(x.pais) + ': ' + (x.capacidades || []).join(', ') + (x.activo ? '' : ' (apagado)');
+        }).join('<br>') || '<span class="mut">sin países</span>';
+
+        // El ambiente activo sin URLs es el error más probable de toda la cadena
+        // y no da síntoma hasta que un firmante lo usa. Se avisa acá.
+        var ambienteOk = (p.ambientes_cargados || []).indexOf(p.entorno) >= 0;
+        var amb = esc(p.entorno) + (ambienteOk ? '' :
+          ' <span class="msg err" style="display:inline-block;padding:1px 6px">sin URLs</span>');
+
+        var cred = p.tiene_credencial
+          ? '<span class="mut">cargada ' + esc(String(p.credencial_puesta_en || '').slice(0, 10)) +
+            '<br>' + esc(p.credencial_puesta_por || '') + '</span>'
+          : '<span class="msg err" style="display:inline-block;padding:1px 6px">falta</span>';
+
+        var salud = p.salud && p.salud !== 'operativo'
+          ? ' <span class="mut">(' + esc(p.salud) + ')</span>' : '';
+
+        return '<tr>' +
+          '<td><b>' + esc(p.nombre_mostrado) + '</b><br><span class="mut">' + esc(p.codigo) + '</span></td>' +
+          '<td>' + amb + '</td>' +
+          '<td>' + cred + '</td>' +
+          '<td>' + caps + '</td>' +
+          '<td>' + (p.activo_global ? 'Encendido' : '<span class="mut">Apagado</span>') + salud + '</td>' +
+          '<td><button class="btn chico" onclick="abrirProveedor(\'' + esc(p.codigo) + '\')">Editar</button></td>' +
+          '<td><button class="btn chico" onclick="togglearProveedor(\'' + esc(p.codigo) + '\',' +
+            (p.activo_global ? 'false' : 'true') + ')">' +
+            (p.activo_global ? 'Apagar' : 'Encender') + '</button></td>' +
+          '</tr>';
+      }).join('');
+    }
+    $('claveEnUso').textContent = CLAVE_EN_USO ? 'Clave de cifrado en uso: ' + CLAVE_EN_USO : '';
+  }
+
+  function provPorCodigo(c) {
+    for (var i = 0; i < PROVEEDORES.length; i++) if (PROVEEDORES[i].codigo === c) return PROVEEDORES[i];
+    return null;
+  }
+
+  function abrirProveedor(codigo) {
+    var p = codigo ? provPorCodigo(codigo) : null;
+    var caps = (p && p.capacidades) || {};
+    var params = (p && p.parametros) || {};
+
+    function chk(id, campo, etiqueta, ayuda) {
+      return '<label style="display:flex;gap:8px;align-items:flex-start;margin-top:8px;font-size:13.5px">' +
+        '<input type="checkbox" id="' + id + '" style="width:auto;margin-top:3px"' +
+        (caps[campo] ? ' checked' : '') + ' /><span>' + etiqueta +
+        (ayuda ? '<br><span class="mut">' + ayuda + '</span>' : '') + '</span></label>';
+    }
+
+    abrirModal(
+      '<h2>' + (p ? esc(p.nombre_mostrado) : 'Agregar proveedor') + '</h2>' +
+      '<p class="sub">Las URLs y el ambiente se administran acá, sin tocar código. Lo que es código ' +
+      'es el protocolo: cómo se le habla a cada proveedor.</p>' +
+
+      '<div class="dos">' +
+      '<div><label>Código</label><input id="pvCod" maxlength="40" value="' + esc(p ? p.codigo : '') + '"' +
+        (p ? ' disabled' : '') + ' placeholder="tuid" /></div>' +
+      '<div><label>Nombre</label><input id="pvNom" value="' + esc(p ? p.nombre_mostrado : '') + '" /></div>' +
+      '</div>' +
+
+      '<div class="dos">' +
+      '<div><label>Ambiente activo</label><input id="pvEnt" value="' +
+        esc(p ? p.entorno : 'integracion') + '" placeholder="preproduccion" /></div>' +
+      '<div><label>Orden</label><input id="pvOrd" type="number" value="' +
+        esc(String(p ? p.orden_preferencia : 100)) + '" /></div>' +
+      '</div>' +
+
+      '<label style="margin-top:12px">URLs por ambiente</label>' +
+      '<textarea id="pvEnd" rows="8" style="font-family:monospace;font-size:12.5px">' +
+        esc(JSON.stringify((p && p.endpoints) || {}, null, 2)) + '</textarea>' +
+      '<span class="mut">El ambiente activo tiene que estar en esta lista y tener al menos una URL. ' +
+      'Sólo https. Si falta, el firmante recibe un error de red que no explica nada.</span>' +
+
+      '<div style="margin-top:14px"><label>Client ID</label>' +
+      '<input id="pvCli" value="' + esc(params.client_id || '') + '" /></div>' +
+
+      '<div style="margin-top:14px"><label>Credencial (client secret)</label>' +
+      (p && p.tiene_credencial
+        ? '<div class="mut" style="margin-bottom:6px">Cargada el ' +
+          esc(String(p.credencial_puesta_en || '').slice(0, 10)) + ' por ' +
+          esc(p.credencial_puesta_por || '') + '. ' +
+          '<b>No se puede mostrar:</b> la base no le da permiso de lectura a nadie.</div>'
+        : '') +
+      '<input id="pvCred" type="password" autocomplete="new-password" placeholder="' +
+        (p && p.tiene_credencial ? 'Dejar vacío para no cambiarla' : 'Pegá el secreto') + '" />' +
+      '<span class="mut">Se guarda cifrada. Un campo vacío significa «no la cambies», nunca «borrala».</span></div>' +
+
+      '<h3 style="margin-top:18px;font-size:14px">Qué sabe hacer</h3>' +
+      '<span class="mut">Lo declara quien escribió el adaptador. El motor lo consulta antes de ' +
+      'despachar un circuito, no cuando la firma falla.</span>' +
+      chk('pvCapHash', 'firma_hash', 'Firma por hash',
+          'Si no, pide el documento entero: el contenido de los clientes saldría del sistema.') +
+      chk('pvCapIdent', 'identifica_titular', 'Sirve como proveedor de identidad') +
+      chk('pvCapDoc', 'devuelve_documento_id', 'Devuelve el documento del titular (cédula, CPF)') +
+      chk('pvCapTsa', 'sellado_tiempo', 'Hace sellado de tiempo') +
+      chk('pvCapAlc', 'alcance_por_firma', 'Token de un solo uso por firma') +
+      chk('pvCapLote', 'soporta_lote', 'Soporta lote',
+          'Mirar esto ANTES de vender un envío masivo con firma avanzada.') +
+
+      '<div id="msgModalProv" style="margin-top:10px"></div>' +
+      '<div class="acciones">' +
+      '<button class="btn btn-s" onclick="cerrarModal()">Cancelar</button>' +
+      '<button class="btn btn-p" onclick="guardarProveedorForm(' + (p ? "'" + esc(p.codigo) + "'" : 'null') + ')">Guardar</button>' +
+      '</div>',
+    );
+  }
+
+  async function guardarProveedorForm(codigo) {
+    var endpoints;
+    try {
+      endpoints = JSON.parse($('pvEnd').value || '{}');
+    } catch (e) {
+      msg('msgModalProv', 'Las URLs no son un JSON válido.', 'err');
+      return;
+    }
+    var cred = $('pvCred').value;
+    try {
+      var r = await api('/operador/proveedores', 'POST', {
+        codigo: codigo || $('pvCod').value.trim(),
+        nombre_mostrado: $('pvNom').value.trim(),
+        entorno: $('pvEnt').value.trim(),
+        endpoints: endpoints,
+        parametros: { client_id: $('pvCli').value.trim() },
+        orden_preferencia: Number($('pvOrd').value || 100),
+        credencial: cred ? cred : undefined,
+      });
+      if (r.id) {
+        await api('/operador/proveedores/' + r.id + '/capacidades', 'PUT', {
+          firma_hash: $('pvCapHash').checked,
+          identifica_titular: $('pvCapIdent').checked,
+          devuelve_documento_id: $('pvCapDoc').checked,
+          sellado_tiempo: $('pvCapTsa').checked,
+          alcance_por_firma: $('pvCapAlc').checked,
+          soporta_lote: $('pvCapLote').checked,
+        });
+      }
+      cerrarModal();
+      cargarProveedores();
+      ok('msgProveedores', 'Proveedor guardado.');
+    } catch (e) {
+      msg('msgModalProv', e.message, 'err');
+    }
+  }
+
+  async function togglearProveedor(codigo, activo) {
+    try {
+      await api('/operador/proveedores/' + encodeURIComponent(codigo) + '/activo', 'PATCH', { activo: activo });
+      cargarProveedores();
+    } catch (e) {
+      // El servidor se niega a encender sin credencial o sin URLs. El mensaje ya
+      // explica cuál falta; no hay que traducirlo.
+      msg('msgProveedores', e.message, 'err');
+    }
+  }
+
+  // ---------------------------------------------------------------------------
+  // Exclusividad por país
+  // ---------------------------------------------------------------------------
+
+  function pintarAcuerdos() {
+    var t = $('tAcuerdos');
+    if (!ACUERDOS.length) {
+      t.innerHTML = '<tr><td colspan="6" class="mut">Sin acuerdos de exclusividad.</td></tr>';
+      return;
+    }
+    t.innerHTML = ACUERDOS.map(function (a) {
+      var marca = a.autorizacion_marca
+        ? 'sí'
+        : '<span class="mut">sin autorización — no se muestra ningún logo</span>';
+      return '<tr>' +
+        '<td><b>' + esc(a.pais) + '</b></td>' +
+        '<td>' + esc(a.socio_nombre) + '<br><span class="mut">' + esc(a.proveedor_nombre) + '</span></td>' +
+        '<td>' + esc(String(a.vigente_desde).slice(0, 10)) + ' → ' +
+          (a.vigente_hasta ? esc(String(a.vigente_hasta).slice(0, 10)) : '<span class="mut">sin fin</span>') + '</td>' +
+        '<td>' + esc((a.capacidades || []).join(', ')) + '</td>' +
+        '<td>' + (a.vigente_hoy ? '<b>vigente</b>' : '<span class="mut">no vigente</span>') +
+          '<br><span class="mut">marca: ' + marca + '</span></td>' +
+        '<td>' + (a.vigente_hoy
+          ? '<button class="btn chico" onclick="cerrarAcuerdoForm(\'' + esc(a.id) + '\')">Cerrar</button>'
+          : '') + '</td>' +
+        '</tr>';
+    }).join('');
+  }
+
+  function abrirAcuerdo() {
+    var opciones = PROVEEDORES.map(function (p) {
+      return '<option value="' + esc(p.id) + '">' + esc(p.nombre_mostrado) + '</option>';
+    }).join('');
+
+    abrirModal(
+      '<h2>Acuerdo de exclusividad</h2>' +
+      '<p class="sub">Mientras esté vigente, en ese país sólo se ofrece este proveedor para las ' +
+      'capacidades del acuerdo. Al vencer se apaga solo: nadie tiene que acordarse de sacar el logo.</p>' +
+
+      '<div class="dos">' +
+      '<div><label>País (2 letras)</label><input id="acPais" maxlength="2" /></div>' +
+      '<div><label>Proveedor</label><select id="acProv">' + opciones + '</select></div>' +
+      '</div>' +
+      '<div><label>Empresa socia</label><input id="acSocio" /></div>' +
+      '<div class="dos">' +
+      '<div><label>Vigente desde</label><input id="acDesde" type="date" /></div>' +
+      '<div><label>Vigente hasta</label><input id="acHasta" type="date" />' +
+      '<span class="mut">Vacío = sin fecha de fin.</span></div>' +
+      '</div>' +
+
+      '<div class="dos" style="margin-top:12px">' +
+      '<div><label>Logo del producto (URL)</label><input id="acLogoP" placeholder="https://…" /></div>' +
+      '<div><label>Logo del socio (URL)</label><input id="acLogoS" placeholder="https://…" /></div>' +
+      '</div>' +
+      '<span class="mut">Tienen que ser https y públicas: los clientes de correo las cargan desde afuera.</span>' +
+
+      '<label style="display:flex;gap:8px;align-items:flex-start;margin-top:14px;font-size:13.5px">' +
+      '<input type="checkbox" id="acMarca" style="width:auto;margin-top:3px" />' +
+      '<span>Tengo la autorización de uso de marca por escrito.<br>' +
+      '<span class="mut">Sin esto no se muestra ningún logo, aunque estén cargados. Usar la marca ' +
+      'del socio requiere su permiso, y eso es cláusula del acuerdo comercial.</span></span></label>' +
+
+      '<div style="margin-top:12px"><label>Nota</label><input id="acNota" /></div>' +
+      '<div id="msgModalAc" style="margin-top:10px"></div>' +
+      '<div class="acciones">' +
+      '<button class="btn btn-s" onclick="cerrarModal()">Cancelar</button>' +
+      '<button class="btn btn-p" onclick="guardarAcuerdoForm()">Crear</button>' +
+      '</div>',
+    );
+  }
+
+  async function guardarAcuerdoForm() {
+    try {
+      await api('/operador/exclusividad', 'POST', {
+        pais: $('acPais').value.trim().toUpperCase(),
+        proveedor_id: $('acProv').value,
+        socio_nombre: $('acSocio').value.trim(),
+        vigente_desde: $('acDesde').value,
+        vigente_hasta: $('acHasta').value || null,
+        logo_producto_url: $('acLogoP').value.trim() || null,
+        logo_socio_url: $('acLogoS').value.trim() || null,
+        autorizacion_marca: $('acMarca').checked,
+        nota: $('acNota').value.trim() || null,
+      });
+      cerrarModal();
+      cargarProveedores();
+      ok('msgProveedores', 'Acuerdo creado.');
+    } catch (e) {
+      msg('msgModalAc', e.message, 'err');
+    }
+  }
+
+  async function cerrarAcuerdoForm(id) {
+    var hoy = new Date().toISOString().slice(0, 10);
+    // No se borra: se le pone fecha de fin. El acuerdo estuvo vigente y eso es un
+    // hecho — hubo documentos firmados bajo él.
+    if (!confirm('Se cierra el acuerdo con fecha de hoy (' + hoy + '). No se borra: queda la historia.')) return;
+    try {
+      await api('/operador/exclusividad/' + encodeURIComponent(id) + '/cerrar', 'PATCH', { vigente_hasta: hoy });
+      cargarProveedores();
+    } catch (e) {
+      msg('msgProveedores', e.message, 'err');
+    }
+  }
+
   window.entrar = entrar;
   window.salir = salir;
   window.ir = ir;
@@ -991,6 +1289,12 @@
   window.borrarPais = borrarPais;
   window.cargarBitacora = cargarBitacora;
   window.cerrarModal = cerrarModal;
+  window.abrirProveedor = abrirProveedor;
+  window.guardarProveedorForm = guardarProveedorForm;
+  window.togglearProveedor = togglearProveedor;
+  window.abrirAcuerdo = abrirAcuerdo;
+  window.guardarAcuerdoForm = guardarAcuerdoForm;
+  window.cerrarAcuerdoForm = cerrarAcuerdoForm;
 
   arrancar();
 })();
