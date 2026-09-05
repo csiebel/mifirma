@@ -25,6 +25,7 @@ import { registrarRutasDocumentos } from './http/routes/documentos';
 import { registrarRutasRepositorio } from './http/routes/repositorio';
 import { registrarRutasCircuitos } from './http/routes/circuitos';
 import { registrarRutasFirma } from './http/routes/firma';
+import { registrarRutasTuid } from './http/routes/tuid';
 
 declare module 'fastify' {
   interface FastifyRequest {
@@ -664,6 +665,7 @@ export function construirServidor(): FastifyInstance {
     registrarRutasRepositorio(app);
     registrarRutasCircuitos(app);
     registrarRutasFirma(app);
+    registrarRutasTuid(app);
   });
 
   /**

@@ -347,7 +347,7 @@ export async function firmar(token: string, input: FirmaInput) {
       posicion: number | null;
       identidad_id: string; caracter: string | null; cuenta_representada_id: string | null;
       sha256: Buffer; titulo: string; nivel_firma: string; me_toca: boolean;
-      anclaje_email: string | null; clave: string; mime: string;
+      anclaje_usado: string | null; nivel_anclaje: string | null; clave: string; mime: string;
       archivo_vigente_id: string | null; firmante: string | null; emisor: string | null;
       pais: string | null; paginas: number | null;
     }>`
@@ -365,9 +365,18 @@ export async function firmar(token: string, input: FirmaInput) {
                   and p2.orden < p.orden
                   and p2.estado not in ('firmada','no_requerida','delegada')
              ) as me_toca,
-             (select an.id from anclaje_identidad an
-               where an.identidad_id = p.identidad_id and an.tipo = 'email'
-                 and an.revocado_en is null order by an.probado_en limit 1) as anclaje_email,
+             -- ⚠ Antes esto buscaba SIEMPRE el anclaje de correo y el nivel se
+             -- escribía fijo en 'bajo'. Con tuID la misma persona puede tener dos
+             -- pruebas —el correo (bajo) y su cédula verificada contra el IdP del
+             -- Estado (alto)—, y quedarse con la de correo haría que verificarse
+             -- no sirviera para nada: el documento saldría con nivel bajo igual.
+             --
+             -- La regla de cuál vale vive en app.mejor_anclaje (migración 069),
+             -- en un solo lugar, porque la necesitan también la pantalla que le
+             -- pide al firmante que se verifique y el chequeo de si un circuito de
+             -- nivel alto puede avanzar. Repartida, un día se contradicen.
+             (select ma.id from app.mejor_anclaje(p.identidad_id) ma) as anclaje_usado,
+             (select ma.nivel_garantia from app.mejor_anclaje(p.identidad_id) ma) as nivel_anclaje,
              -- El PDF tal como está AHORA, con las firmas anteriores aplicadas.
              -- La firma se agrega SOBRE éste; hacerlo sobre el original borraría
              -- las anteriores.
@@ -614,7 +623,14 @@ export async function firmar(token: string, input: FirmaInput) {
     await anotar(trx, {
       ...comun,
       tipo: 'identidad.probada',
-      datos: { metodo: 'verificacion_email', nivel_garantia: 'bajo' },
+      // El expediente dice CÓMO se probó la identidad y con qué nivel. Escribirlo
+      // fijo era correcto cuando había una sola forma de probarla; ahora sería
+      // afirmar 'verificacion_email' de alguien que mostró su cédula ante el IdP
+      // del Estado — un dato falso en el documento que existe para ser creído.
+      datos: {
+        metodo: ctx.nivel_anclaje === 'alto' ? 'oidc' : 'verificacion_email',
+        nivel_garantia: ctx.nivel_anclaje ?? 'bajo',
+      },
       sha256Documento: ctx.sha256,
     });
 
@@ -763,8 +779,8 @@ export async function firmar(token: string, input: FirmaInput) {
     await sql`
       update participacion
          set estado = 'firmada', firmada_en = ${ahora},
-             anclaje_usado_id = ${ctx.anclaje_email},
-             nivel_garantia_obtenido = 'bajo'
+             anclaje_usado_id = ${ctx.anclaje_usado},
+             nivel_garantia_obtenido = ${ctx.nivel_anclaje ?? 'bajo'}
        where id = ${ctx.participacion_id}::uuid
     `.execute(trx);
 
