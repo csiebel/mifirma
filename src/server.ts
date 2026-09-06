@@ -462,6 +462,12 @@ export function construirServidor(): FastifyInstance {
     '/firmar/campos/guardar',
     '/firmar/cuenta',
     '/firmar/cuenta/crear',
+    // La verificación de identidad del firmante (6/9). La ida va bajo /firmar
+    // porque ahí llega la cookie del enlace; la vuelta es la URL registrada en
+    // tuID y llega sin cookie, con el `state` firmado. ⚠ La vuelta NO estaba acá
+    // hasta el 6/9: tuID habría devuelto al firmante a una puerta con llave.
+    '/firmar/identidad/iniciar',
+    '/identidad/tuid/vuelta',
     // La rúbrica del firmante sin cuenta: la carga él, en el acto de firmar.
     // Sin parámetros en el camino — PUBLICAS compara la ruta exacta.
     '/firmar/rubrica',

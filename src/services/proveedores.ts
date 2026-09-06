@@ -1,5 +1,5 @@
 import { sql } from 'kysely';
-import { operadorDb } from '../db/pool';
+import { operadorDb, withOperador } from '../db/pool';
 import { HttpError } from '../http/errors';
 import { cifrar, huellaClave } from '../operador/cripto';
 
@@ -28,6 +28,18 @@ import { cifrar, huellaClave } from '../operador/cripto';
  * `mifirma_operador`. No es prolijidad: el límite del operador —no ver el
  * contenido de los clientes— es la AUSENCIA de GRANT, y sólo existe si la
  * conexión es otra. Ver el encabezado de `db/pool.ts`.
+ *
+ * ⚠⚠ Y las ESCRITURAS van por `withOperador()`, no por `operadorDb()` a secas
+ * — corregido el 6/9. El pool del operador da el ROL, pero no el CONTEXTO: las
+ * políticas de la 067 exigen `app.actor() = 'operador'` para insertar y
+ * modificar, y ese valor lo fija `fijarContexto()` dentro de una transacción.
+ * Sin él, `app.actor()` devuelve 'anonimo' y Postgres contesta «new row
+ * violates row-level security policy». Desde que nació la pantalla (5/9)
+ * NINGUNA escritura de la consola sobre el catálogo había funcionado — y la
+ * fila de tuID existe porque `scripts/cargar_credencial.ts` entra como
+ * superusuario, que saltea la RLS. Las lecturas sí andaban: su política es
+ * `using (true)`. Es la lección del 1/9 con otro disfraz: un camino que
+ * saltea la RLS da verde sobre un camino que no la pasa.
  */
 
 export const CAPACIDADES = ['identidad', 'firma', 'sellado_tiempo'] as const;
@@ -122,32 +134,61 @@ export async function guardarProveedor(d: DatosProveedor) {
 
   const cif = d.credencial ? cifrar(d.credencial) : null;
 
-  const r = await sql<{ id: string }>`
-    insert into proveedor_firma
-      (codigo, nombre_mostrado, entorno, endpoints, parametros, orden_preferencia,
-       credenciales_cif, credencial_puesta_en, credencial_puesta_por)
-    values
-      (${d.codigo}, ${d.nombreMostrado}, ${d.entorno},
-       ${JSON.stringify(d.endpoints)}::jsonb, ${JSON.stringify(d.parametros)}::jsonb,
-       ${d.ordenPreferencia ?? 100},
-       ${cif}, ${cif ? new Date() : null}, ${cif ? `${d.porQuien} (${huellaClave()})` : null})
-    on conflict (codigo) do update set
-       nombre_mostrado = excluded.nombre_mostrado,
-       entorno         = excluded.entorno,
-       endpoints       = excluded.endpoints,
-       parametros      = excluded.parametros,
-       orden_preferencia = excluded.orden_preferencia,
-       -- ⚠ El secreto sólo se pisa si vino uno nuevo. Un formulario que se envía
-       -- con el campo vacío NO borra la credencial cargada: eso apagaría el
-       -- proveedor sin que nadie se dé cuenta hasta el próximo intento de firma.
-       credenciales_cif      = coalesce(excluded.credenciales_cif, proveedor_firma.credenciales_cif),
-       credencial_puesta_en  = coalesce(excluded.credencial_puesta_en, proveedor_firma.credencial_puesta_en),
-       credencial_puesta_por = coalesce(excluded.credencial_puesta_por, proveedor_firma.credencial_puesta_por),
-       actualizado_en = now()
-    returning id
-  `.execute(operadorDb());
+  return withOperador(d.porQuien, async (trx) => {
+  // ⚠ DOS sentencias y no un solo upsert con `coalesce` — corregido el 6/9.
+  //
+  // La 067 dejó `credenciales_cif` SIN permiso de lectura para nadie, a
+  // propósito: es lo que hace imposible que la consola muestre el secreto
+  // aunque alguien lo programe por error. Pero un
+  //   `set credenciales_cif = coalesce(excluded.credenciales_cif, proveedor_firma.credenciales_cif)`
+  // LEE la columna, y Postgres exige permiso de lectura para eso:
+  // «permission denied for table proveedor_firma». Editar cualquier proveedor
+  // existente fallaba siempre, desde el día que nació la pantalla.
+  //
+  // La reparación no es dar el permiso —eso abre justo la puerta que la 067
+  // cerró—: es que el `update` NO MENCIONE la columna cuando no vino credencial
+  // nueva. Así «campo vacío = no la cambies» se cumple sin leer nada.
+  const r = cif
+    ? await sql<{ id: string }>`
+        insert into proveedor_firma
+          (codigo, nombre_mostrado, entorno, endpoints, parametros, orden_preferencia,
+           credenciales_cif, credencial_puesta_en, credencial_puesta_por)
+        values
+          (${d.codigo}, ${d.nombreMostrado}, ${d.entorno},
+           ${JSON.stringify(d.endpoints)}::jsonb, ${JSON.stringify(d.parametros)}::jsonb,
+           ${d.ordenPreferencia ?? 100},
+           ${cif}, now(), ${`${d.porQuien} (${huellaClave()})`})
+        on conflict (codigo) do update set
+           nombre_mostrado   = excluded.nombre_mostrado,
+           entorno           = excluded.entorno,
+           endpoints         = excluded.endpoints,
+           parametros        = excluded.parametros,
+           orden_preferencia = excluded.orden_preferencia,
+           credenciales_cif      = excluded.credenciales_cif,
+           credencial_puesta_en  = excluded.credencial_puesta_en,
+           credencial_puesta_por = excluded.credencial_puesta_por,
+           actualizado_en = now()
+        returning id
+      `.execute(trx)
+    : await sql<{ id: string }>`
+        insert into proveedor_firma
+          (codigo, nombre_mostrado, entorno, endpoints, parametros, orden_preferencia)
+        values
+          (${d.codigo}, ${d.nombreMostrado}, ${d.entorno},
+           ${JSON.stringify(d.endpoints)}::jsonb, ${JSON.stringify(d.parametros)}::jsonb,
+           ${d.ordenPreferencia ?? 100})
+        on conflict (codigo) do update set
+           nombre_mostrado   = excluded.nombre_mostrado,
+           entorno           = excluded.entorno,
+           endpoints         = excluded.endpoints,
+           parametros        = excluded.parametros,
+           orden_preferencia = excluded.orden_preferencia,
+           actualizado_en = now()
+        returning id
+      `.execute(trx);
 
   return { ok: true, id: r.rows[0]?.id };
+  });
 }
 
 /** Qué sabe hacer un proveedor. Lo declara quien escribió el adaptador. */
@@ -158,8 +199,9 @@ export async function guardarCapacidades(
     devuelve_documento_id?: boolean; alcance_por_firma?: boolean;
     requiere_presencia?: boolean; soporta_lote?: boolean; formatos_devueltos?: string[];
   },
+  operadorId: string,
 ) {
-  await sql`
+  await withOperador(operadorId, (trx) => sql`
     insert into proveedor_capacidad
       (proveedor_id, firma_hash, identifica_titular, sellado_tiempo,
        devuelve_documento_id, alcance_por_firma, requiere_presencia, soporta_lote,
@@ -179,7 +221,7 @@ export async function guardarCapacidades(
        soporta_lote = excluded.soporta_lote,
        formatos_devueltos = excluded.formatos_devueltos,
        actualizado_en = now()
-  `.execute(operadorDb());
+  `.execute(trx));
   return { ok: true };
 }
 
@@ -191,6 +233,7 @@ export async function habilitarEnPais(
     capacidades: string[]; activo?: boolean; preferido?: boolean;
     acreditadoPor?: string | null; costoPorFirma?: string | null; monedaCosto?: string | null;
   },
+  operadorId: string,
 ) {
   for (const c of d.capacidades) {
     if (!(CAPACIDADES as readonly string[]).includes(c)) {
@@ -200,7 +243,7 @@ export async function habilitarEnPais(
   // ⚠ El trigger `proveedor_pais_coherente` (067) rechaza habilitar una
   // capacidad que el proveedor no declara. No lo duplicamos acá: la base es la
   // que manda, y una segunda copia de la regla es una copia que se desincroniza.
-  await sql`
+  await withOperador(operadorId, (trx) => sql`
     insert into proveedor_pais
       (proveedor_id, pais, capacidades, activo, preferido, acreditado_por,
        costo_por_firma, moneda_costo)
@@ -215,7 +258,7 @@ export async function habilitarEnPais(
        acreditado_por = excluded.acreditado_por,
        costo_por_firma = excluded.costo_por_firma,
        moneda_costo = excluded.moneda_costo
-  `.execute(operadorDb());
+  `.execute(trx));
   return { ok: true };
 }
 
@@ -229,7 +272,8 @@ export async function habilitarEnPais(
  *
  * Apagar no exige nada: si algo anda mal, apagarlo tiene que ser inmediato.
  */
-export async function setProveedorActivo(codigo: string, activo: boolean) {
+export async function setProveedorActivo(codigo: string, activo: boolean, operadorId: string) {
+  return withOperador(operadorId, async (trx) => {
   if (activo) {
     const r = await sql<{ tiene_cred: boolean; entorno: string; tiene_urls: boolean }>`
       select credencial_puesta_en is not null as tiene_cred,
@@ -237,7 +281,7 @@ export async function setProveedorActivo(codigo: string, activo: boolean) {
              (endpoints -> entorno) is not null
                and (endpoints -> entorno) <> '{}'::jsonb as tiene_urls
         from proveedor_firma where codigo = ${codigo}
-    `.execute(operadorDb());
+    `.execute(trx);
     const p = r.rows[0];
     if (!p) throw new HttpError(404, `No existe el proveedor «${codigo}».`);
     if (!p.tiene_cred) throw new HttpError(400, 'No se puede encender: falta cargar la credencial.');
@@ -246,9 +290,10 @@ export async function setProveedorActivo(codigo: string, activo: boolean) {
   const u = await sql`
     update proveedor_firma set activo_global = ${activo}, actualizado_en = now()
      where codigo = ${codigo}
-  `.execute(operadorDb());
+  `.execute(trx);
   if (Number(u.numAffectedRows ?? 0) === 0) throw new HttpError(404, `No existe el proveedor «${codigo}».`);
   return { ok: true };
+  });
 }
 
 // ═══════════════════════════════════════════════════════════════════════════
@@ -293,7 +338,7 @@ export async function crearAcuerdo(d: DatosAcuerdo) {
   }
 
   try {
-    const r = await sql<{ id: string }>`
+    const r = await withOperador(d.porQuien, (trx) => sql<{ id: string }>`
       insert into acuerdo_exclusividad
         (pais, proveedor_id, socio_nombre, vigente_desde, vigente_hasta, capacidades,
          logo_producto_url, logo_socio_url, autorizacion_marca, nota, creado_por)
@@ -304,7 +349,7 @@ export async function crearAcuerdo(d: DatosAcuerdo) {
          ${d.logoProductoUrl ?? null}, ${d.logoSocioUrl ?? null},
          ${d.autorizacionMarca ?? false}, ${d.nota ?? null}, ${d.porQuien})
       returning id
-    `.execute(operadorDb());
+    `.execute(trx));
     return { ok: true, id: r.rows[0]?.id };
   } catch (e) {
     // La restricción `acuerdo_sin_solapar` (067) impide dos acuerdos que se pisen
@@ -329,11 +374,11 @@ export async function crearAcuerdo(d: DatosAcuerdo) {
  * hecho — hubo documentos firmados bajo él y hubo un logo en la portada. Borrar
  * la fila haría que el sistema no pudiera contestar «qué acuerdo regía en marzo».
  */
-export async function cerrarAcuerdo(id: string, hasta: string) {
-  const u = await sql`
+export async function cerrarAcuerdo(id: string, hasta: string, operadorId: string) {
+  const u = await withOperador(operadorId, (trx) => sql`
     update acuerdo_exclusividad set vigente_hasta = ${hasta}::date
      where id = ${id}::uuid
-  `.execute(operadorDb());
+  `.execute(trx));
   if (Number(u.numAffectedRows ?? 0) === 0) throw new HttpError(404, 'No existe ese acuerdo.');
   return { ok: true };
 }

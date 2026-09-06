@@ -16,6 +16,7 @@ import {
 } from '../../services/firma';
 import { estadoDeCuenta, crearCuentaDesdeFirma } from '../../services/cuenta_del_firmante';
 import { camposParaFirmar, guardarValor } from '../../services/campos';
+import { iniciarVerificacion } from '../../services/tuid_identidad';
 import { HttpError } from '../errors';
 
 /**
@@ -84,6 +85,28 @@ export function registrarRutasFirma(app: FastifyInstance) {
     guardarToken(req, reply, token);
     return datos;
   });
+
+  // ═══ Verificarse con el proveedor de identidad del país (6/9) ═══
+  //
+  // Vive bajo /firmar y NO bajo /identidad, a propósito: la cookie del enlace
+  // está acotada a /firmar (ver arriba) y el navegador no la manda a ningún
+  // otro camino. La pantalla se saca el token de la barra apenas entra, así
+  // que cuando aprieta el botón la cookie es lo único que tiene — y es lo mejor
+  // que puede tener: no viaja en la URL, no se copia al pegar, no queda en el
+  // historial. Es exactamente la misma autorización que abre el documento.
+  //
+  // Devuelve a dónde mandar el navegador. La VUELTA la trae el proveedor a
+  // `/identidad/tuid/vuelta` —la URL registrada allá—, que no necesita cookie:
+  // viaja con el `state` firmado (tuid.ts).
+  //
+  // ⚠ La pantalla sólo muestra el botón si `/firmar/abrir` dijo
+  // `verificacion_disponible`. Si igual llega un pedido sin proveedor habilitado,
+  // `configDeProveedor` contesta 503 con un mensaje para el operador.
+  app.post(
+    '/firmar/identidad/iniciar',
+    { config: { rateLimit: { max: 10, timeWindow: '10 minutes' } } },
+    async (req) => iniciarVerificacion(tokenDe(req)),
+  );
 
   app.get('/firmar/documento', async (req, reply) => {
     const r = await documentoParaFirmar(tokenDe(req));

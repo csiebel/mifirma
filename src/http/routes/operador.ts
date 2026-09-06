@@ -795,7 +795,7 @@ export function registrarRutasOperador(app: FastifyInstance) {
         formatos_devueltos: z.array(z.string()).optional(),
       })
       .parse(req.body);
-    return guardarCapacidades(id, b);
+    return guardarCapacidades(id, b, s.operadorId);
   });
 
   app.put('/operador/proveedores/:id/paises/:pais', async (req) => {
@@ -819,7 +819,7 @@ export function registrarRutasOperador(app: FastifyInstance) {
       acreditadoPor: b.acreditado_por,
       costoPorFirma: b.costo_por_firma,
       monedaCosto: b.moneda_costo,
-    });
+    }, s.operadorId);
   });
 
   app.patch('/operador/proveedores/:codigo/activo', async (req) => {
@@ -827,7 +827,7 @@ export function registrarRutasOperador(app: FastifyInstance) {
     exigirCap(s, 'gestionar_pagos');
     const { codigo } = req.params as { codigo: string };
     const b = z.object({ activo: z.boolean() }).parse(req.body);
-    return setProveedorActivo(codigo, b.activo);
+    return setProveedorActivo(codigo, b.activo, s.operadorId);
   });
 
   // ---- Acuerdos de exclusividad por país ----
@@ -879,6 +879,6 @@ export function registrarRutasOperador(app: FastifyInstance) {
     exigirCap(s, 'gestionar_pagos');
     const { id } = req.params as { id: string };
     const b = z.object({ vigente_hasta: z.string().min(8) }).parse(req.body);
-    return cerrarAcuerdo(id, b.vigente_hasta);
+    return cerrarAcuerdo(id, b.vigente_hasta, s.operadorId);
   });
 }

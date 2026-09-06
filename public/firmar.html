@@ -237,6 +237,32 @@
   .msg.err{background:#fef3f2;color:var(--danger);border:1px solid #fecdc9}
   .msg.ok{background:#ecfdf3;color:var(--ok);border:1px solid #abefc6}
   .msg.aviso{background:#fef6e7;color:#8a5c05;border:1px solid #f5d9a0}
+
+  /* ── La tarjeta de identidad (6/9) ─────────────────────────────────────────
+     Va en el teal de «lo mío» —el color de la marca propia en el visor—, no en
+     el azul del consentimiento: son dos cosas distintas y tienen que verse
+     distintas. El botón es blanco con borde: el único botón azul de la pantalla
+     sigue siendo Firmar. Es opcional y lo dice. Maqueta aprobada el 6/9. */
+  .identidad{margin-top:20px;background:var(--acc-50);border:1px solid #bfe6ea;
+             border-radius:var(--r);padding:14px}
+  .identidad .op{font-size:11px;font-weight:700;letter-spacing:.06em;text-transform:uppercase;
+                 color:var(--acc-700)}
+  .identidad h2{font-size:15px;margin:3px 0 5px;letter-spacing:-.01em}
+  .identidad p{font-size:13px;margin:0;color:#25404f}
+  .identidad .btn{margin-top:12px;background:var(--paper);color:var(--acc-700);
+                  border-color:var(--acc-700);font-size:14px;padding:11px}
+  .identidad .btn:hover{background:var(--acc-50)}
+  .identidad .btn:disabled{opacity:.6;cursor:progress}
+  .identidad .nota{font-size:12px;color:var(--mut);margin-top:8px}
+  .identidad .msg{margin:0 0 12px}
+  .identidad.hecha{background:#ecfdf3;border-color:#abefc6}
+  .identidad.hecha .op{color:var(--ok)}
+  .identidad.hecha h2{display:flex;align-items:center;gap:8px;color:var(--ok)}
+  .identidad.hecha .tick{width:20px;height:20px;border-radius:50%;background:var(--ok);
+                         display:grid;place-items:center;flex:none}
+  .identidad.hecha .tick svg{width:12px;height:12px;stroke:#fff;fill:none;stroke-width:3;
+                             stroke-linecap:round;stroke-linejoin:round}
+  .identidad.hecha p{color:#1f5a3a}
   .pista{font-size:12px;color:var(--mut);margin-top:8px}
   .hidden{display:none!important}
 

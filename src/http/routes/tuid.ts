@@ -1,40 +1,28 @@
 import type { FastifyInstance } from 'fastify';
 import { z } from 'zod';
-import { iniciarVerificacion, completarVerificacion } from '../../services/tuid_identidad';
+import { completarVerificacion } from '../../services/tuid_identidad';
 import { HttpError } from '../errors';
 
 /**
- * Verificación de identidad del firmante externo con tuID.
+ * Verificación de identidad del firmante externo con tuID — la VUELTA.
  *
- *   1. POST /identidad/tuid/iniciar   → devuelve a dónde mandar el navegador
- *   2. GET  /identidad/tuid/vuelta    → tuID trae de vuelta al firmante
+ *   GET /identidad/tuid/vuelta → tuID trae de vuelta al firmante
  *
- * ⚠ Las dos son PÚBLICAS, y tienen que serlo: el firmante externo no tiene
- * sesión. La autorización no la da un token de sesión sino el enlace de firma,
- * que se verifica adentro del servicio. No agregar un `preHandler` de sesión
- * acá: dejaría afuera exactamente a la gente para la que existe esto.
+ * La IDA vive en `firma.ts` como `POST /firmar/identidad/iniciar`, bajo /firmar:
+ * ahí llega la cookie del enlace, que está acotada a ese camino a propósito.
+ * (Hasta el 6/9 la ida estaba acá y pedía el token en el cuerpo — pero la
+ * pantalla se saca el token de la barra apenas entra, así que al apretar el
+ * botón ya no lo tenía. La ruta pedía algo que la pantalla no podía dar.)
+ *
+ * Esta ruta no necesita cookie —tuID redirige el navegador y trae el `state`
+ * firmado— y por eso puede vivir acá, en la URL que quedó registrada en tuID.
+ *
+ * ⚠ Es PÚBLICA, y tiene que serlo: el firmante externo no tiene sesión. Está en
+ * `PUBLICAS` de server.ts (desde el 6/9: antes no estaba, y la vuelta habría
+ * rebotado pidiendo sesión). No agregar un `preHandler` de sesión acá: dejaría
+ * afuera exactamente a la gente para la que existe esto.
  */
 export function registrarRutasTuid(app: FastifyInstance) {
-  // ---- Ida ----
-  //
-  // POST y no GET aunque «sólo redirija»: el token del enlace viaja en el
-  // cuerpo. En una query quedaría en los logs del servidor, en el historial del
-  // navegador y en el Referer — que es justo lo que `enlace_firma.ts` evita
-  // mandándolo en el fragmento de la URL.
-  app.post(
-    '/identidad/tuid/iniciar',
-    { config: { rateLimit: { max: 10, timeWindow: '10 minutes' } } },
-    async (req) => {
-      const b = z
-        .object({
-          token: z.string().min(1),
-          volver_a: z.string().max(300).optional(),
-        })
-        .parse(req.body);
-      return iniciarVerificacion(b.token, b.volver_a);
-    },
-  );
-
   // ---- Vuelta ----
   //
   // GET porque lo hace tuID redirigiendo el navegador, no nosotros.

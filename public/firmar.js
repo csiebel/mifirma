@@ -25,6 +25,10 @@
 
   var DATOS = null;
   var VISOR = null;
+  // Con qué volvió el firmante del proveedor de identidad: '' | 'ok' |
+  // 'cancelada' | 'documento_distinto'. Se lee de `?verificacion=` al arrancar y
+  // la barra se limpia enseguida, igual que se limpia el token.
+  var VUELTA = '';
   // El tipo de marca que se coloca con el próximo toque. Vive acá, en la
   // barra que lo muestra, y el visor lo pregunta. Una sola copia.
   var TIPO_MARCA = 'firma';
@@ -192,6 +196,7 @@
       '<div id="cajaCampos"></div>' +
       '<div id="cajaCaracter"></div>' +
       '<div id="cajaRubrica"></div>' +
+      '<div id="cajaIdentidad"></div>' +
 
       '<label class="consent" for="fConsent">' +
       '<input type="checkbox" id="fConsent" />' +
@@ -506,6 +511,93 @@
     });
   }
 
+  /**
+   * La tarjeta de identidad (6/9). Cuatro estados, y el quinto es que no exista.
+   *
+   * ⚠ La pantalla no afirma nada que la base no afirme. «Verificada» sale de
+   * `identidad_verificada`, que `/firmar/abrir` calcula con `app.mejor_anclaje`
+   * —la misma función que consulta el motor al firmar—, y NO de haber vuelto
+   * con `?verificacion=ok`. Si volvió con «ok» y la base no lo tiene, se dice
+   * eso, no «verificada». Es la decisión T8: la prueba vive en una fila con
+   * vigencia, no en lo que trae la URL.
+   *
+   * Y el botón existe sólo si `/firmar/abrir` dijo que hay proveedor habilitado
+   * para el país de la empresa emisora. Un botón que no puede funcionar es peor
+   * que ninguno.
+   */
+  function pintarIdentidad() {
+    var caja = $('cajaIdentidad');
+    if (!caja) return;                       // copia, no le toca, ya firmó: no hay panel
+    var d = DATOS;
+    var p = d.verificacion_proveedor || null;
+    var nombre = (p && p.nombre) || 'tu proveedor de identidad';
+
+    if (d.identidad_verificada) {
+      caja.innerHTML =
+        '<div class="identidad hecha">' +
+        '<div class="op">Identidad</div>' +
+        '<h2><span class="tick"><svg viewBox="0 0 24 24"><path d="M5 13l4 4L19 7"/></svg></span>' +
+        'Verificada' + (p ? ' con ' + esc(p.nombre) : '') + '</h2>' +
+        '<p>Quedó en el expediente de este documento. Se va a usar cuando firmes.</p>' +
+        '</div>';
+      return;
+    }
+    if (!d.verificacion_disponible || !p) { caja.innerHTML = ''; return; }
+
+    var aviso = '';
+    var rotulo = 'Verificar con ' + esc(nombre);
+    if (VUELTA === 'cancelada') {
+      aviso = '<div class="msg aviso">No se completó la verificación en ' + esc(nombre) +
+              '. Podés firmar igual, o intentarlo de nuevo.</div>';
+      rotulo = 'Volver a intentar';
+    } else if (VUELTA === 'documento_distinto') {
+      // T6: la cédula de la cuenta del proveedor no es la del firmante. No se
+      // registró nada, y se dice.
+      aviso = '<div class="msg err">La cédula de esa cuenta de ' + esc(nombre) +
+              ' no es la del firmante de este documento. No se registró nada. ' +
+              'Si el número está mal en el documento, avisale a quien te lo envió.</div>';
+      rotulo = 'Probar con otra cuenta';
+    } else if (VUELTA === 'ok') {
+      aviso = '<div class="msg aviso">Volviste de ' + esc(nombre) +
+              ' pero no encontramos la verificación registrada. Podés intentarlo de nuevo.</div>';
+      rotulo = 'Volver a intentar';
+    }
+
+    // Qué ES el proveedor se dice sólo del que conocemos. Para cualquier otro,
+    // una frase que no afirma nada que no sepamos.
+    var que = p.codigo === 'tuid'
+      ? esc(nombre) + ' es la identidad digital del Estado uruguayo.'
+      : esc(nombre) + ' es un proveedor de identidad habilitado para tu país.';
+
+    caja.innerHTML =
+      '<div class="identidad">' + aviso +
+      '<div class="op">Opcional</div>' +
+      '<h2>Confirmá quién sos con ' + esc(nombre) + '</h2>' +
+      '<p>' + que + ' Si la usás, en el expediente queda una prueba de tu identidad ' +
+      'más fuerte que la del correo.</p>' +
+      '<button type="button" class="btn" id="fVerificar">' + rotulo + '</button>' +
+      '<p class="nota">Te lleva a ' + esc(nombre) + ' y volvés acá. No firma nada por vos.</p>' +
+      '</div>';
+    $('fVerificar').addEventListener('click', verificarIdentidad);
+  }
+
+  async function verificarIdentidad() {
+    var b = $('fVerificar');
+    if (!b) return;
+    b.disabled = true;
+    try {
+      // Va con la cookie del enlace, nada más: la pantalla ya no tiene el token
+      // (se lo sacó de la barra al entrar) y no lo necesita.
+      var r = await api('/firmar/identidad/iniciar', {});
+      if (!r || !r.url) throw new Error('El proveedor no devolvió a dónde ir.');
+      // Se va del sitio. Lo que vuelva lo lee arrancar() en `?verificacion=`.
+      location.href = r.url;
+    } catch (e) {
+      b.disabled = false;
+      msg(e.message || 'No pudimos empezar la verificación. Podés firmar igual.', 'err');
+    }
+  }
+
   function pintarListo(texto, detalle) {
     $('pantalla').innerHTML =
       '<div class="listo" style="grid-column:1/-1">' +
@@ -739,12 +831,17 @@
       return;
     }
 
+    // Con qué volvió del proveedor de identidad, si volvió. Se lee ANTES de
+    // limpiar la barra: la línea de abajo también borra la query.
+    try { VUELTA = new URLSearchParams(location.search).get('verificacion') || ''; } catch (e) {}
+
     // El token ya está en la cookie: se saca de la barra de direcciones para que
     // no quede en el historial ni se comparta sin querer al copiar la URL.
     try { history.replaceState(null, '', location.pathname); } catch (e) {}
 
     pintarCabecera();
     pintarPanel();
+    pintarIdentidad();
 
     // El visor va DESPUÉS del panel: montar pdf.js tarda —descarga el worker y
     // mide todas las hojas— y no hay motivo para que el formulario espere.

@@ -67,12 +67,12 @@ export async function abrirParaFirmar(
       cuenta_propietaria_id: string; papel: string; orden: number; estado: string;
       titulo: string; circuito_estado: string; modo: string; nivel_firma: string;
       vence_en: Date | null; emisor: string; firmante_email: string; firmante_nombre: string | null;
-      sha256: Buffer; me_toca: boolean;
+      sha256: Buffer; me_toca: boolean; pais_emisor: string | null;
     }>`
       select p.id as participacion_id, p.instancia_id, p.circuito_id,
              p.cuenta_propietaria_id, p.papel, p.orden, p.estado,
              c.titulo, c.estado as circuito_estado, c.modo, c.nivel_firma, c.vence_en,
-             cu.nombre_mostrado as emisor,
+             cu.nombre_mostrado as emisor, cu.pais as pais_emisor,
              i.email_mostrado as firmante_email, i.nombre_mostrado as firmante_nombre,
              a.sha256,
              -- Le toca si no queda nadie pendiente con un orden menor. Misma
@@ -150,6 +150,41 @@ export async function abrirParaFirmar(
       canal: 'web',
     });
 
+    // ═══ La verificación de identidad, para que la pantalla sepa qué ofrecer ═══
+    //
+    // Dos preguntas distintas, y las dos se le hacen a la base — no se suponen:
+    //
+    //   · ¿Hay un proveedor de IDENTIDAD habilitado para el país de la empresa
+    //     emisora? `app.proveedores_habilitados` (067) ya resuelve `activo_global`,
+    //     la vigencia por país, la salud y la exclusividad (T2). Si no hay, la
+    //     pantalla no muestra ningún botón: un botón que no puede funcionar es
+    //     peor que ninguno.
+    //   · ¿Esta persona YA tiene una prueba de identidad vigente de nivel alto?
+    //     Es `app.mejor_anclaje` (069), la misma función que consulta el motor al
+    //     firmar. Si la tiene, la pantalla dice «verificada» aunque se recargue
+    //     sin `?verificacion=ok` en la barra, y no vuelve a ofrecer el viaje.
+    //     La pantalla nunca afirma lo que la base no afirma.
+    //
+    // ⚠ El país sale de la cuenta EMISORA (T3 del 5/9: adentro del producto
+    // manda la cuenta, nunca la IP). Si la política no dejó ver la cuenta,
+    // `pais_emisor` es null y la respuesta es «no disponible»: en la duda, no
+    // se ofrece.
+    let verificacionProveedor: { codigo: string; nombre: string } | null = null;
+    if (f.papel === 'firmante' && f.pais_emisor) {
+      const prov = await sql<{ codigo: string; nombre_mostrado: string }>`
+        select codigo, nombre_mostrado
+          from app.proveedores_habilitados(${f.pais_emisor}::char(2), 'identidad')
+         limit 1
+      `.execute(trx);
+      const p = prov.rows[0];
+      if (p) verificacionProveedor = { codigo: p.codigo, nombre: p.nombre_mostrado };
+    }
+
+    const mejor = await sql<{ nivel_garantia: string }>`
+      select nivel_garantia from app.mejor_anclaje(${e.identidadId}::uuid)
+    `.execute(trx);
+    const identidadVerificada = mejor.rows[0]?.nivel_garantia === 'alto';
+
     return {
       titulo: f.titulo,
       emisor: f.emisor ?? '',
@@ -161,6 +196,9 @@ export async function abrirParaFirmar(
       vence_en: f.vence_en,
       me_toca: f.me_toca,
       sha256: Buffer.from(f.sha256).toString('hex'),
+      verificacion_disponible: verificacionProveedor !== null,
+      verificacion_proveedor: verificacionProveedor,
+      identidad_verificada: identidadVerificada,
     };
   });
 }
