@@ -91,6 +91,10 @@ export const LOGIN_PATHS: ReadonlyMap<string, Realm> = new Map<string, Realm>([
   // más de una. Se llamaba 'elegir-empresa' en payroll y quedó apuntando a una
   // ruta que ya no existe: el que tenía dos cuentas entraba sin cookie.
   ['/auth/login/elegir-cuenta', 'emp'],
+  // Lo mismo, para quien entró con su identidad digital y tiene más de una
+  // cuenta. El caso de UNA sola cuenta NO pasa por acá: ése termina en una
+  // redirección, no en un JSON, y pone la cookie a mano (ver routes/auth_idp.ts).
+  ['/auth/idp/elegir-cuenta', 'emp'],
   // El alta emite sesión igual que un login. Sin esto, la cuenta se crea, el
   // navegador salta a /app y ahí no hay cookie: consola vacía y a /entrar.
   //

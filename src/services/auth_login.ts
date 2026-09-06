@@ -750,7 +750,7 @@ async function nivelDeAnclaje(anclajeId: string): Promise<NivelGarantia> {
 // Paso 3: a qué cuenta entra
 // ---------------------------------------------------------------------------
 
-async function cuentasDe(identidadId: string) {
+export async function cuentasDe(identidadId: string) {
   return enSistema((trx) =>
     trx
       .selectFrom('membresia as m')

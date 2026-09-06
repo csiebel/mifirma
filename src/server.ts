@@ -10,6 +10,7 @@ import { HttpError } from './http/errors';
 import { realmDePath, tokenDeCookie, tokenCsrfDeCookie, setCookieSesion, setCookieCsrf, LOGIN_PATHS } from './http/cookies_sesion';
 import { verificarTokenOperador } from './operador/sesion';
 import { registrarRutasAuth } from './http/routes/auth';
+import { registrarRutasAuthIdp } from './http/routes/auth_idp';
 import { registrarRutasChat } from './http/routes/chat';
 import { registrarRutasUsuarios } from './http/routes/usuarios';
 import { registrarRutasRoles } from './http/routes/roles';
@@ -504,6 +505,17 @@ export function construirServidor(): FastifyInstance {
     '/auth/registro/ver',
     '/auth/registro/confirmar',
     '/auth/logout',
+    // Entrar con una identidad digital. Todo esto pasa ANTES de tener sesión —
+    // es justamente lo que la crea— y por eso va acá.
+    //
+    // ⚠ La VUELTA del proveedor no está en esta lista porque no es una ruta
+    // nueva: llega por `/identidad/tuid/vuelta`, que ya está más abajo. tuID
+    // compara la direccion de vuelta caracter por caracter y sólo tiene
+    // registrada ésa; `routes/tuid.ts` reparte por el propósito del `state`.
+    '/auth/idp/proveedores',
+    '/auth/idp/iniciar',
+    '/auth/idp/pendiente',
+    '/auth/idp/elegir-cuenta',
     // Datos que consume la página comercial sin token
     '/publico/planes',
     '/publico/industrias',
@@ -650,6 +662,9 @@ export function construirServidor(): FastifyInstance {
   // pasan 25 de 25 pedidos contra un tope de 20/minuto; adentro del `after`, 20 y 5 frenados.
   app.after(() => {
     registrarRutasAuth(app);
+    // Entrar con identidad digital (`/auth/idp/*`) y conectarla desde adentro
+    // (`/mi/idp*`). La vuelta del proveedor la reparte registrarRutasTuid.
+    registrarRutasAuthIdp(app);
     registrarRutasChat(app);
     registrarRutasUsuarios(app);
     registrarRutasRoles(app);

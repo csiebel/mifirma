@@ -1,6 +1,8 @@
 import type { FastifyInstance } from 'fastify';
 import { z } from 'zod';
 import { completarVerificacion } from '../../services/tuid_identidad';
+import { viajeDelState } from '../../services/auth_idp';
+import { vueltaDelIdp } from './auth_idp';
 import { HttpError } from '../errors';
 
 /**
@@ -16,6 +18,25 @@ import { HttpError } from '../errors';
  *
  * Esta ruta no necesita cookie —tuID redirige el navegador y trae el `state`
  * firmado— y por eso puede vivir acá, en la URL que quedó registrada en tuID.
+ *
+ * ═══ ⚠⚠ POR ACÁ VUELVEN DOS VIAJES DISTINTOS (6/9) ═══
+ *
+ * Desde que se puede ENTRAR al producto con la identidad digital, esta misma
+ * dirección recibe dos cosas: el firmante que se verifica (lo de abajo, sin
+ * cambios) y la persona que entra o conecta su identidad (`services/auth_idp.ts`).
+ *
+ * No es por comodidad: tuID compara la `redirect_uri` CARÁCTER POR CARÁCTER
+ * contra una lista corta que administran ellos, y no tiene registrada ninguna
+ * dirección del login. Una dirección propia sería más prolija y no se podría
+ * probar hasta que tuID la registre, que es un trámite abierto. Decisión de
+ * Claudio: se reusa ésta y se reparte adentro.
+ *
+ * ⚠ Lo que separa los dos caminos NO es el orden de los `if`: es que cada uno
+ * RECHAZA el sobre del otro. El `state` del login lleva `proposito: 'idp'` y
+ * `verificarState` de `oauth.ts` sólo acepta `proposito: 'tuid'`; al revés,
+ * `viajeDelState` sólo acepta 'idp' y ante cualquier otra cosa devuelve `null`.
+ * Un sobre de firma no sirve para entrar, y uno de login no sirve para anclar,
+ * aunque alguien los mande por la puerta equivocada a propósito.
  *
  * ⚠ Es PÚBLICA, y tiene que serlo: el firmante externo no tiene sesión. Está en
  * `PUBLICAS` de server.ts (desde el 6/9: antes no estaba, y la vuelta habría
@@ -40,6 +61,27 @@ export function registrarRutasTuid(app: FastifyInstance) {
         error_description: z.string().optional(),
       })
       .parse(req.query);
+
+    // ═══ El reparto, ANTES DE TODO LO DEMÁS ═══
+    //
+    // Va arriba del `if (q.error)` a propósito: si la persona aprieta
+    // «cancelar» en tuID viniendo del login, mandarla a la pantalla de firma
+    // sería dejarla en un documento que no estaba mirando. Quién canceló lo
+    // dice el sobre, no el error.
+    //
+    // Debajo de esta línea, el camino del firmante queda exactamente como
+    // estaba: si el sobre no es del login, `viajeDelState` devuelve `null` y no
+    // se ejecuta nada de acá.
+    const viajeIdp = q.state ? await viajeDelState(q.state) : null;
+    if (viajeIdp) {
+      if (q.error) {
+        return reply.redirect(
+          viajeIdp.modo === 'vincular' ? '/app?idp=cancelada#cuenta' : '/entrar?idp=cancelada',
+        );
+      }
+      if (!q.code) throw new HttpError(400, 'Respuesta incompleta de tuID.');
+      return vueltaDelIdp(req, reply, viajeIdp, q.code);
+    }
 
     // ⚠ Las redirecciones de vuelta son RELATIVAS (6/9). `APP_BASE_URL` es lo
     // que se le declara a tuID como redirect_uri y tiene que ser https (lo exige

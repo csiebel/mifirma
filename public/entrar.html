@@ -100,6 +100,19 @@
   .opcion b{display:block;font-size:15px}
   .opcion span{color:var(--mut);font-size:13px}
 
+  /* Entrar con una identidad digital. El separador y los botones sólo existen
+     si el operador tiene un proveedor encendido: entrar.js no dibuja nada si la
+     lista vuelve vacía, y entonces la pantalla se ve exactamente como antes. */
+  .idp{margin-top:20px}
+  .sep{display:flex;align-items:center;gap:12px;color:var(--mut);font-size:12.5px;margin:4px 0 14px}
+  .sep::before,.sep::after{content:"";flex:1;height:1px;background:var(--line)}
+  .idpBtn{width:100%;display:flex;align-items:center;justify-content:center;gap:10px;font:inherit;
+          font-weight:600;font-size:14.5px;color:var(--ink);background:var(--paper);cursor:pointer;
+          border:1.5px solid var(--line);border-radius:var(--r);padding:11.5px 14px;margin-bottom:9px;transition:.15s}
+  .idpBtn:hover{border-color:var(--acc);background:var(--acc-50)}
+  .idpBtn:disabled{opacity:.55;cursor:default}
+  .idpBtn img{height:19px;display:block}
+
   .foot{margin-top:24px;padding-top:19px;border-top:1px solid var(--line);font-size:13.5px;color:var(--mut)}
   .msg{margin-top:16px;font-size:13.5px;padding:11px 13px;border-radius:var(--r)}
   .msg.err{background:#fef3f2;color:var(--danger);border:1px solid #fecdc9}
@@ -147,6 +160,14 @@
 
     <button class="primary" id="btnLogin" onclick="login()" data-t="btn.entrar">Entrar</button>
     <div id="msgLogin"></div>
+
+    <!-- La otra puerta. ⚠ CONVIVE con la contraseña, nunca la reemplaza
+         (decisión de Claudio del 6/9): quien no tenga identidad digital
+         conectada tiene que poder entrar igual, y quien la pierda también. -->
+    <div id="idp" class="idp hidden">
+      <div class="sep"><span data-t="idp.o">o</span></div>
+      <div id="idpBotones"></div>
+    </div>
 
     <div class="foot">
       <button class="link" onclick="ver('vReset')" data-t="olvide">¿Olvidaste tu contraseña?</button>

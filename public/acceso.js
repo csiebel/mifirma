@@ -130,6 +130,94 @@
     return html;
   }
 
+  // ── Tu identidad digital ────────────────────────────────────────────────
+  //
+  // ⚠⚠ ESTO NO ES LA VERIFICACIÓN DE IDENTIDAD DE LA PANTALLA DE FIRMA, y la
+  // pantalla no puede sugerir que lo sea. Acá se decide CON QUÉ PUERTA ENTRÁS;
+  // allá se registra QUÉ PROBASTE el día que firmaste. Conectar tuID hoy no
+  // cambia el nivel de ninguna firma: es la mitad que falta y se decide aparte.
+  //
+  // ⚠ Se conecta desde ADENTRO (decisión del 6/9): la persona ya probó ser
+  // quien dice, y recién ahí ata su identidad digital. Nunca al revés.
+  var idpEstado = { proveedores: [], vinculadas: [] };
+
+  function fecha(s) {
+    if (!s) return '';
+    try { return new Date(s).toLocaleDateString('es-UY', { day:'2-digit', month:'2-digit', year:'numeric' }); }
+    catch (e) { return String(s).slice(0, 10); }
+  }
+
+  function pintarIdp() {
+    var v = idpEstado.vinculadas || [], p = idpEstado.proveedores || [];
+
+    // Sin proveedores encendidos por el operador, el bloque entero no existe.
+    // No se dibuja un título con un cartel de «no hay nada»: es ruido en una
+    // pantalla donde lo que importa es la contraseña y el celular.
+    //
+    // ⚠ Ojo con lo que se lleva puesto: el hueco del aviso NO vive acá adentro
+    // (ver abajo). Cuando alguien desconecta la única identidad que tenía y el
+    // proveedor además está apagado, este bloque desaparece — y si el aviso
+    // estuviera adentro, desaparecería con él: la persona apretaría
+    // «Desconectar», la sección se esfumaría y no habría ninguna confirmación
+    // de que pasó algo. Encontrado el 6/9 apretando el botón.
+    if (!p.length && !v.length) return '';
+
+    var conectadas = v.map(function (x) {
+      return (
+        '<div style="display:flex;align-items:center;gap:12px;flex-wrap:wrap;margin:0 0 10px">' +
+        '<div style="flex:1;min-width:180px">' +
+        '<b>' + esc(x.proveedor_nombre) + '</b> <span class="pill ok">conectada</span>' +
+        (x.mostrado ? '<br /><span class="pista">' + esc(x.mostrado) + '</span>' : '') +
+        '<br /><span class="pista">Conectada el ' + esc(fecha(x.vinculada_en)) +
+        (x.ultimo_acceso_en ? ' · última vez que entraste con ella: ' + esc(fecha(x.ultimo_acceso_en)) : '') +
+        '</span></div>' +
+        '<button class="btn btn-s" data-idp-quitar="' + esc(x.id) + '">Desconectar</button>' +
+        '</div>'
+      );
+    }).join('');
+
+    // Sólo se ofrece conectar lo que todavía no está conectado: la 070 admite
+    // una sola vinculación vigente por persona y proveedor, así que ofrecer el
+    // botón de nuevo sería ofrecer algo que la base va a rechazar.
+    var yaTengo = {};
+    v.forEach(function (x) { yaTengo[x.proveedor] = true; });
+    var faltan = p.filter(function (x) { return !yaTengo[x.codigo]; });
+
+    var ofrecer = faltan.map(function (x) {
+      return '<button class="btn btn-p" data-idp-conectar="' + esc(x.codigo) + '" ' +
+             'style="margin:0 8px 8px 0">Conectar ' + esc(x.nombre) + '</button>';
+    }).join('');
+
+    return (
+      '<hr style="border:0;border-top:1px solid var(--line);margin:22px 0">' +
+      '<h3 style="font-size:15px;margin:0 0 10px">Tu identidad digital</h3>' +
+      '<p class="pista" style="margin:0 0 12px">Conectala y vas a poder entrar a MiFirma con ella, ' +
+      'sin escribir tu contraseña. Tu contraseña sigue funcionando igual.</p>' +
+      conectadas + ofrecer
+    );
+  }
+
+  /**
+   * Qué pasó en el viaje al proveedor, que el servidor cuenta en la barra.
+   *
+   * ⚠ Se lee una sola vez y se limpia la barra: sin eso, recargar la pantalla
+   * repite un cartel sobre algo que ya no está pasando.
+   */
+  function resultadoIdp() {
+    var r = new URLSearchParams(location.search || '').get('idp');
+    if (!r) return;
+    try { history.replaceState(null, '', location.pathname + location.hash); } catch (e) {}
+    var textos = {
+      vinculada: ['Listo, tu identidad digital quedó conectada.', 'ok'],
+      ya_estaba: ['Esa identidad digital ya estaba conectada a tu cuenta.', 'ok'],
+      ocupada: ['No pudimos conectarla: esa identidad digital ya está en otra cuenta, ' +
+                'o ya tenés otra del mismo proveedor conectada acá.', 'err'],
+      cancelada: ['No completaste la verificación, así que no conectamos nada.', 'err'],
+      error: ['No pudimos conectar tu identidad digital. Probá de nuevo.', 'err'],
+    };
+    if (textos[r]) aviso('acMsgIdp', textos[r][0], textos[r][1]);
+  }
+
   // ── Pintar todo ─────────────────────────────────────────────────────────
   async function pintar() {
     var caja = $('acceso');
@@ -139,6 +227,15 @@
     } catch (e) {
       caja.innerHTML = '<div class="msg err">' + esc(e.message) + '</div>';
       return;
+    }
+
+    // ⚠ Aparte y tolerante: si el catálogo de proveedores falla, «Tu acceso»
+    // tiene que seguir mostrando la contraseña y el celular. Un bloque nuevo no
+    // puede tumbar una pantalla que ya funcionaba.
+    try {
+      idpEstado = await api('/mi/idp');
+    } catch (e) {
+      idpEstado = { proveedores: [], vinculadas: [] };
     }
 
     caja.innerHTML =
@@ -159,9 +256,14 @@
       '<hr style="border:0;border-top:1px solid var(--line);margin:22px 0">' +
       '<h3 style="font-size:15px;margin:0 0 10px">Por dónde te mandamos el código</h3>' +
       pintarCanal(estado) +
-      '<div id="acMsgCanal"></div>';
+      '<div id="acMsgCanal"></div>' +
+      pintarIdp() +
+      // ⚠ FUERA del bloque de identidad, y a propósito: tiene que sobrevivir a
+      // que ese bloque deje de dibujarse. Vacío no ocupa nada.
+      '<div id="acMsgIdp"></div>';
 
     enganchar();
+    resultadoIdp();
   }
 
   function enganchar() {
@@ -246,6 +348,43 @@
         });
       });
     }
+
+    // ── Identidad digital ──
+    document.querySelectorAll('[data-idp-conectar]').forEach(function (b) {
+      b.addEventListener('click', async function () {
+        aviso('acMsgIdp', '', '');
+        b.disabled = true;
+        try {
+          var j = await api('/mi/idp/vincular', 'POST', { proveedor: b.dataset.idpConectar });
+          // Se va del sitio a autenticarse ante el proveedor. Vuelve por la
+          // dirección que el proveedor tiene registrada y el servidor redirige
+          // acá con el resultado en la barra.
+          location.assign(j.url);
+        } catch (e) {
+          aviso('acMsgIdp', e.message, 'err');
+          b.disabled = false;
+        }
+      });
+    });
+
+    document.querySelectorAll('[data-idp-quitar]').forEach(function (b) {
+      b.addEventListener('click', async function () {
+        aviso('acMsgIdp', '', '');
+        b.disabled = true;
+        try {
+          await api('/mi/idp/' + b.dataset.idpQuitar, 'DELETE');
+          await pintar();
+          // ⚠ Desconectar no borra nada: queda registrado que estuvo conectada
+          // y cuándo se desconectó (la 070 revoca, no borra). Con esa
+          // vinculación alguien entró al sistema, y la bitácora de accesos que
+          // la nombra tiene que seguir teniendo a qué apuntar.
+          aviso('acMsgIdp', 'Listo, la desconectamos. Podés volver a conectarla cuando quieras.', 'ok');
+        } catch (e) {
+          aviso('acMsgIdp', e.message, 'err');
+          b.disabled = false;
+        }
+      });
+    });
 
     document.querySelectorAll('input[name="acCanal"]').forEach(function (r) {
       r.addEventListener('change', async function () {

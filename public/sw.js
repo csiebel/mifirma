@@ -16,7 +16,11 @@
 //
 // ⚠ Subir el número de CACHE también sirve para desalojar cualquier resto que
 // haya quedado de payroll en un navegador que alguna vez abrió `/mi`.
-const CACHE = 'mifirma-shell-v4';
+// ⚠ v5 (6/9): además de estrenar la excepción de `/identidad/*`, subir el
+// número DESALOJA lo que la versión anterior alcanzó a guardar de esas
+// vueltas — el `caches.put` de abajo las cacheaba por camino, así que un
+// navegador que ya hizo un viaje tiene guardada la respuesta de un canje.
+const CACHE = 'mifirma-shell-v5';
 const SHELL = ['/app', '/entrar'];
 
 self.addEventListener('install', (e) => {
@@ -56,6 +60,25 @@ self.addEventListener('fetch', (e) => {
   // > Regla: un service worker manda sobre TODO su origen, incluidas puertas
   // > que no son suyas. Lo que se autentica afuera, pasa derecho.
   if (url.pathname === '/operador' || url.pathname.startsWith('/operador/')) return;
+
+  // ⚠⚠ LA VUELTA DE UN PROVEEDOR DE IDENTIDAD NO ES UNA PANTALLA: ES UN TRÁMITE
+  // QUE TERMINA EN UNA REDIRECCIÓN. Y una redirección no puede salir de acá.
+  //
+  // `respondWith` con una respuesta cuyo `redirected` es true está PROHIBIDO
+  // para una navegación: el navegador la rechaza y rehace la navegación sin el
+  // worker. Como el `fetch` de abajo sigue los saltos solo, eso es exactamente
+  // lo que pasaba — y el segundo viaje llegaba con el código de un solo uso ya
+  // gastado. Medido el 6/9 en el log del servidor: 302 → 200 en la pantalla
+  // correcta → y un segundo después el MISMO código otra vez, con 502.
+  //
+  // Efecto para quien lo vivía: el login funcionaba, se veía la pantalla buena
+  // un instante, y terminaba en un error. Lo peor de los dos mundos, porque el
+  // error decía «TuID rechazó el código» y tuID no había rechazado nada.
+  //
+  // > Regla, hermana de la de arriba: lo que TERMINA EN UNA REDIRECCIÓN pasa
+  // > derecho. El worker sólo puede responder navegaciones que devuelven una
+  // > página.
+  if (url.pathname.startsWith('/identidad/')) return;
 
   // Navegación: red primero (sin pasar por el cache HTTP del navegador, que en
   // iOS a veces ignora no-store), cache como respaldo offline por ruta real.

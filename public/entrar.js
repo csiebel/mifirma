@@ -19,6 +19,12 @@
       'otp.reenviar':'Enviar outro código','otp.porCorreo':'Enviar por e-mail','otp.destino':'Enviamos para {destino}.',
       'otp.enviado':'Pronto, enviamos outro para {destino}.',
       'cuenta.h1':'Em qual conta você quer entrar?','cuenta.lead':'Você tem acesso a mais de uma.',
+      'idp.o':'ou','idp.entrar':'Entrar com {p}',
+      'idp.cancelada':'Você não concluiu a verificação com sua identidade digital. Pode tentar de novo ou entrar com sua senha.',
+      'idp.sesion':'Sua sessão expirou enquanto você conectava sua identidade digital, então não conectamos nada. Entre de novo e tente outra vez.',
+      'idp.error':'Não conseguimos concluir a entrada com sua identidade digital. Tente de novo, ou entre com seu e-mail e sua senha.',
+      'idp.sin_vincular':'Essa identidade digital ainda não está conectada a nenhuma conta do MiFirma. Entre com seu e-mail e sua senha e conecte-a em «Seu acesso».',
+      'idp.sin_cuenta':'Seu usuário ainda não está habilitado em nenhuma empresa. Se te convidaram para assinar um documento, entre pelo link que você recebeu.',
       'crear.h1':'Crie a conta da sua empresa','crear.h1.persona':'Crie a sua conta',
       'crear.lead.persona':'É sua. Se um dia incluir alguém, você dá acesso com o papel que precisar.',
       'tipo.empresa':'Uma empresa','tipo.empresa.p':'Assina com o nome dela e inclui sua equipe.',
@@ -65,6 +71,12 @@
       'otp.reenviar':'Send another code','otp.porCorreo':'Send it by email','otp.destino':'We sent it to {destino}.',
       'otp.enviado':'Done, we sent another one to {destino}.',
       'cuenta.h1':'Which account do you want to enter?','cuenta.lead':'You have access to more than one.',
+      'idp.o':'or','idp.entrar':'Sign in with {p}',
+      'idp.cancelada':'You didn’t finish verifying with your digital identity. You can try again or sign in with your password.',
+      'idp.sesion':'Your session expired while you were connecting your digital identity, so nothing was connected. Sign in again and retry.',
+      'idp.error':'We couldn’t finish signing you in with your digital identity. Try again, or sign in with your email and password.',
+      'idp.sin_vincular':'That digital identity is not connected to any MiFirma account yet. Sign in with your email and password, then connect it from “Your access”.',
+      'idp.sin_cuenta':'Your user is not enabled in any company yet. If you were invited to sign a document, use the link you received.',
       'crear.h1':'Create your company account','crear.h1.persona':'Create your account',
       'crear.lead.persona':'It\u2019s yours. If you ever add someone, you give them the role they need.',
       'tipo.empresa':'A company','tipo.empresa.p':'Signs under its own name and adds its team.',
@@ -113,6 +125,12 @@
     'np.h1.alta':'Confirmá tu correo y elegí tu contraseña',
     'np.confirmar':'Confirmar y entrar',
     'crear.revisa':'Te mandamos un correo a {email}. Abrilo para confirmar que es tuyo y elegir tu contraseña — hasta ese momento no se creó ninguna cuenta.',
+    'idp.o':'o','idp.entrar':'Entrar con {p}',
+    'idp.cancelada':'No completaste la verificación con tu identidad digital. Podés intentarlo de nuevo o entrar con tu contraseña.',
+    'idp.sesion':'Tu sesión venció mientras conectabas tu identidad digital, así que no conectamos nada. Entrá de nuevo y volvé a intentarlo.',
+    'idp.error':'No pudimos completar la entrada con tu identidad digital. Probá de nuevo, o entrá con tu correo y tu contraseña.',
+    'idp.sin_vincular':'Esa identidad digital todavía no está conectada a ninguna cuenta de MiFirma. Entrá con tu correo y tu contraseña, y conectala desde «Tu acceso».',
+    'idp.sin_cuenta':'Tu usuario todavía no está habilitado en ninguna empresa. Si te invitaron a firmar un documento, entrá por el enlace que recibiste.',
     'err.faltan':'Completá el correo y la contraseña.','err.codigo':'El código tiene 6 dígitos.',
     'err.correo':'Escribí tu correo.','err.noCoinciden':'Las dos contraseñas tienen que ser iguales.',
     'err.corta':'Mínimo 12 caracteres.','err.crear':'Completá el nombre de la empresa, tu nombre, correo y contraseña.',
@@ -136,6 +154,12 @@
     document.querySelectorAll('.lang button').forEach(function(b){
       b.setAttribute('aria-pressed', String(b.dataset.l === LANG));
     });
+    // ⚠ Los botones de identidad digital NO se pintan con `data-t`: su texto
+    // lleva el nombre del proveedor adentro («Entrar con TuID»), así que se
+    // arman a mano. Sin esta línea quedaban en el idioma que había al cargar la
+    // página y no seguían al selector — media pantalla en un idioma y media en
+    // otro, que es justo lo que la deuda 85 dice de la pantalla del firmante.
+    dibujarIdp();
   }
 
   var VISTAS = ['vLogin','vCanal','vOtp','vCuenta','vCrear','vReset','vNuevaPassword'];
@@ -152,6 +176,11 @@
      ------------------------------------------------------------------------- */
   var TIPO = 'empresa';
   var DESAFIO_OTP = null, DESAFIO_CUENTA = null, TOKEN_RESET = null, CANAL_TEL = 'sms';
+  // El desafío de cuenta del login federado NO vive acá: viaja en una cookie
+  // httpOnly que puso el servidor, porque el paso anterior fue una redirección
+  // desde el proveedor y no una respuesta JSON. Esta bandera sólo dice por cuál
+  // de los dos endpoints hay que mandar la elección.
+  var IDP_ELEGIR = false;
   var TIPO_TOKEN = 'reset', NECESITA_PASSWORD = true;
 
   function $(id){ return document.getElementById(id); }
@@ -352,10 +381,98 @@
   }
   async function elegirCuenta(id){
     msg('msgCuenta','','');
-    try{ entrar(await api('/auth/login/elegir-cuenta','POST',{ desafio:DESAFIO_CUENTA, cuenta_id:id })); }
+    try{
+      var j = IDP_ELEGIR
+        ? await api('/auth/idp/elegir-cuenta','POST',{ cuenta_id:id })
+        : await api('/auth/login/elegir-cuenta','POST',{ desafio:DESAFIO_CUENTA, cuenta_id:id });
+      entrar(j);
+    }
     catch(e){ msg('msgCuenta', e.message, 'err'); }
   }
-  function volverAlLogin(){ DESAFIO_OTP=null; DESAFIO_CUENTA=null; msg('msgLogin','',''); ver('vLogin'); }
+  function volverAlLogin(){ DESAFIO_OTP=null; DESAFIO_CUENTA=null; IDP_ELEGIR=false; msg('msgLogin','',''); ver('vLogin'); }
+
+  /* -------------------------------------------------------------------------
+     Entrar con una identidad digital.
+
+     ⚠ Es OTRA PUERTA, no la única: convive con la contraseña (decisión de
+     Claudio del 6/9). Quien no conectó ninguna identidad —o la perdió— tiene
+     que poder entrar igual, así que el formulario de arriba no se toca.
+
+     ⚠ Si el operador no tiene ningún proveedor de identidad encendido, la lista
+     vuelve vacía y acá no se dibuja nada: la pantalla queda idéntica a como
+     estaba. Un botón que no puede funcionar es peor que ninguno.
+     ------------------------------------------------------------------------- */
+  var PROVS_IDP = [];
+
+  async function pintarIdp(){
+    try{ PROVS_IDP = (await api('/auth/idp/proveedores')).proveedores || []; }
+    catch(e){ return; }   // sin catálogo no hay botón, y no es un error de la persona
+    dibujarIdp();
+  }
+
+  function dibujarIdp(){
+    var caja = $('idp'), lista = $('idpBotones');
+    if (!caja || !lista) return;
+    var provs = PROVS_IDP;
+    if (!provs.length) return;
+
+    lista.innerHTML = provs.map(function(p){
+      return '<button class="idpBtn" data-p="'+esc(p.codigo)+'">' +
+             (p.logoUrl ? '<img src="'+esc(p.logoUrl)+'" alt="" />' : '') +
+             '<span>'+esc(t('idp.entrar').replace('{p}', p.nombre))+'</span></button>';
+    }).join('');
+    lista.querySelectorAll('[data-p]').forEach(function(b){
+      b.addEventListener('click', function(){ entrarConIdp(b, b.dataset.p); });
+    });
+    caja.classList.remove('hidden');
+  }
+
+  async function entrarConIdp(boton, codigo){
+    msg('msgLogin','','');
+    boton.disabled = true;
+    try{
+      var j = await api('/auth/idp/iniciar','POST',{ proveedor:codigo });
+      // Se va del sitio: el navegador tiene que autenticarse ANTE EL PROVEEDOR,
+      // que es todo el punto. Vuelve por la dirección que el proveedor tiene
+      // registrada, y el servidor decide qué pantalla mostrar.
+      location.assign(j.url);
+    }catch(e){
+      msg('msgLogin', e.message, 'err');
+      boton.disabled = false;
+    }
+  }
+
+  /**
+   * Qué pasó en el viaje, que el servidor cuenta en la barra al redirigir.
+   *
+   * ⚠ Se lee ANTES de limpiar la barra, y se limpia siempre: sin eso, recargar
+   * la página vuelve a mostrar un cartel sobre algo que ya no está pasando.
+   * (Es lo mismo que hace la pantalla de firma con `?verificacion=`.)
+   */
+  function leerResultadoIdp(){
+    var q = new URLSearchParams(location.search || '');
+    var r = q.get('idp');
+    if (!r) return false;
+    try{ history.replaceState(null, '', location.pathname + location.hash); }catch(e){}
+
+    if (r === 'elegir'){
+      IDP_ELEGIR = true;
+      api('/auth/idp/pendiente').then(function(d){
+        mostrarCuentas({ desafio:null, opciones:d.opciones||[] });
+        IDP_ELEGIR = true;   // mostrarCuentas pisa DESAFIO_CUENTA, no esta bandera
+      }).catch(function(e){
+        IDP_ELEGIR = false;
+        msg('msgLogin', e.message, 'err'); ver('vLogin');
+      });
+      return true;
+    }
+    if (r === 'sin_vincular' || r === 'sin_cuenta' || r === 'cancelada' || r === 'sesion' || r === 'error'){
+      msg('msgLogin', t('idp.' + r), 'err');
+      ver('vLogin');
+      return true;
+    }
+    return false;
+  }
 
   // ---------------- Alta de cuenta ----------------
 
@@ -532,6 +649,7 @@
   });
   pintarTipo();
   prepararCaptcha();
-  if (!leerHash()) ver('vLogin');
+  pintarIdp();
+  if (!leerResultadoIdp() && !leerHash()) ver('vLogin');
   window.addEventListener('hashchange', function(){ if (!leerHash()) ver('vLogin'); });
 })();
