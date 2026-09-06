@@ -4,7 +4,7 @@ import { verificarEnlaceFirma } from '../auth/enlace_firma';
 import { configDeProveedor, credencialDeProveedor, endpoint } from '../proveedores/catalogo';
 import {
   urlDeAutorizacion, emitirState, verificarState, canjearCodigo, leerIdentidad,
-  mismoDocumento, NIVEL_ALTO, type ConfigTuid,
+  mismoDocumento, nivelDesdeAcr, type ConfigTuid,
 } from '../proveedores/tuid/oauth';
 import { HttpError } from '../http/errors';
 
@@ -47,12 +47,15 @@ async function configConSecreto(trx: Parameters<typeof configDeProveedor>[0], re
   // La colección de Postman usa un solo {{host}}; el PDF sugiere hosts por
   // servicio. Se aceptan las dos formas: si no hay `auth`, se usa `host`.
   const base = cfg.endpoints.auth ? endpoint(cfg, 'auth') : endpoint(cfg, 'host');
+  // El nivel exigido es del operador (6/9). Vacío o ausente = no exigir.
+  const acr = cfg.parametros.acr_values;
   return {
     baseAuth: base,
     baseRecursos: cfg.endpoints.api ? endpoint(cfg, 'api') : base,
     clientId,
     clientSecret: await credencialDeProveedor(trx, cfg.id),
     redirectUri,
+    acrValues: typeof acr === 'string' && acr.trim() ? acr.trim() : undefined,
   };
 }
 
@@ -119,15 +122,14 @@ export async function completarVerificacion(codigo: string, state: string): Prom
     const token = await canjearCodigo(cfg, codigo);
     const id = await leerIdentidad(cfg, token);
 
-    // 3. ⚠ El nivel se vuelve a verificar. Lo pedimos alto en la ida; si tuID
-    //    autenticó con otro, anclar como «alto» sería escribir en el expediente
-    //    una afirmación que no ocurrió.
-    if (id.nivelDeclarado && id.nivelDeclarado !== NIVEL_ALTO) {
-      throw new HttpError(
-        409,
-        'La verificación se completó con un nivel de seguridad menor al requerido. Volvé a intentarla.',
-      );
-    }
+    // 3. ⚠ El nivel que se escribe es el que tuID DECLARA, no el que queramos.
+    //    Hasta el 6/9 la ida pedía `high` y acá se rechazaba cualquier otro; desde
+    //    el 6/9 no se pide nivel (decisión de Claudio) y se anota el declarado.
+    //    Si tuID no declara ninguno, queda 'alto': es la identificación con
+    //    cédula ante el IdP del Estado, que es lo que la decisión del 5/9 llamó
+    //    nivel alto. Si declara `medium` o `low`, se escribe eso — y la pantalla
+    //    y el motor (069) lo leen de la fila: nadie afirma de más.
+    const nivelGarantia = nivelDesdeAcr(id.nivelDeclarado) ?? 'alto';
 
     // 4. Sin documento no hay nada que anclar. No es un detalle que se pueda
     //    dejar pasar: un anclaje de nivel alto sin documento es una afirmación
@@ -186,22 +188,63 @@ export async function completarVerificacion(codigo: string, state: string): Prom
       }
     }
 
-    // 7. El anclaje. `idp_sujeto` es la llave estable de tuID: sirve para
-    //    reconocer a la misma persona la próxima vez, aunque cambie de correo.
-    const ins = await sql<{ id: string }>`
-      insert into anclaje_identidad
-        (identidad_id, tipo, valor_normalizado, metodo_prueba, nivel_garantia,
-         idp, idp_sujeto, documento_tipo, documento_numero_norm, pais, emisor)
-      values
-        (${part.identidad_id}::uuid, 'documento',
-         ${normalizarDoc(id.documento.numero)}, 'oidc', 'alto',
-         ${CODIGO_PROVEEDOR}, ${id.sub},
-         ${id.documento.tipo}, ${normalizarDoc(id.documento.numero)},
-         ${id.documento.pais}, ${cfg.baseAuth})
-      returning id
+    // 7. ⚠ UNA CÉDULA ES UNA SOLA IDENTIDAD en todo el sistema — es el índice
+    //    `anclaje_documento_uq` de la 003, y Claudio lo confirmó el 6/9 cuando
+    //    el segundo viaje real chocó contra él con un 500 mudo. Dos casos:
+    //
+    //    · La MISMA identidad ya tiene esta cédula anclada y vigente: no se
+    //      escribe nada y se vuelve con «ok». Verificarse dos veces no es un
+    //      error. (⚠ Tampoco se sube el nivel si el nuevo es mayor: los anclajes
+    //      son append-only para app_rw y el índice no admite dos vigentes. Es
+    //      deuda, no olvido: «subir de nivel un anclaje existente».)
+    //    · OTRA identidad la tiene: la RLS no nos deja verla, así que el select
+    //      de abajo no la encuentra y el insert choca con el índice. Ese choque
+    //      —código 23505— se traduce a un 409 legible, no a un 500.
+    const numero = normalizarDoc(id.documento.numero);
+    const previo = await sql<{ id: string; nivel_garantia: string }>`
+      select id, nivel_garantia from anclaje_identidad
+       where identidad_id = ${part.identidad_id}::uuid
+         and tipo = 'documento' and revocado_en is null
+         and documento_numero_norm = ${numero}
+       limit 1
     `.execute(trx);
+    if (previo.rows[0]) {
+      return {
+        ok: true as const,
+        anclajeId: previo.rows[0].id,
+        documento: id.documento,
+        nombre: id.nombre,
+        volverA: viaje.volverA,
+      };
+    }
 
-    const anclajeId = ins.rows[0]?.id;
+    // `idp_sujeto` es la llave estable de tuID: sirve para reconocer a la misma
+    // persona la próxima vez, aunque cambie de correo.
+    let anclajeId: string | undefined;
+    try {
+      const ins = await sql<{ id: string }>`
+        insert into anclaje_identidad
+          (identidad_id, tipo, valor_normalizado, metodo_prueba, nivel_garantia,
+           idp, idp_sujeto, documento_tipo, documento_numero_norm, pais, emisor)
+        values
+          (${part.identidad_id}::uuid, 'documento',
+           ${numero}, 'oidc', ${nivelGarantia},
+           ${CODIGO_PROVEEDOR}, ${id.sub},
+           ${id.documento.tipo}, ${numero},
+           ${id.documento.pais}, ${cfg.baseAuth})
+        returning id
+      `.execute(trx);
+      anclajeId = ins.rows[0]?.id;
+    } catch (e) {
+      if ((e as { code?: string })?.code === '23505') {
+        throw new HttpError(
+          409,
+          'Esa cédula ya está vinculada a otra cuenta de MiFirma. Entrá con esa cuenta, ' +
+            'o pedile al emisor que te envíe el documento al correo de esa cuenta.',
+        );
+      }
+      throw e;
+    }
     if (!anclajeId) throw new HttpError(500, 'No se pudo registrar la verificación.');
 
     return {

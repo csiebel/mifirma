@@ -1094,6 +1094,24 @@
       '<div style="margin-top:14px"><label>Client ID</label>' +
       '<input id="pvCli" value="' + esc(params.client_id || '') + '" /></div>' +
 
+      // El nivel de autenticación que se le exige al proveedor de identidad.
+      // Configuración del operador, no código (6/9). Vacío = no exigir: el
+      // proveedor ofrece todos sus métodos, usuario y contraseña incluidos.
+      '<div style="margin-top:14px"><label>Nivel de autenticación exigido (identidad)</label>' +
+      '<select id="pvAcr">' +
+      [['', 'Sin exigir — el proveedor ofrece todos sus métodos'],
+       ['urn:safelayer:tws:policies:authentication:level:low', 'Bajo (low)'],
+       ['urn:safelayer:tws:policies:authentication:level:medium', 'Medio (medium)'],
+       ['urn:safelayer:tws:policies:authentication:level:high', 'Alto (high) — cédula, app móvil o cara'],
+       ['urn:safelayer:tws:policies:authentication:level:very_high', 'Muy alto (very_high)']]
+        .map(function (o) {
+          return '<option value="' + esc(o[0]) + '"' + ((params.acr_values || '') === o[0] ? ' selected' : '') + '>' +
+                 esc(o[1]) + '</option>';
+        }).join('') +
+      '</select>' +
+      '<span class="mut">Lo que se escribe en el expediente es el nivel que el proveedor DECLARA al volver, ' +
+      'no éste. Esto sólo decide qué métodos le ofrece al firmante.</span></div>' +
+
       '<div style="margin-top:14px"><label>Credencial (client secret)</label>' +
       (p && p.tiene_credencial
         ? '<div class="mut" style="margin-bottom:6px">Cargada el ' +
@@ -1140,7 +1158,7 @@
         nombre_mostrado: $('pvNom').value.trim(),
         entorno: $('pvEnt').value.trim(),
         endpoints: endpoints,
-        parametros: { client_id: $('pvCli').value.trim() },
+        parametros: { client_id: $('pvCli').value.trim(), acr_values: $('pvAcr').value },
         orden_preferencia: Number($('pvOrd').value || 100),
         credencial: cred ? cred : undefined,
       });

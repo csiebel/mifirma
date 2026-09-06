@@ -44,17 +44,43 @@ export interface ConfigTuid {
   clientSecret: string;
   /** Registrado en TuID: tiene que coincidir exactamente, carácter por carácter. */
   redirectUri: string;
+  /**
+   * Nivel de autenticación que se le EXIGE a TuID (`acr_values`), como URN
+   * completa de TrustedX — o undefined para no exigir ninguno y que TuID ofrezca
+   * todos sus métodos (usuario y contraseña incluidos). Lo decide el operador
+   * en `proveedor_firma.parametros.acr_values` (6/9): es configuración, no código.
+   */
+  acrValues?: string;
 }
 
 /**
- * ⚠ EL NIVEL LO PIDE EL SERVIDOR, NO EL NAVEGADOR
+ * ⚠ EL NIVEL EXIGIDO LO CONFIGURA EL OPERADOR; EL ESCRITO ES EL QUE TUID DECLARA (6/9)
  *
- * TrustedX define cuatro niveles de autenticación. Para anclar una identidad con
- * validez legal pedimos `high`: el nivel es parte de lo que después se afirma en
- * el expediente, así que no puede quedar a criterio de quien arma la URL en el
- * navegador. Se pide acá y se VUELVE A VERIFICAR en la respuesta.
+ * TrustedX define cuatro niveles de autenticación (low, medium, high, very_high).
+ * Hasta el 6/9 la ida pedía `high` fijo en este archivo; Claudio pidió que ese
+ * parámetro lo pueda cambiar el operador — y que sin él TuID ofrezca todos sus
+ * métodos, usuario y contraseña incluidos. Va en `parametros.acr_values` del
+ * catálogo y llega en `ConfigTuid.acrValues`.
+ *
+ * Lo que NO cambia es la regla de fondo: el nivel que se escribe en el
+ * expediente es el que tuID DECLARA en la respuesta (`acr`), traducido con
+ * `nivelDesdeAcr()` — nunca uno que decidamos nosotros.
  */
 export const NIVEL_ALTO = 'urn:safelayer:tws:policies:authentication:level:high';
+
+/**
+ * De lo que TuID declara a lo que admite `anclaje_identidad.nivel_garantia`
+ * ('bajo' | 'sustancial' | 'alto'). Sin `acr` declarado devuelve null: quien
+ * llama decide qué hacer con la ausencia — no este módulo.
+ */
+export function nivelDesdeAcr(acr: string | undefined): 'bajo' | 'sustancial' | 'alto' | null {
+  if (!acr) return null;
+  const nivel = acr.split(':').pop();
+  if (nivel === 'high' || nivel === 'very_high') return 'alto';
+  if (nivel === 'medium' || nivel === 'substantial') return 'sustancial';
+  if (nivel === 'low') return 'bajo';
+  return null;
+}
 
 /** Alcances de la colección. `full_profile` es el que trae el documento de identidad. */
 const SCOPES_IDENTIDAD = 'profile identity_profile full_profile';
@@ -128,7 +154,8 @@ export function urlDeAutorizacion(cfg: ConfigTuid, state: string): string {
   u.searchParams.set('scope', SCOPES_IDENTIDAD);
   u.searchParams.set('redirect_uri', cfg.redirectUri);
   u.searchParams.set('state', state);
-  u.searchParams.set('acr_values', NIVEL_ALTO);
+  // El nivel exigido lo pone el operador; sin él, TuID ofrece todos sus métodos.
+  if (cfg.acrValues) u.searchParams.set('acr_values', cfg.acrValues);
   return u.toString();
 }
 
@@ -163,8 +190,16 @@ export async function canjearCodigo(cfg: ConfigTuid, codigo: string): Promise<To
 
   if (!r.ok) {
     // ⚠ El cuerpo del error de TrustedX puede repetir el pedido, y el pedido
-    // lleva el código. No se registra: se registra el estado y nada más.
-    throw new HttpError(502, `TuID rechazó el canje del código (HTTP ${r.status}).`);
+    // lleva el código. No se registra entero: sólo los dos campos estándar de
+    // OAuth (`error`, `error_description`), que dicen la causa —invalid_client,
+    // invalid_grant— y no llevan el código. (6/9: un 401 mudo costó una hora.)
+    let motivo = '';
+    try {
+      const e = (await r.json()) as { error?: unknown; error_description?: unknown };
+      const partes = [e.error, e.error_description].filter((x): x is string => typeof x === 'string' && x.length < 200);
+      motivo = partes.length ? ` — ${partes.join(': ')}` : '';
+    } catch { /* cuerpo no JSON: se calla */ }
+    throw new HttpError(502, `TuID rechazó el canje del código (HTTP ${r.status})${motivo}.`);
   }
 
   const j = (await r.json()) as { access_token?: string; expires_in?: number };

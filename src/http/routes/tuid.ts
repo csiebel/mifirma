@@ -41,12 +41,17 @@ export function registrarRutasTuid(app: FastifyInstance) {
       })
       .parse(req.query);
 
-    const base = (process.env.APP_BASE_URL || 'http://127.0.0.1:3000').replace(/\/+$/, '');
+    // ⚠ Las redirecciones de vuelta son RELATIVAS (6/9). `APP_BASE_URL` es lo
+    // que se le declara a tuID como redirect_uri y tiene que ser https (lo exige
+    // tuID); pero la pantalla a la que volvemos es la nuestra, en el mismo host
+    // que atendió este pedido — que en la Mac es http. Con una URL absoluta
+    // armada desde APP_BASE_URL, en desarrollo el navegador iba a https://localhost
+    // y se quedaba en la página anterior.
 
     // El firmante apretó «cancelar» en tuID, o tuID rechazó. No es un error
     // nuestro y no merece una pantalla de error: vuelve a firmar sin verificar.
     if (q.error) {
-      return reply.redirect(`${base}/firmar?verificacion=cancelada`);
+      return reply.redirect('/firmar?verificacion=cancelada');
     }
     if (!q.code || !q.state) {
       throw new HttpError(400, 'Respuesta incompleta de tuID.');
@@ -57,13 +62,18 @@ export function registrarRutasTuid(app: FastifyInstance) {
       // ⚠ Redirección sin el código ni el state en la URL. Lo que se lleva el
       // navegador es el hecho, no las credenciales del viaje.
       const destino = r.volverA && r.volverA.startsWith('/') ? r.volverA : '/firmar';
-      return reply.redirect(`${base}${destino}?verificacion=ok`);
+      return reply.redirect(`${destino}?verificacion=ok`);
     } catch (e) {
       // El rechazo por documento que no coincide (T6) es el caso que más va a
       // pasar de verdad, y no es un error técnico: es una respuesta del sistema.
       // Va a la pantalla con un motivo legible, no a un 500.
       if (e instanceof HttpError && e.statusCode === 403) {
-        return reply.redirect(`${base}/firmar?verificacion=documento_distinto`);
+        return reply.redirect('/firmar?verificacion=documento_distinto');
+      }
+      // Una cédula es una sola identidad (6/9): la cédula ya está en otra
+      // cuenta. Tampoco es un error técnico: es una respuesta del sistema.
+      if (e instanceof HttpError && e.statusCode === 409) {
+        return reply.redirect('/firmar?verificacion=cedula_en_otra_cuenta');
       }
       throw e;
     }

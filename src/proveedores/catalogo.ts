@@ -1,6 +1,6 @@
 import { sql, type Transaction } from 'kysely';
 import type { DB } from '../db/schema';
-import { descifrar } from '../operador/cripto';
+import { descifrar, huellaClave } from '../operador/cripto';
 import { HttpError } from '../http/errors';
 
 /**
@@ -109,15 +109,21 @@ export async function credencialDeProveedor(
   if (!cif) {
     throw new HttpError(503, 'El proveedor no tiene credenciales cargadas. Cargalas desde la consola del operador.');
   }
-  try {
-    return descifrar(cif);
-  } catch {
-    // ⚠ Sin detalle. Un error de descifrado sólo puede significar dos cosas —la
-    // clave cambió o el dato está corrupto— y las dos se diagnostican mirando la
-    // huella de la clave, no el mensaje. Decir más es contarle a un atacante si
-    // el formato era válido.
-    throw new HttpError(503, 'No se pudo descifrar la credencial del proveedor.');
+  // ⚠ `descifrar()` NO tira: con una clave distinta devuelve '' en silencio
+  // (6/9). Ese vacío viajaba como client_secret y tuID contestaba 401 —un error
+  // de un tercero por una causa nuestra. Acá se corta: un blob que existe y
+  // descifra a vacío es «la clave de este servidor no es la que cifró», y lo
+  // que ayuda a arreglarlo es la huella de la clave en uso, que ya se muestra
+  // en la consola. No se dice más que eso.
+  const secreto = descifrar(cif);
+  if (!secreto) {
+    throw new HttpError(
+      503,
+      `La credencial del proveedor no se puede descifrar con la clave de este servidor (huella ${huellaClave()}). ` +
+        'Cargala de nuevo desde la consola, o poné en este servidor la clave con la que se cargó.',
+    );
   }
+  return secreto;
 }
 
 /** Una URL del ambiente activo, o un error que dice cuál falta. */

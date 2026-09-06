@@ -180,10 +180,16 @@ export async function abrirParaFirmar(
       if (p) verificacionProveedor = { codigo: p.codigo, nombre: p.nombre_mostrado };
     }
 
-    const mejor = await sql<{ nivel_garantia: string }>`
-      select nivel_garantia from app.mejor_anclaje(${e.identidadId}::uuid)
+    // «Verificada» = el mejor anclaje vigente es de un proveedor de identidad
+    // (`oidc`), del nivel que sea. El 6/9 el primer viaje real volvió con
+    // `sustancial` (usuario y contraseña en tuID), y la pantalla —que sólo
+    // reconocía «alto»— volvió a ofrecer verificarse. El nivel se devuelve
+    // aparte para que la tarjeta lo DIGA, en vez de esconderlo.
+    const mejor = await sql<{ nivel_garantia: string; metodo_prueba: string }>`
+      select nivel_garantia, metodo_prueba from app.mejor_anclaje(${e.identidadId}::uuid)
     `.execute(trx);
-    const identidadVerificada = mejor.rows[0]?.nivel_garantia === 'alto';
+    const identidadVerificada = mejor.rows[0]?.metodo_prueba === 'oidc';
+    const identidadNivel = identidadVerificada ? mejor.rows[0]!.nivel_garantia : null;
 
     return {
       titulo: f.titulo,
@@ -199,6 +205,7 @@ export async function abrirParaFirmar(
       verificacion_disponible: verificacionProveedor !== null,
       verificacion_proveedor: verificacionProveedor,
       identidad_verificada: identidadVerificada,
+      identidad_nivel: identidadNivel,
     };
   });
 }

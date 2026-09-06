@@ -538,7 +538,9 @@
         '<div class="op">Identidad</div>' +
         '<h2><span class="tick"><svg viewBox="0 0 24 24"><path d="M5 13l4 4L19 7"/></svg></span>' +
         'Verificada' + (p ? ' con ' + esc(p.nombre) : '') + '</h2>' +
-        '<p>Quedó en el expediente de este documento. Se va a usar cuando firmes.</p>' +
+        '<p>Quedó en el expediente de este documento, con nivel <b>' +
+        esc({ bajo: 'básico', sustancial: 'sustancial', alto: 'alto' }[d.identidad_nivel] || d.identidad_nivel || '') +
+        '</b>. Se va a usar cuando firmes.</p>' +
         '</div>';
       return;
     }
@@ -556,6 +558,13 @@
       aviso = '<div class="msg err">La cédula de esa cuenta de ' + esc(nombre) +
               ' no es la del firmante de este documento. No se registró nada. ' +
               'Si el número está mal en el documento, avisale a quien te lo envió.</div>';
+      rotulo = 'Probar con otra cuenta';
+    } else if (VUELTA === 'cedula_en_otra_cuenta') {
+      // Una cédula es una sola identidad (6/9). No hay nada que reintentar con
+      // la misma cuenta de tuID: el aviso explica y el botón queda por si se
+      // equivocó de cuenta.
+      aviso = '<div class="msg err">Esa cédula ya está vinculada a otra cuenta de MiFirma. ' +
+              'Entrá con esa cuenta, o pedile al emisor que te envíe el documento al correo de esa cuenta.</div>';
       rotulo = 'Probar con otra cuenta';
     } else if (VUELTA === 'ok') {
       aviso = '<div class="msg aviso">Volviste de ' + esc(nombre) +
