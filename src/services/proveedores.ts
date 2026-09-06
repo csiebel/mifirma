@@ -164,9 +164,30 @@ export async function guardarProveedor(d: DatosProveedor) {
            endpoints         = excluded.endpoints,
            parametros        = excluded.parametros,
            orden_preferencia = excluded.orden_preferencia,
-           credenciales_cif      = excluded.credenciales_cif,
-           credencial_puesta_en  = excluded.credencial_puesta_en,
-           credencial_puesta_por = excluded.credencial_puesta_por,
+           -- ATENCION: los tres van como PARAMETRO, no como excluded. Corregido
+           -- el 6/9 de noche, y es la SEGUNDA mitad del mismo defecto de la
+           -- manana.
+           --
+           -- excluded no es una constante: PostgreSQL exige permiso de SELECT
+           -- sobre toda columna de la tabla destino referenciada en un
+           -- ON CONFLICT DO UPDATE, y credenciales_cif no lo tiene para nadie,
+           -- a proposito (067). O sea que este set fallaba con
+           -- "permission denied for table proveedor_firma" -- igual que el
+           -- coalesce que se saco a la manana, y por el mismo motivo.
+           --
+           -- A la manana se arreglo la rama SIN credencial nueva y se probo esa.
+           -- Esta, la que carga una credencial, NUNCA SE EJECUTO: la de tuID se
+           -- habia cargado con el script cargar_credencial.ts, que entra como
+           -- superusuario y saltea la RLS y los grants. Cargar una credencial
+           -- desde la consola no funciono nunca, desde el dia que nacio la
+           -- pantalla, y se descubrio el 6/9 intentando recargarla en produccion.
+           --
+           -- Un parametro literal no lee ninguna columna, asi que no pide
+           -- permiso de nada. Los otros excluded. de arriba se quedan: esas
+           -- columnas si tienen lectura.
+           credenciales_cif      = ${cif},
+           credencial_puesta_en  = now(),
+           credencial_puesta_por = ${`${d.porQuien} (${huellaClave()})`},
            actualizado_en = now()
         returning id
       `.execute(trx)
