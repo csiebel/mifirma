@@ -29,6 +29,12 @@
   // 'cancelada' | 'documento_distinto'. Se lee de `?verificacion=` al arrancar y
   // la barra se limpia enseguida, igual que se limpia el token.
   var VUELTA = '';
+  // Con qué volvió del viaje de AUTORIZAR LA FIRMA con tuID (`?firma_tuid=`),
+  // y si la próxima firma va con la clave del titular. Lo segundo lo decide el
+  // SERVIDOR (`firma_tuid_autorizada` de /firmar/abrir): la pantalla nunca
+  // afirma que hay autorización por haber vuelto con `?firma_tuid=ok`.
+  var VUELTA_FIRMA = '';
+  var FIRMA_CON_TUID = false;
   // El tipo de marca que se coloca con el próximo toque. Vive acá, en la
   // barra que lo muestra, y el visor lo pregunta. Una sola copia.
   var TIPO_MARCA = 'firma';
@@ -197,6 +203,7 @@
       '<div id="cajaCaracter"></div>' +
       '<div id="cajaRubrica"></div>' +
       '<div id="cajaIdentidad"></div>' +
+      '<div id="cajaFirmaTuid"></div>' +
 
       '<label class="consent" for="fConsent">' +
       '<input type="checkbox" id="fConsent" />' +
@@ -590,6 +597,92 @@
     $('fVerificar').addEventListener('click', verificarIdentidad);
   }
 
+  /* -------------------------------------------------------------------------
+     Firmar con el certificado del titular en tuID (6/9, con fable).
+
+     Es OTRA tarjeta, hermana de la de identidad, y hace otra cosa: no prueba
+     quién sos, AUTORIZA que tuID firme con tu clave. El único botón azul sigue
+     siendo Firmar; lo que cambia es con qué clave firma, y eso lo decide esta
+     tarjeta. Cuatro estados: sin autorizar, autorizada (verde), cancelada /
+     sin certificado / cédula distinta / error (avisos), y el quinto es que no
+     exista (sin proveedor para el país).
+     ------------------------------------------------------------------------- */
+  function pintarFirmaTuid() {
+    var caja = $('cajaFirmaTuid');
+    if (!caja) return;
+    var d = DATOS;
+    var p = d.verificacion_proveedor || null;
+    var nombre = (p && p.nombre) || 'tu proveedor de identidad';
+    if (!d.firma_tuid_disponible || !p) { caja.innerHTML = ''; FIRMA_CON_TUID = false; return; }
+
+    // ⚠ «Autorizada» lo dice el SERVIDOR, no la barra. Volver con
+    // `?firma_tuid=ok` y que el servidor diga que no hay autorización es un
+    // estado posible (venció, reinicio) y se muestra como tal.
+    if (d.firma_tuid_autorizada) {
+      FIRMA_CON_TUID = true;
+      caja.innerHTML =
+        '<div class="identidad hecha">' +
+        '<div class="op">Firma</div>' +
+        '<h2><span class="tick"><svg viewBox="0 0 24 24"><path d="M5 13l4 4L19 7"/></svg></span>' +
+        'Listo para firmar con ' + esc(nombre) + '</h2>' +
+        '<p>Cuando aprietes <b>Firmar</b>, la firma la hace ' + esc(nombre) +
+        ' con tu certificado, en vez del sello de la plataforma. Tenés diez minutos.</p>' +
+        '</div>';
+      return;
+    }
+    FIRMA_CON_TUID = false;
+
+    var aviso = '';
+    var rotulo = 'Autorizar en ' + esc(nombre);
+    if (VUELTA_FIRMA === 'cancelada') {
+      aviso = '<div class="msg aviso">No se completó la autorización en ' + esc(nombre) +
+              '. Podés firmar igual con firma simple, o intentarlo de nuevo.</div>';
+      rotulo = 'Volver a intentar';
+    } else if (VUELTA_FIRMA === 'sin_certificado') {
+      aviso = '<div class="msg aviso">Tu cuenta de ' + esc(nombre) +
+              ' no tiene un certificado para firmar. <b>Podés firmar igual con firma simple</b>, ' +
+              'apretando Firmar.</div>';
+    } else if (VUELTA_FIRMA === 'documento_distinto') {
+      aviso = '<div class="msg err">El certificado de esa cuenta de ' + esc(nombre) +
+              ' no es del firmante de este documento. No se autorizó nada. ' +
+              'Si el número está mal en el documento, avisale a quien te lo envió.</div>';
+      rotulo = 'Probar con otra cuenta';
+    } else if (VUELTA_FIRMA === 'error') {
+      aviso = '<div class="msg err">No pudimos completar la autorización con ' + esc(nombre) +
+              '. Podés intentarlo de nuevo, o firmar con firma simple.</div>';
+      rotulo = 'Volver a intentar';
+    } else if (VUELTA_FIRMA === 'ok') {
+      aviso = '<div class="msg aviso">Volviste de ' + esc(nombre) +
+              ' pero la autorización ya no está (vence a los diez minutos). Podés pedirla de nuevo.</div>';
+      rotulo = 'Volver a autorizar';
+    }
+
+    caja.innerHTML =
+      '<div class="identidad">' + aviso +
+      '<div class="op">Opcional</div>' +
+      '<h2>Firmá con tu certificado de ' + esc(nombre) + '</h2>' +
+      '<p>Tu firma la hace ' + esc(nombre) + ' con tu clave, en vez del sello de la plataforma. ' +
+      'Es firma avanzada. El documento no sale de acá: a ' + esc(nombre) + ' sólo viaja una huella.</p>' +
+      '<button type="button" class="btn" id="fAutorizarTuid">' + rotulo + '</button>' +
+      '<p class="nota">Te lleva a ' + esc(nombre) + ' y volvés acá. Después apretás Firmar.</p>' +
+      '</div>';
+    $('fAutorizarTuid').addEventListener('click', autorizarFirmaTuid);
+  }
+
+  async function autorizarFirmaTuid() {
+    var b = $('fAutorizarTuid');
+    if (!b) return;
+    b.disabled = true;
+    try {
+      var r = await api('/firmar/tuid/iniciar', {});
+      if (!r || !r.url) throw new Error('El proveedor no devolvió a dónde ir.');
+      location.href = r.url;
+    } catch (e) {
+      msg(e.message, 'err');
+      b.disabled = false;
+    }
+  }
+
   async function verificarIdentidad() {
     var b = $('fVerificar');
     if (!b) return;
@@ -714,6 +807,10 @@
         nombre_escrito: $('fNombre').value.trim() || undefined,
         zona_horaria: zonaHoraria(),
         huella: huella(),
+        // Explícito: sólo si la tarjeta de tuID está en verde. Si la
+        // autorización venció en el medio, el servidor contesta 409 con motivo
+        // y NO cae al sello en silencio.
+        con_tuid: FIRMA_CON_TUID || undefined,
       });
       pintarListo(
         'Listo, firmaste',
@@ -843,6 +940,7 @@
     // Con qué volvió del proveedor de identidad, si volvió. Se lee ANTES de
     // limpiar la barra: la línea de abajo también borra la query.
     try { VUELTA = new URLSearchParams(location.search).get('verificacion') || ''; } catch (e) {}
+    try { VUELTA_FIRMA = new URLSearchParams(location.search).get('firma_tuid') || ''; } catch (e) {}
 
     // El token ya está en la cookie: se saca de la barra de direcciones para que
     // no quede en el historial ni se comparta sin querer al copiar la URL.
@@ -851,6 +949,7 @@
     pintarCabecera();
     pintarPanel();
     pintarIdentidad();
+    pintarFirmaTuid();
 
     // El visor va DESPUÉS del panel: montar pdf.js tarda —descarga el worker y
     // mide todas las hojas— y no hay motivo para que el formulario espere.

@@ -85,6 +85,25 @@ export function nivelDesdeAcr(acr: string | undefined): 'bajo' | 'sustancial' | 
 /** Alcances de la colección. `full_profile` es el que trae el documento de identidad. */
 const SCOPES_IDENTIDAD = 'profile identity_profile full_profile';
 
+/**
+ * Alcances para FIRMAR con la clave del titular, de la colección de Postman
+ * («GetCode Signing») y del propio recurso: cada identidad de firma declara en
+ * `links["Signatures.create.server.raw"].auth.oauth2.scopes` qué scope exige,
+ * y el ejemplo del PDF (§5.3.1.4.6) dice `urn:eidas:sign:identity:use:server`.
+ *
+ * ⚠ El texto del PDF (§5.2.1.4) dice `urn:safelayer:eidas:sign:identity:use:server`
+ * «por defecto». Son dos URN distintas. Se usa la que declara el recurso y la
+ * que usa la colección, que son las medidas; si tuID rechazara el scope, el
+ * primer sospechoso es esta línea.
+ *
+ * `urn:safelayer:eidas:sign:identity:profile` es para LISTAR las identidades
+ * de firma (§5.3.3.3.2); `profile` para saber quién es el usuario.
+ */
+// ⚠ Lleva TAMBIÉN los de identidad (`identity_profile full_profile`): para
+// firmar hace falta saber de quién es la clave, porque si el emisor exigió
+// una cédula, la firma tiene que ser de ESA cédula (T6 aplicada a la firma).
+const SCOPES_FIRMA = 'profile identity_profile full_profile urn:eidas:sign:identity:use:server urn:safelayer:eidas:sign:identity:profile';
+
 // ═══════════════════════════════════════════════════════════════════════════
 // El `state`, que la colección de Postman no trae
 //
@@ -114,15 +133,28 @@ function secretoState(): Uint8Array {
   return new TextEncoder().encode(s);
 }
 
-export async function emitirState(v: ViajeTuid): Promise<string> {
-  return new SignJWT({ oid: v.otorgamientoId, pid: v.participacionId, volver: v.volverA ?? null, proposito: 'tuid' })
+/**
+ * Los dos propósitos de un viaje a tuID que arranca desde el enlace de firma.
+ *
+ *   · 'tuid'       → VERIFICAR la identidad: la vuelta escribe un anclaje (T8).
+ *   · 'tuid_firma' → AUTORIZAR LA FIRMA con la clave del titular: la vuelta
+ *                    deja una autorización efímera que el motor consume al firmar.
+ *
+ * Son sobres distintos y cada vuelta exige el suyo: uno de verificación no
+ * sirve para firmar, ni al revés. (El del login federado es otro más, 'idp',
+ * y vive en services/auth_idp.ts.)
+ */
+export type PropositoTuid = 'tuid' | 'tuid_firma';
+
+export async function emitirState(v: ViajeTuid, proposito: PropositoTuid = 'tuid'): Promise<string> {
+  return new SignJWT({ oid: v.otorgamientoId, pid: v.participacionId, volver: v.volverA ?? null, proposito })
     .setProtectedHeader({ alg: 'HS256' })
     .setIssuedAt()
     .setExpirationTime(TTL_STATE)
     .sign(secretoState());
 }
 
-export async function verificarState(state: string): Promise<ViajeTuid> {
+export async function verificarState(state: string, proposito: PropositoTuid = 'tuid'): Promise<ViajeTuid> {
   let payload;
   try {
     ({ payload } = await jwtVerify(state, secretoState()));
@@ -132,8 +164,9 @@ export async function verificarState(state: string): Promise<ViajeTuid> {
     throw new HttpError(401, 'La verificación de identidad expiró. Volvé a intentarla.');
   }
   // El propósito va adentro y se verifica: sin esto, un enlace de firma serviría
-  // como `state`, que es la misma trampa que evita `enlace_firma.ts`.
-  if (payload.proposito !== 'tuid') throw new HttpError(401, 'Estado inválido.');
+  // como `state`, que es la misma trampa que evita `enlace_firma.ts`. Y un sobre
+  // de verificación no sirve para autorizar una firma, ni al revés.
+  if (payload.proposito !== proposito) throw new HttpError(401, 'Estado inválido.');
   const oid = payload.oid, pid = payload.pid;
   if (typeof oid !== 'string' || typeof pid !== 'string') throw new HttpError(401, 'Estado incompleto.');
   return {
@@ -143,15 +176,37 @@ export async function verificarState(state: string): Promise<ViajeTuid> {
   };
 }
 
+/**
+ * Qué propósito trae un `state`, o `null` si no es nuestro.
+ *
+ * Es lo que usa la vuelta compartida (`routes/tuid.ts`) para repartir entre la
+ * verificación y la autorización de firma sin probar un verificador tras otro.
+ * Verifica la firma del sobre: un `state` ajeno o alterado devuelve `null`, no
+ * un propósito.
+ */
+export async function propositoDelState(state: string): Promise<PropositoTuid | null> {
+  try {
+    const { payload } = await jwtVerify(state, secretoState());
+    return payload.proposito === 'tuid' || payload.proposito === 'tuid_firma' ? payload.proposito : null;
+  } catch {
+    return null;
+  }
+}
+
 // ═══════════════════════════════════════════════════════════════════════════
 // Paso 1 — a dónde mandamos al firmante
 // ═══════════════════════════════════════════════════════════════════════════
 
-export function urlDeAutorizacion(cfg: ConfigTuid, state: string): string {
+/**
+ * `para` decide qué se le pide a tuID: 'identidad' (verificar quién es) o
+ * 'firma' (además, permiso para usar su clave). Pedir el de firma para
+ * verificar sería pedir de más; pedir sólo identidad para firmar no alcanza.
+ */
+export function urlDeAutorizacion(cfg: ConfigTuid, state: string, para: 'identidad' | 'firma' = 'identidad'): string {
   const u = new URL(`${cfg.baseAuth.replace(/\/+$/, '')}/trustedx-authserver/oauth/as-principal`);
   u.searchParams.set('response_type', 'code');
   u.searchParams.set('client_id', cfg.clientId);
-  u.searchParams.set('scope', SCOPES_IDENTIDAD);
+  u.searchParams.set('scope', para === 'firma' ? SCOPES_FIRMA : SCOPES_IDENTIDAD);
   u.searchParams.set('redirect_uri', cfg.redirectUri);
   u.searchParams.set('state', state);
   // El nivel exigido lo pone el operador; sin él, TuID ofrece todos sus métodos.
@@ -295,4 +350,122 @@ export function mismoDocumento(a: string | null | undefined, b: string | null | 
   if (!a || !b) return false;
   const limpiar = (s: string) => s.replace(/[.\s-]/g, '').toUpperCase();
   return limpiar(a) === limpiar(b);
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
+// Paso 4 — la identidad de FIRMA del titular
+//
+// De la colección («Obtain User Signing Identities») y del PDF §5.3. Una
+// identidad de firma es «una clave custodiada por tuID más su certificado»:
+// es lo que firma en nombre del titular. Con `labels=server` se piden sólo las
+// que tuID puede usar desde el servidor, que es lo único que sirve acá.
+// ═══════════════════════════════════════════════════════════════════════════
+
+export interface IdentidadDeFirma {
+  id: string;
+  /** El certificado del titular, DER. Es lo que va dentro del CMS. */
+  certificadoDer: Buffer;
+  /** Lo que tuID dice de esta identidad: 'enabled' es la única que sirve. */
+  estado: string;
+  /** Las etiquetas de tuID («server», «cualificado», «x509:keyUsage:…»). Van al expediente tal cual. */
+  etiquetas: string[];
+}
+
+export async function listarIdentidadesDeFirma(cfg: ConfigTuid, token: TokenTuid): Promise<IdentidadDeFirma[]> {
+  const r = await fetch(`${cfg.baseRecursos.replace(/\/+$/, '')}/trustedx-resources/esigp/v1/sign_identities?labels=server`, {
+    headers: { Authorization: `Bearer ${token.accessToken}` },
+    signal: AbortSignal.timeout(15_000),
+  });
+  if (!r.ok) throw new HttpError(502, `TuID no devolvió las identidades de firma (HTTP ${r.status}).`);
+
+  // ⚠ La forma exacta de la LISTA no está en el PDF: está la de UNA identidad
+  // (§5.3.3.4.3) y la del listado por grupos (§5.3.1.4.6). Se aceptan las dos
+  // envolturas razonables —`{ sign_identities: [...] }` y un arreglo pelado— y
+  // si viene otra cosa se dice, en vez de devolver vacío y que parezca «no
+  // tiene certificado».
+  const j = (await r.json()) as unknown;
+  const lista: unknown[] = Array.isArray(j)
+    ? j
+    : j && typeof j === 'object' && Array.isArray((j as { sign_identities?: unknown }).sign_identities)
+      ? ((j as { sign_identities: unknown[] }).sign_identities)
+      : [];
+  if (!Array.isArray(j) && lista.length === 0 && j && typeof j === 'object' && !('sign_identities' in (j as object))) {
+    throw new HttpError(502, `TuID devolvió las identidades de firma en una forma que no reconocemos (claves: ${Object.keys(j as object).join(', ')}).`);
+  }
+
+  const salida: IdentidadDeFirma[] = [];
+  for (const x of lista) {
+    if (!x || typeof x !== 'object') continue;
+    const o = x as Record<string, unknown>;
+    const id = str(o.id);
+    const det = (o.details ?? {}) as Record<string, unknown>;
+    const cert = str(det.certificate);
+    if (!id || !cert) continue;
+    const estado = ((o.status ?? {}) as Record<string, unknown>).value;
+    salida.push({
+      id,
+      // Puede venir con saltos de línea (así lo imprime el PDF): se limpian.
+      certificadoDer: Buffer.from(cert.replace(/\s+/g, ''), 'base64'),
+      estado: typeof estado === 'string' ? estado : 'desconocido',
+      etiquetas: Array.isArray(o.labels) ? (o.labels as unknown[]).filter((l): l is string => typeof l === 'string') : [],
+    });
+  }
+  return salida;
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
+// Paso 5 — la firma, sobre un hash
+//
+// PDF §5.2.1: `POST /esigp/v1/signatures/server/raw` con `digest_value` (el
+// hash en base64), `signature_algorithm` y `sign_identity_id`. Devuelve «el
+// valor binario de la firma»: la firma CRUDA (PKCS#1 v1.5), no un CMS. El CMS
+// —los atributos firmados, el certificado, el envoltorio— lo arma el adaptador
+// (`firma/adaptadores/tuid.ts`). Esto es lo que hace que EL DOCUMENTO NUNCA
+// SALGA DEL SERVIDOR: lo único que viaja a tuID son 32 bytes.
+// ═══════════════════════════════════════════════════════════════════════════
+
+/**
+ * Firma un hash SHA-256 con la identidad de firma del titular.
+ *
+ * ⚠ `digest` son los 32 BYTES del hash, no su hexadecimal. El ejemplo de la
+ * colección de Postman manda base64 de una cadena hexadecimal —y sirve de
+ * ilustración, no de referencia—; el del PDF (§5.2.2, lote) manda 32 bytes.
+ * Con el hexadecimal tuID firmaría OTRO valor y la firma verificaría mal sin
+ * ningún error de por medio.
+ */
+export async function firmarHash(
+  cfg: ConfigTuid,
+  token: TokenTuid,
+  signIdentityId: string,
+  digestSha256: Buffer,
+): Promise<Buffer> {
+  if (digestSha256.length !== 32) {
+    throw new HttpError(500, `firmarHash espera los 32 bytes de un SHA-256 y recibió ${digestSha256.length}.`);
+  }
+  const r = await fetch(`${cfg.baseRecursos.replace(/\/+$/, '')}/trustedx-resources/esigp/v1/signatures/server/raw`, {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      Authorization: `Bearer ${token.accessToken}`,
+    },
+    body: JSON.stringify({
+      digest_value: digestSha256.toString('base64'),
+      signature_algorithm: 'rsa-sha256',
+      sign_identity_id: signIdentityId,
+    }),
+    signal: AbortSignal.timeout(20_000),
+  });
+  if (!r.ok) {
+    // Igual que en el canje: los dos campos estándar del error y nada más.
+    let motivo = '';
+    try {
+      const e = (await r.json()) as { error?: unknown; error_description?: unknown };
+      const partes = [e.error, e.error_description].filter((x): x is string => typeof x === 'string' && x.length < 200);
+      motivo = partes.length ? ` — ${partes.join(': ')}` : '';
+    } catch { /* cuerpo no JSON */ }
+    throw new HttpError(502, `TuID no pudo firmar (HTTP ${r.status})${motivo}.`);
+  }
+  const firma = Buffer.from(await r.arrayBuffer());
+  if (firma.length < 64) throw new HttpError(502, `TuID devolvió una firma de ${firma.length} bytes, que no puede ser válida.`);
+  return firma;
 }

@@ -1,6 +1,8 @@
 import type { FastifyInstance } from 'fastify';
 import { z } from 'zod';
 import { completarVerificacion } from '../../services/tuid_identidad';
+import { completarAutorizacionFirma } from '../../services/tuid_firma';
+import { propositoDelState } from '../../proveedores/tuid/oauth';
 import { viajeDelState } from '../../services/auth_idp';
 import { vueltaDelIdp } from './auth_idp';
 import { HttpError } from '../errors';
@@ -81,6 +83,29 @@ export function registrarRutasTuid(app: FastifyInstance) {
       }
       if (!q.code) throw new HttpError(400, 'Respuesta incompleta de tuID.');
       return vueltaDelIdp(req, reply, viajeIdp, q.code);
+    }
+
+    // ═══ Tercer viaje por esta puerta: AUTORIZAR LA FIRMA con la clave del titular ═══
+    //
+    // Mismo criterio que el reparto de arriba: lo decide el propósito del
+    // sobre, y cada verificador rechaza el sobre del otro. Si no es 'tuid_firma',
+    // se sigue con la verificación de siempre, intacta.
+    const proposito = q.state ? await propositoDelState(q.state) : null;
+    if (proposito === 'tuid_firma') {
+      if (q.error) return reply.redirect('/firmar?firma_tuid=cancelada');
+      if (!q.code) throw new HttpError(400, 'Respuesta incompleta de tuID.');
+      try {
+        const r = await completarAutorizacionFirma(q.code, q.state!);
+        const destino = r.volverA && r.volverA.startsWith('/') ? r.volverA : '/firmar';
+        return reply.redirect(`${destino}?firma_tuid=ok`);
+      } catch (e) {
+        // Las respuestas del sistema van a la pantalla con motivo; los errores
+        // técnicos quedan en el log y la pantalla dice que no se pudo.
+        if (e instanceof HttpError && e.statusCode === 403) return reply.redirect('/firmar?firma_tuid=documento_distinto');
+        if (e instanceof HttpError && e.statusCode === 409) return reply.redirect('/firmar?firma_tuid=sin_certificado');
+        console.error('tuid: falló la autorización de firma:', e);
+        return reply.redirect('/firmar?firma_tuid=error');
+      }
     }
 
     // ⚠ Las redirecciones de vuelta son RELATIVAS (6/9). `APP_BASE_URL` es lo

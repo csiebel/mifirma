@@ -17,6 +17,7 @@ import {
 import { estadoDeCuenta, crearCuentaDesdeFirma } from '../../services/cuenta_del_firmante';
 import { camposParaFirmar, guardarValor } from '../../services/campos';
 import { iniciarVerificacion } from '../../services/tuid_identidad';
+import { iniciarAutorizacionFirma } from '../../services/tuid_firma';
 import { HttpError } from '../errors';
 
 /**
@@ -108,6 +109,17 @@ export function registrarRutasFirma(app: FastifyInstance) {
     async (req) => iniciarVerificacion(tokenDe(req)),
   );
 
+  // Firmar con la clave del titular en tuID: la IDA. Misma forma que la
+  // verificación —bajo /firmar, con la cookie del enlace— y otro propósito en
+  // el sobre. La vuelta llega por /identidad/tuid/vuelta y la reparte
+  // `routes/tuid.ts`; deja una autorización de diez minutos que consume el
+  // `POST /firmar/firmar` de siempre cuando viene con `con_tuid: true`.
+  app.post(
+    '/firmar/tuid/iniciar',
+    { config: { rateLimit: { max: 10, timeWindow: '10 minutes' } } },
+    async (req) => iniciarAutorizacionFirma(tokenDe(req)),
+  );
+
   app.get('/firmar/documento', async (req, reply) => {
     const r = await documentoParaFirmar(tokenDe(req));
     reply
@@ -127,12 +139,16 @@ export function registrarRutasFirma(app: FastifyInstance) {
         nombre_escrito: z.string().max(120).optional(),
         zona_horaria: z.string().max(60).optional(),
         huella: z.string().max(120).optional(),
+        // Explícito: la pantalla lo manda sólo si la persona autorizó tuID y
+        // eligió firmar con su certificado. Ver `FirmaInput.conTuid`.
+        con_tuid: z.boolean().optional(),
       })
       .parse(req.body);
 
     return firmar(tokenDe(req), {
       consentimiento: b.consentimiento,
       nombreEscrito: b.nombre_escrito ?? null,
+      conTuid: b.con_tuid === true,
       ip: req.ip,
       userAgent: req.headers['user-agent'] ?? null,
       zonaHoraria: b.zona_horaria ?? null,

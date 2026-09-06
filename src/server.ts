@@ -457,6 +457,8 @@ export function construirServidor(): FastifyInstance {
     '/firmar/documento',
     '/firmar/firmar',
     '/firmar/rechazar',
+    // La ida de «firmar con tuID»: bajo /firmar, con la cookie del enlace.
+    '/firmar/tuid/iniciar',
     '/firmar/marca',
     // La autorización la lleva la cookie de firma, igual que las de arriba.
     '/firmar/campos',

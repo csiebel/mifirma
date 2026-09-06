@@ -8,6 +8,8 @@ import { almacen, nuevaClave } from '../almacenamiento/almacen';
 import { normalizar, sellar, verificar } from '../firma/pades';
 import type { Marca } from '../firma/apariencia';
 import { selloDePlataforma } from '../firma/adaptadores/sello_plataforma';
+import type { Firmante } from '../firma/adaptadores/tipos';
+import { tomarFirmanteAutorizado, hayAutorizacionVigente } from './tuid_firma';
 import { anotar } from './evidencia';
 import { obtenerSello, selloObligatorio, type ResultadoSello } from './tsa';
 import { avisarAlQueSigue, avisarCompletado, ubicarEnBandeja, consolidarOtorgamiento } from './circuito';
@@ -206,6 +208,14 @@ export async function abrirParaFirmar(
       verificacion_proveedor: verificacionProveedor,
       identidad_verificada: identidadVerificada,
       identidad_nivel: identidadNivel,
+      // ⚠ Firmar con el certificado del titular se ofrece con la MISMA llave
+      // que verificarse: el proveedor de identidad habilitado para el país
+      // (decisión del 6/9: una sola capacidad). Si algún día conviene poder
+      // encender una sin la otra, es una capacidad más en `proveedor_pais`.
+      firma_tuid_disponible: verificacionProveedor !== null,
+      // ¿Ya autorizó? Sale de la memoria del servidor, no de la barra: la
+      // pantalla no afirma lo que el servidor no tiene.
+      firma_tuid_autorizada: hayAutorizacionVigente(e.otorgamientoId),
     };
   });
 }
@@ -250,6 +260,14 @@ export interface FirmaInput {
   consentimiento: boolean;
   /** Lo que la persona escribe como representación visual. NO es la firma. */
   nombreEscrito?: string | null;
+  /**
+   * Firmar con la clave del titular en tuID, que la pantalla pide sólo si el
+   * firmante autorizó antes (`/firmar/tuid/iniciar` → vuelta). Es EXPLÍCITO a
+   * propósito: si la autorización venció, se contesta con un error legible —
+   * nunca se cae al sello en silencio, porque la persona eligió firmar con su
+   * certificado y el expediente diría otra cosa.
+   */
+  conTuid?: boolean;
   ip?: string | null;
   userAgent?: string | null;
   zonaHoraria?: string | null;
@@ -553,6 +571,25 @@ export async function firmar(token: string, input: FirmaInput) {
   // tiene que quedar adentro del PKCS#7 antes de escribirlo en el PDF.
   let resultadoSello: ResultadoSello | null = null;
 
+  // ── ¿Con qué clave se firma? ──
+  //
+  // Con la del titular en tuID si la persona lo pidió Y hay autorización
+  // vigente; con el sello de plataforma en cualquier otro caso. Se toma acá,
+  // lo más cerca posible de la firma, porque tomarla la CONSUME: si algo
+  // fallara antes, la persona tendría que hacer otro viaje sin motivo.
+  //
+  // ⚠ Si pidió tuID y la autorización venció, NO se cae al sello: se contesta
+  // con un error que dice qué pasó. La persona eligió firmar con su
+  // certificado; firmar con otra cosa y anotarlo sería firmarle otra cosa.
+  const tuid = input.conTuid ? tomarFirmanteAutorizado(e.otorgamientoId) : null;
+  if (input.conTuid && !tuid) {
+    throw new HttpError(
+      409,
+      'La autorización de tuID para firmar venció o ya se usó. Volvé a apretar «Firmar con tuID» y repetí.',
+    );
+  }
+  const firmante: Firmante = tuid?.firmante ?? selloDePlataforma();
+
   let salida;
   try {
     salida = await sellar(
@@ -573,7 +610,7 @@ export async function firmar(token: string, input: FirmaInput) {
           ? [...visual.marcas, ...campos.marcas]
           : undefined,
       },
-      selloDePlataforma(),
+      firmante,
       async (datos) => {
         resultadoSello = await obtenerSello(datos, ctx.pais ?? null);
         return resultadoSello.sello;
@@ -701,8 +738,33 @@ export async function firmar(token: string, input: FirmaInput) {
         representacion_visual: input.nombreEscrito ?? null,
         sellado_pades: true,
         subfiltro: 'ETSI.CAdES.detached',
-        sello: selloDePlataforma().codigo,
-        titular_certificado: selloDePlataforma().titular,
+        // Con qué clave se firmó. Hasta el 6/9 acá decía siempre «sello de
+        // plataforma»; desde que se puede firmar con tuID, dice cuál fue.
+        sello: firmante.codigo,
+        titular_certificado: firmante.titular,
+        // ⚠ Lo que esta firma PRODUJO, que no es lo mismo que lo que el
+        // circuito PIDIÓ (`nivel_firma`, arriba). Con el sello es 'simple';
+        // con la clave del titular es 'avanzada'. El expediente guarda los dos
+        // porque son dos hechos: uno del emisor, otro del acto.
+        nivel_firma_obtenido: firmante.nivel,
+        ...(tuid
+          ? {
+              proveedor_firma: {
+                codigo: 'tuid',
+                identidad_firma_id: tuid.detalle.identidad_firma_id,
+                etiquetas: tuid.detalle.etiquetas,
+                emisor_certificado: tuid.firmante.emisorCertificado,
+                certificado_valido_hasta: tuid.firmante.certificadoValidoHasta.toISOString(),
+                // El documento del titular según tuID, normalizado igual que
+                // en los anclajes. Es lo que ata la firma a una cédula.
+                documento: tuid.detalle.documento
+                  ? { pais: tuid.detalle.documento.pais, tipo: tuid.detalle.documento.tipo,
+                      numero: tuid.detalle.documento.numero.replace(/[.\s-]/g, '').toUpperCase() }
+                  : null,
+                nivel_autenticacion_declarado: tuid.detalle.nivel_declarado ?? null,
+              },
+            }
+          : {}),
         firmas_en_el_documento: firmas.length,
         // La huella del documento ANTES y DESPUÉS de esta firma. Es lo que ata
         // el evento al archivo concreto, sin depender de ninguna otra tabla.
