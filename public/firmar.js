@@ -214,6 +214,11 @@
       '<div id="faltaFirmar"></div>' +
       vence +
       '<button class="btn btn-s" id="fRechazar">No lo voy a firmar</button>' +
+      // La tercera salida, pedida por Claudio el 7/9: hasta entonces la pantalla
+      // sólo ofrecía firmar o rechazar, y «cerrar la pestaña» no es un botón.
+      // No es un hecho del expediente —el firmante no decidió nada— así que no
+      // llama al servidor: sólo le pone nombre a irse.
+      '<button class="despues" id="fDespues" type="button">Firmar más tarde</button>' +
       '<div id="msg"></div>';
 
     // ⚠ Dos condiciones, no una. El consentimiento nunca alcanzó solo desde que
@@ -282,6 +287,7 @@
     $('fConsent').addEventListener('change', repasar);
     $('fFirmar').addEventListener('click', firmarAhora);
     $('fRechazar').addEventListener('click', abrirRechazo);
+    $('fDespues').addEventListener('click', function () { firmarDespues(d); });
 
     montarCampos();
     montarCaracter();
@@ -823,6 +829,30 @@
       b.disabled = false;
       b.textContent = 'Firmar';
     }
+  }
+
+  /**
+   * «Firmar más tarde»: el panel se reemplaza por una tarjeta tranquila que
+   * dice cómo volver y hasta cuándo. El botón lleva al sitio, porque
+   * `window.close()` sólo cierra pestañas que abrió un script — ésta la abrió
+   * el correo.
+   */
+  function firmarDespues(d) {
+    var hasta = '';
+    if (d && d.vence_en) {
+      try {
+        hasta = ' Vence el ' +
+          new Date(d.vence_en).toLocaleDateString('es', { day: '2-digit', month: 'long', year: 'numeric' }) + '.';
+      } catch (e) {}
+    }
+    $('panel').innerHTML =
+      '<h1>Quedó pendiente</h1>' +
+      '<p class="lead">Volvé cuando quieras con el mismo enlace del correo.' + esc(hasta) + '</p>' +
+      '<p class="pista">No se firmó nada ni se avisó a nadie: el documento sigue esperándote.</p>' +
+      '<button class="btn btn-p" id="fCerrar">Cerrar</button>' +
+      '<button class="btn btn-s" id="fVolver">Volver al documento</button>';
+    $('fCerrar').addEventListener('click', function () { location.href = location.origin + '/'; });
+    $('fVolver').addEventListener('click', function () { location.reload(); });
   }
 
   function abrirRechazo() {
