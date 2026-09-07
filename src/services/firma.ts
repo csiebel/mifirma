@@ -19,6 +19,23 @@ import { marcasAPredeclarar, nombreDeMarca } from './marcas';
 import { HttpError } from '../http/errors';
 
 /**
+ * Las dos prestaciones que la pantalla de firma necesita, resueltas por
+ * `app.prestacion_de_cuenta` (071): override de la suscripción → plan → no.
+ * Una consulta por prestación; son dos y la función es barata.
+ */
+async function prestacionesDelEmisor(trx: any, cuentaId: string | null | undefined) {
+  const out = { identidad_digital: false, firma_avanzada: false };
+  if (!cuentaId) return out;
+  for (const k of ['identidad_digital', 'firma_avanzada'] as const) {
+    const r = await sql<{ incluida: boolean }>`
+      select incluida from app.prestacion_de_cuenta(${cuentaId}::uuid, ${k})
+    `.execute(trx);
+    out[k] = r.rows[0]?.incluida === true;
+  }
+  return out;
+}
+
+/**
  * La firma del participante externo.
  *
  * ═══ LAS DOS REGLAS DE ORO, ACÁ ES DONDE SE APLICAN ═══
@@ -193,6 +210,17 @@ export async function abrirParaFirmar(
     const identidadVerificada = mejor.rows[0]?.metodo_prueba === 'oidc';
     const identidadNivel = identidadVerificada ? mejor.rows[0]!.nivel_garantia : null;
 
+    // ═══ El plan de la empresa emisora (071) ═══
+    //
+    // Que exista el proveedor es una cosa; que el plan de la empresa lo traiga
+    // es otra. Verificarse con la identidad digital y firmar con el certificado
+    // del titular son PRESTACIONES (`identidad_digital`, `firma_avanzada`): si
+    // el plan no las incluye, la pantalla no ofrece el viaje aunque el
+    // proveedor esté encendido. La regla vive en `app.prestacion_de_cuenta`,
+    // que devuelve SIEMPRE una fila (sin suscripción = no incluida): acá no hay
+    // NULL que leer como «sí».
+    const plan = await prestacionesDelEmisor(trx, f.cuenta_propietaria_id);
+
     return {
       titulo: f.titulo,
       emisor: f.emisor ?? '',
@@ -204,7 +232,7 @@ export async function abrirParaFirmar(
       vence_en: f.vence_en,
       me_toca: f.me_toca,
       sha256: Buffer.from(f.sha256).toString('hex'),
-      verificacion_disponible: verificacionProveedor !== null,
+      verificacion_disponible: verificacionProveedor !== null && plan.identidad_digital,
       verificacion_proveedor: verificacionProveedor,
       identidad_verificada: identidadVerificada,
       identidad_nivel: identidadNivel,
@@ -212,7 +240,7 @@ export async function abrirParaFirmar(
       // que verificarse: el proveedor de identidad habilitado para el país
       // (decisión del 6/9: una sola capacidad). Si algún día conviene poder
       // encender una sin la otra, es una capacidad más en `proveedor_pais`.
-      firma_tuid_disponible: verificacionProveedor !== null,
+      firma_tuid_disponible: verificacionProveedor !== null && plan.firma_avanzada,
       // ¿Ya autorizó? Sale de la memoria del servidor, no de la barra: la
       // pantalla no afirma lo que el servidor no tiene.
       firma_tuid_autorizada: hayAutorizacionVigente(e.otorgamientoId),
@@ -468,6 +496,11 @@ export async function firmar(token: string, input: FirmaInput) {
     if (f.estado === 'firmada') throw new HttpError(409, 'Ya firmaste este documento.');
     if (f.estado === 'rechazada') throw new HttpError(409, 'Ya rechazaste este documento.');
     if (!f.me_toca) throw new HttpError(409, 'Todavía no es tu turno: falta que firme alguien antes que vos.');
+    // ⚠ La llave del plan se comprueba también acá y no sólo en `abrirParaFirmar`:
+    // la pantalla esconde el botón, pero el servidor es el que decide (071).
+    if (input.conTuid && !(await prestacionesDelEmisor(trx, f.cuenta_propietaria_id)).firma_avanzada) {
+      throw new HttpError(403, 'El plan de la empresa emisora no incluye la firma con certificado del titular.');
+    }
     return f;
   });
 
