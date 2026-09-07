@@ -183,7 +183,7 @@
     document.querySelectorAll('.lang button').forEach(function(b){
       b.setAttribute('aria-pressed', String(b.dataset.l === LANG));
     });
-    pintarPaises(); pintarSelector(); cargarPlanes(PAIS);
+    pintarPaises(); pintarSelector(); cargarPlanes(PAIS); pintarMarca();
   }
 
   /* ---------------- Países ----------------
@@ -232,7 +232,57 @@
       b.setAttribute('aria-pressed', String(b.dataset.p === PAIS));
     });
   }
-  function elegirPais(k){ PAIS = k; marcarPais(); cargarPlanes(k); }
+  function elegirPais(k){ PAIS = k; marcarPais(); cargarPlanes(k); cargarMarca(k); }
+
+  /* ---------------- Marca del país ----------------
+     Sale de `/publico/marca`: el acuerdo de exclusividad vigente del país, con
+     autorización de marca. Si no hay, la barra queda como siempre. La regla de
+     qué se muestra vive en la base (`app.exclusividad_vigente`), no acá. */
+  var MARCA = null;
+  async function cargarMarca(pais){
+    MARCA = null;
+    try{
+      var r = await fetch('/publico/marca?pais=' + encodeURIComponent(pais));
+      if (r.ok){ var j = await r.json(); MARCA = j.marca || null; }
+    }catch(e){}
+    pintarMarca();
+  }
+  function pintarMarca(){
+    var nav = document.querySelector('nav'), m = MARCA;
+    var hay = !!(m && ((m.socio && m.socio.logo) || (m.producto && m.producto.logo)));
+    nav.classList.toggle('con-marca', hay);
+    // Con marca, el menú baja a la segunda línea; sin marca vuelve a su lugar.
+    var menu = nav.querySelector('.menu'), sub = document.getElementById('submenu');
+    if (menu && sub){
+      if (hay && menu.parentNode !== sub) sub.appendChild(menu);
+      if (!hay && menu.parentNode === sub) nav.querySelector('.wrap').insertBefore(menu, document.getElementById('marcaSocio'));
+    }
+    function logo(id, d, nombre){
+      var a = document.getElementById(id); if (!a) return;
+      var img = a.querySelector('img');
+      if (!hay || !d || !d.logo){ img.removeAttribute('src'); a.removeAttribute('href'); return; }
+      img.src = d.logo; img.alt = nombre || '';
+      if (d.enlace){ a.href = d.enlace; a.target = '_blank'; a.rel = 'noopener'; }
+      else { a.removeAttribute('href'); a.removeAttribute('target'); }
+    }
+    logo('marcaSocio', m && m.socio, m && m.socio_nombre);
+    logo('marcaProducto', m && m.producto, m && m.socio_nombre);
+    var caja = document.getElementById('marcaTexto'); if (!caja) return;
+    var txt = null;
+    if (m){
+      var ti = m.texto_i18n || {};
+      txt = ti[LANG] || ti.es || ti.pt || ti.en || m.texto || null;
+    }
+    if (txt){
+      document.getElementById('marcaTextoTxt').textContent = txt;
+      var l = document.getElementById('marcaTextoLogo');
+      if (m.socio && m.socio.logo){ l.src = m.socio.logo; l.alt = m.socio_nombre || ''; l.hidden = false; }
+      else { l.removeAttribute('src'); l.hidden = true; }
+      caja.setAttribute('data-hay', '1');
+    } else {
+      caja.removeAttribute('data-hay');
+    }
+  }
 
   /* ---------------- Planes ----------------
      Ni un monto está escrito acá: sale de la base, cargado por el operador.
@@ -247,7 +297,10 @@
     firma:{es:'Por firma',pt:'Por assinatura',en:'Per signature'},
     documento:{es:'Por documento',pt:'Por documento',en:'Per document'},
     circuito:{es:'Por circuito',pt:'Por circuito',en:'Per envelope'},
-    sms:{es:'SMS',pt:'SMS',en:'SMS'}
+    sms:{es:'SMS',pt:'SMS',en:'SMS'},
+    asistente_ia:{es:'Consulta al asistente',pt:'Consulta ao assistente',en:'Assistant query'},
+    dispositivo_propio:{es:'Firma con tu token',pt:'Assinatura com seu token',en:'Signature with your token'},
+    identidad_digital:{es:'Verificación de identidad',pt:'Verificação de identidade',en:'Identity check'}
   };
   var NIVEL = { simple:{es:'simple',pt:'simples',en:'simple'}, avanzada:{es:'avanzada',pt:'avançada',en:'advanced'} };
 
@@ -335,6 +388,6 @@
   var nav = (navigator.language || 'es').slice(0,2);
   if (!guardado && nav === 'pt') PAIS = 'BR';
   idioma(guardado || (T[nav] ? nav : 'es'));
-  cargarPaises().then(function(){ cargarPlanes(PAIS); });
+  cargarPaises().then(function(){ cargarPlanes(PAIS); cargarMarca(PAIS); });
   revelar();
 })();

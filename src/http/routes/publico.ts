@@ -115,6 +115,73 @@ export function registrarRutasPublico(app: FastifyInstance) {
     };
   });
 
+  // ---- La marca del país (067/071) ----
+  //
+  // El acuerdo de exclusividad vigente CON autorización de marca: logo del
+  // socio, logo del producto co-brandeado, a dónde lleva cada uno y el texto
+  // que el operador cargó para la página de ese país. La regla de qué se
+  // muestra vive en `app.exclusividad_vigente`, no acá: sin acuerdo, sin
+  // autorización o vencido, devuelve `{ marca: null }` y el sitio no dibuja
+  // nada.
+  //
+  // Se devuelve `texto_i18n` entero además del texto resuelto: el sitio cambia
+  // de idioma sin recargar y tiene que poder repintar.
+  //
+  // ⚠ La imagen subida manda sobre la URL. Los bytes NO viajan acá: van por
+  // `/publico/marca-imagen`, que el navegador cachea aparte.
+  app.get('/publico/marca', async (req) => {
+    const q = z.object({ pais: z.string().length(2) }).parse((req as any).query ?? {});
+    const pais = q.pais.toUpperCase();
+    const idioma = idiomaDe(req as any);
+    const r = await anonimo((trx) =>
+      sql<{
+        socio_nombre: string; logo_producto_url: string | null; logo_socio_url: string | null;
+        logo_producto_enlace: string | null; logo_socio_enlace: string | null;
+        logo_producto_img_hay: boolean; logo_socio_img_hay: boolean; texto_i18n: unknown;
+      }>`select * from app.exclusividad_vigente(${pais})`.execute(trx),
+    );
+    const a = r.rows[0];
+    if (!a) return { marca: null };
+    const logo = (cual: 'socio' | 'producto', hay: boolean, url: string | null) =>
+      hay ? `/publico/marca-imagen?pais=${pais}&cual=${cual}` : url;
+    return {
+      marca: {
+        socio_nombre: a.socio_nombre,
+        socio: { logo: logo('socio', a.logo_socio_img_hay, a.logo_socio_url), enlace: a.logo_socio_enlace },
+        producto: { logo: logo('producto', a.logo_producto_img_hay, a.logo_producto_url), enlace: a.logo_producto_enlace },
+        texto: textoI18n(a.texto_i18n, idioma),
+        texto_i18n: a.texto_i18n && typeof a.texto_i18n === 'object' ? a.texto_i18n : null,
+      },
+    };
+  });
+
+  // Los bytes del logo, por la única puerta que los da (`app.marca_imagen`,
+  // security definer): acuerdo vigente y autorización de marca, si no 404.
+  //
+  // ⚠ Un SVG es un documento: si alguien lo abre por la URL en vez de verlo
+  // como <img>, corre en NUESTRO origen. La consola lo sanea al subirlo, y acá
+  // además va con un CSP que prohíbe scripts y lo aísla (`sandbox`). Dos
+  // cinturones porque un logo lo carga un operador, y un operador se puede
+  // equivocar de archivo.
+  app.get('/publico/marca-imagen', async (req, reply) => {
+    const q = z
+      .object({ pais: z.string().length(2), cual: z.enum(['socio', 'producto']) })
+      .parse((req as any).query ?? {});
+    const r = await anonimo((trx) =>
+      sql<{ img: Buffer; mime: string }>`
+        select img, mime from app.marca_imagen(${q.pais.toUpperCase()}, ${q.cual})
+      `.execute(trx),
+    );
+    const f = r.rows[0];
+    if (!f) return reply.code(404).send({ error: 'sin_imagen' });
+    return reply
+      .header('Content-Type', f.mime)
+      .header('Content-Security-Policy', "default-src 'none'; style-src 'unsafe-inline'; sandbox")
+      .header('X-Content-Type-Options', 'nosniff')
+      .header('Cache-Control', 'public, max-age=600')
+      .send(f.img);
+  });
+
   /**
    * Planes con sus precios para un país.
    *

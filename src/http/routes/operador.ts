@@ -46,6 +46,7 @@ import {
   listarAcuerdos,
   crearAcuerdo,
   cerrarAcuerdo,
+  actualizarMarca,
   CAPACIDADES as CAPACIDADES_PROVEEDOR,
 } from '../../services/proveedores';
 import { adaptadorDe } from '../../services/pagos/registro';
@@ -85,6 +86,7 @@ import {
   borrarPlan,
   setPrecio,
   bajaPrecio,
+  PRESTACIONES,
 } from '../../services/planes';
 
 // Autenticación de la consola: sesión de operador (JWT propio). El login con
@@ -136,6 +138,18 @@ const planSchema = z.object({
   publico: z.boolean().optional(),
   destacado: z.boolean().optional(),
   orden: z.coerce.number().int().min(0).optional(),
+  // Las prestaciones del plan (071). Si no vienen, no se tocan.
+  prestaciones: z
+    .array(
+      z.object({
+        prestacion: z.enum(PRESTACIONES),
+        incluida: z.boolean(),
+        cobra: z.boolean(),
+        cantidad_incluida: z.coerce.number().min(0),
+        margen_pct: z.coerce.number().min(0),
+      }),
+    )
+    .optional(),
 });
 
 const guardarCorreoSchema = z.object({
@@ -328,7 +342,7 @@ export function registrarRutasOperador(app: FastifyInstance) {
       iaCobra: b.ia_cobra,
       iaMargenPct: b.ia_margen_pct,
       iaIncluido: b.ia_incluido,
-    });
+    }, s.operadorId);
   });
 
   // ---- Catálogos de pago (banco / tipo de cuenta) por país ----
@@ -872,6 +886,37 @@ export function registrarRutasOperador(app: FastifyInstance) {
       nota: b.nota,
       porQuien: s.operadorId,
     });
+  });
+
+  // La marca del país (071): logos subidos o por URL, enlaces, texto por idioma
+  // y autorización. Es lo único del acuerdo que se edita en el lugar.
+  app.patch('/operador/exclusividad/:id/marca', async (req) => {
+    const s = await sesion(req);
+    exigirCap(s, 'gestionar_pagos');
+    const { id } = req.params as { id: string };
+    const url = z.string().max(500).nullable().optional();
+    const b = z
+      .object({
+        logo_socio_url: url,
+        logo_socio_enlace: url,
+        logo_socio_img: z.string().max(600_000).nullable().optional(),
+        logo_producto_url: url,
+        logo_producto_enlace: url,
+        logo_producto_img: z.string().max(600_000).nullable().optional(),
+        texto_i18n: z.record(z.string().max(400)).nullable().optional(),
+        autorizacion_marca: z.boolean().optional(),
+      })
+      .parse(req.body);
+    return actualizarMarca(id, {
+      logoSocioUrl: b.logo_socio_url,
+      logoSocioEnlace: b.logo_socio_enlace,
+      logoSocioImg: b.logo_socio_img,
+      logoProductoUrl: b.logo_producto_url,
+      logoProductoEnlace: b.logo_producto_enlace,
+      logoProductoImg: b.logo_producto_img,
+      textoI18n: b.texto_i18n,
+      autorizacionMarca: b.autorizacion_marca,
+    }, s.operadorId);
   });
 
   app.patch('/operador/exclusividad/:id/cerrar', async (req) => {

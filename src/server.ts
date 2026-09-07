@@ -180,7 +180,12 @@ export function construirServidor(): FastifyInstance {
         "frame-src 'self' blob: https://challenges.cloudflare.com; " +
         "style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; " +
         "font-src 'self' https://fonts.gstatic.com data:; " +
-        "img-src 'self' data: blob:; " +
+        // ⚠ `https:` en `img-src` es por los logos del acuerdo de exclusividad
+        // cargados como URL (067): se descubrió el 6/9 que la propia CSP los
+        // bloqueaba en el sitio y el «logo por URL» nunca había podido verse.
+        // Una imagen no ejecuta nada; abrir el esquema entero es más honesto que
+        // una lista de dominios de socios que habría que tocar por cada acuerdo.
+        "img-src 'self' data: blob: https:; " +
         "connect-src 'self'; " +
         "worker-src 'self'; " +
         "frame-ancestors 'none'; " +
@@ -523,6 +528,9 @@ export function construirServidor(): FastifyInstance {
     '/publico/industrias',
     '/publico/salud',
     '/publico/paises',
+    // La marca del país: logos y texto del acuerdo de exclusividad vigente (071).
+    '/publico/marca',
+    '/publico/marca-imagen',
     // La clave pública del cartelito de «no soy un robot». Sin esta línea da 401
     // y la pantalla no lo dibuja nunca.
     '/publico/captcha',

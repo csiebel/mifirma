@@ -28,7 +28,11 @@ import { monedaDeCobro } from './paises';
  * Así cerrar hoy y abrir hoy no se superponen, y el precio de hoy es uno solo.
  */
 
-const METRICAS = ['abono', 'firma', 'documento', 'circuito', 'sms'] as const;
+// Las tres últimas llegaron con la 071: una prestación del plan también se
+// puede tarifar por unidad (una firma con dispositivo propio, una consulta al
+// asistente, una verificación de identidad).
+const METRICAS = ['abono', 'firma', 'documento', 'circuito', 'sms',
+                  'asistente_ia', 'dispositivo_propio', 'identidad_digital'] as const;
 type Metrica = (typeof METRICAS)[number];
 
 const NIVELES = ['simple', 'avanzada'] as const;
@@ -40,7 +44,56 @@ const ADMITE_NIVEL: Record<Metrica, boolean> = {
   documento: true,
   circuito: true,
   sms: false,
+  asistente_ia: false,
+  dispositivo_propio: false,
+  identidad_digital: false,
 };
+
+/**
+ * Las prestaciones del plan (071): qué trae cada plan, con o sin costo.
+ *
+ * La lista cerrada vive en la base (`app.prestaciones_conocidas()`); ésta es
+ * su copia para tipar. Si se agrega una allá y no acá, la consola no la
+ * muestra; si se agrega acá y no allá, la base la rechaza — que es el lado
+ * bueno de la asimetría.
+ *
+ * Cada fila dice cuatro cosas: incluida (el plan la ofrece), cobra (el uso se
+ * factura), cantidad_incluida (unidades sin cargo antes de cobrar) y
+ * margen_pct (sobre el costo del proveedor). Lo mismo que la IA decía como
+ * columnas de `plan` hasta la 071.
+ */
+export const PRESTACIONES = ['asistente_ia', 'firma_avanzada', 'dispositivo_propio', 'identidad_digital'] as const;
+export type Prestacion = (typeof PRESTACIONES)[number];
+
+export interface PrestacionDelPlan {
+  prestacion: Prestacion;
+  incluida: boolean;
+  cobra: boolean;
+  cantidad_incluida: number;
+  margen_pct: number;
+}
+
+/**
+ * Reemplazo completo, como el resto del plan: lo que la pantalla manda es lo
+ * que queda. Una prestación que no viene se guarda como NO incluida — no se
+ * borra la fila, para que el operador vea el renglón y no un hueco.
+ */
+async function guardarPrestaciones(trx: any, planId: string, lista: PrestacionDelPlan[] | undefined) {
+  if (!lista) return;
+  const por = new Map(lista.map((x) => [x.prestacion, x]));
+  for (const nombre of PRESTACIONES) {
+    const x = por.get(nombre);
+    await sql`
+      insert into plan_prestacion (plan_id, prestacion, incluida, cobra, cantidad_incluida, margen_pct)
+      values (${planId}::uuid, ${nombre}, ${x?.incluida ?? false}, ${x?.cobra ?? true},
+              ${String(x?.cantidad_incluida ?? 0)}::numeric, ${String(x?.margen_pct ?? 0)}::numeric)
+      on conflict (plan_id, prestacion) do update set
+        incluida = excluded.incluida, cobra = excluded.cobra,
+        cantidad_incluida = excluded.cantidad_incluida, margen_pct = excluded.margen_pct,
+        actualizado_en = now()
+    `.execute(trx);
+  }
+}
 
 export interface PlanComercial {
   id: string;
@@ -85,6 +138,21 @@ export async function listarPlanes(operadorId: string) {
        order by pais, metrica, nivel_firma nulls first
     `.execute(trx);
 
+    const prest = await sql<{
+      plan_id: string; prestacion: string; incluida: boolean; cobra: boolean;
+      cantidad_incluida: string; margen_pct: string;
+    }>`
+      select plan_id, prestacion, incluida, cobra,
+             cantidad_incluida::text as cantidad_incluida, margen_pct::text as margen_pct
+        from plan_prestacion
+    `.execute(trx);
+    const prestPorPlan = new Map<string, any[]>();
+    for (const x of prest.rows) {
+      const a = prestPorPlan.get(x.plan_id) ?? [];
+      a.push({ ...x, cantidad_incluida: Number(x.cantidad_incluida), margen_pct: Number(x.margen_pct) });
+      prestPorPlan.set(x.plan_id, a);
+    }
+
     const porPlan = new Map<string, any[]>();
     for (const p of precios.rows) {
       const a = porPlan.get(p.plan_id) ?? [];
@@ -96,6 +164,7 @@ export async function listarPlanes(operadorId: string) {
       metricas: METRICAS,
       niveles: NIVELES,
       admite_nivel: ADMITE_NIVEL,
+      prestaciones: PRESTACIONES,
       planes: planes.rows.map((p) => ({
         id: p.id,
         codigo: p.codigo,
@@ -107,6 +176,7 @@ export async function listarPlanes(operadorId: string) {
         destacado: p.destacado,
         orden: p.orden,
         precios: porPlan.get(p.id) ?? [],
+        prestaciones: prestPorPlan.get(p.id) ?? [],
       })),
     };
   });
@@ -141,6 +211,7 @@ export interface DatosPlan {
   publico?: boolean;
   destacado?: boolean;
   orden?: number;
+  prestaciones?: PrestacionDelPlan[];
 }
 
 export async function crearPlan(operadorId: string, codigo: string, d: DatosPlan) {
@@ -163,6 +234,7 @@ export async function crearPlan(operadorId: string, codigo: string, d: DatosPlan
               ${d.orden ?? 100})
       returning id
     `.execute(trx);
+    await guardarPrestaciones(trx, r.rows[0]!.id, d.prestaciones);
     return { id: r.rows[0]!.id, codigo: cod };
   });
 }
@@ -191,6 +263,7 @@ export async function editarPlan(operadorId: string, planId: string, d: DatosPla
       returning id
     `.execute(trx);
     if (!r.rows.length) throw new HttpError(404, 'Ese plan no existe.');
+    await guardarPrestaciones(trx, planId, d.prestaciones);
     return { ok: true };
   });
 }

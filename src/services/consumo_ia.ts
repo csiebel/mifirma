@@ -1,8 +1,9 @@
+import { sql } from 'kysely';
 import Decimal from 'decimal.js';
 import type { Transaction } from 'kysely';
 import type { DB } from '../db/schema';
 import { withUsuario } from '../auth/authz';
-import { operadorDb } from '../db/pool';
+import { operadorDb, withOperador } from '../db/pool';
 import { HttpError } from '../http/errors';
 
 // =============================================================================
@@ -232,18 +233,33 @@ export async function setOverrideIaEmpresa(
     iaMargenPct?: number | string | null;
     iaIncluido?: number | string | null;
   },
+  operadorId: string,
 ) {
-  const set: Record<string, unknown> = {};
-  if (c.asistenteIa !== undefined) set.asistente_ia = c.asistenteIa;
-  if (c.iaCobra !== undefined) set.ia_cobra = c.iaCobra;
-  if (c.iaMargenPct !== undefined) set.ia_margen_pct = c.iaMargenPct === null ? null : String(c.iaMargenPct);
-  if (c.iaIncluido !== undefined) set.ia_incluido = c.iaIncluido === null ? null : String(c.iaIncluido);
-  if (Object.keys(set).length === 0) return { ok: true };
-  const r = await operadorDb()
-    .updateTable('suscripcion')
-    .set(set)
-    .where('cuenta_id', '=', cuentaId)
-    .executeTakeFirst();
-  if (Number(r.numUpdatedRows) === 0) throw new HttpError(404, 'La empresa no tiene suscripción activa.');
+  if (c.asistenteIa === undefined && c.iaCobra === undefined && c.iaMargenPct === undefined && c.iaIncluido === undefined) {
+    return { ok: true };
+  }
+  // Desde la 071 la fuente es `suscripcion_prestacion` ('asistente_ia'); las
+  // columnas viejas de `suscripcion` las mantiene igual el trigger espejo, y
+  // `configIA` de arriba las sigue leyendo hasta que migre. Lo que no viene
+  // (undefined) se conserva: coalesce contra la fila que ya está.
+  const num = (v: number | string | null | undefined) => (v === undefined ? undefined : v === null ? null : String(v));
+  // ⚠ Con contexto de operador: `operadorDb()` a secas entra como 'anonimo' y
+  // la política de escritura lo rechaza en silencio (0 filas → «sin suscripción»).
+  const r = await withOperador(operadorId, (trx) => sql<{ suscripcion_id: string }>`
+    insert into suscripcion_prestacion (suscripcion_id, prestacion, incluida, cobra, cantidad_incluida, margen_pct)
+    select s.id, 'asistente_ia',
+           ${c.asistenteIa ?? null}::boolean, ${c.iaCobra ?? null}::boolean,
+           ${num(c.iaIncluido) ?? null}::numeric, ${num(c.iaMargenPct) ?? null}::numeric
+      from suscripcion s
+     where s.cuenta_id = ${cuentaId}::uuid and s.estado = 'activa'
+    on conflict (suscripcion_id, prestacion) do update set
+      incluida          = case when ${c.asistenteIa === undefined} then suscripcion_prestacion.incluida else excluded.incluida end,
+      cobra             = case when ${c.iaCobra === undefined} then suscripcion_prestacion.cobra else excluded.cobra end,
+      cantidad_incluida = case when ${c.iaIncluido === undefined} then suscripcion_prestacion.cantidad_incluida else excluded.cantidad_incluida end,
+      margen_pct        = case when ${c.iaMargenPct === undefined} then suscripcion_prestacion.margen_pct else excluded.margen_pct end,
+      actualizado_en    = now()
+    returning suscripcion_id
+  `.execute(trx));
+  if (r.rows.length === 0) throw new HttpError(404, 'La empresa no tiene suscripción activa.');
   return { ok: true };
 }

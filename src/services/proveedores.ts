@@ -323,7 +323,14 @@ export async function setProveedorActivo(codigo: string, activo: boolean, operad
 
 export async function listarAcuerdos() {
   const r = await sql<Record<string, unknown>>`
-    select a.*, pf.codigo as proveedor_codigo, pf.nombre_mostrado as proveedor_nombre,
+    select a.id, a.pais, a.proveedor_id, a.socio_nombre, a.vigente_desde, a.vigente_hasta,
+           a.capacidades, a.logo_producto_url, a.logo_socio_url, a.autorizacion_marca, a.nota,
+           a.creado_por, a.creado_en,
+           a.logo_socio_enlace, a.logo_producto_enlace, a.texto_i18n,
+           a.logo_socio_img is not null as logo_socio_img_hay,
+           a.logo_producto_img is not null as logo_producto_img_hay,
+           a.logo_socio_mime, a.logo_producto_mime,
+           pf.codigo as proveedor_codigo, pf.nombre_mostrado as proveedor_nombre,
            (a.vigente_desde <= current_date
             and (a.vigente_hasta is null or a.vigente_hasta >= current_date)) as vigente_hoy
       from acuerdo_exclusividad a
@@ -386,6 +393,119 @@ export async function crearAcuerdo(d: DatosAcuerdo) {
     }
     throw e;
   }
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
+// La marca del país (071): logos subidos, enlaces y texto del acuerdo
+// ═══════════════════════════════════════════════════════════════════════════
+
+const MIMES_LOGO = new Set(['image/png', 'image/jpeg', 'image/webp', 'image/svg+xml']);
+const TOPE_LOGO = 300 * 1024;
+
+/**
+ * Un logo que llega de la consola como data URL → bytes + mime verificados.
+ *
+ * ⚠ El mime NO se toma del data URL: se mira el archivo. PNG, JPEG y WebP
+ * tienen firma en los primeros bytes; lo que no coincide con ninguna se trata
+ * como SVG sólo si es texto que empieza con `<svg` o `<?xml`. Un operador se
+ * puede equivocar de archivo, y un `.exe` rotulado image/png no tiene que
+ * llegar a la base aunque el check de la 071 lo dejara pasar.
+ *
+ * El SVG se sanea: sin <script>, sin atributos on*, sin javascript: y sin
+ * <foreignObject>. Como <img> no ejecutaría nada igual, pero por la URL
+ * directa sí — y `/publico/marca-imagen` le pone además un CSP con sandbox.
+ * Dos cinturones.
+ */
+export function logoDesdeDataUrl(dataUrl: string): { img: Buffer; mime: string } {
+  const m = /^data:([a-z0-9.+\/-]+);base64,([A-Za-z0-9+\/=\s]+)$/i.exec(dataUrl.trim());
+  if (!m) throw new HttpError(400, 'El logo tiene que llegar como imagen en base64.');
+  let img = Buffer.from(m[2].replace(/\s+/g, ''), 'base64');
+  if (img.length === 0) throw new HttpError(400, 'El logo está vacío.');
+  if (img.length > TOPE_LOGO) throw new HttpError(400, `El logo pesa ${Math.round(img.length / 1024)} KB y el tope es 300 KB.`);
+
+  let mime: string | null = null;
+  if (img.length > 8 && img.readUInt32BE(0) === 0x89504e47) mime = 'image/png';
+  else if (img.length > 3 && img[0] === 0xff && img[1] === 0xd8 && img[2] === 0xff) mime = 'image/jpeg';
+  else if (img.length > 12 && img.toString('ascii', 0, 4) === 'RIFF' && img.toString('ascii', 8, 12) === 'WEBP') mime = 'image/webp';
+  else {
+    const txt = img.toString('utf8');
+    if (/^\s*(<\?xml[^>]*>\s*)?(<!--[\s\S]*?-->\s*)*<svg[\s>]/i.test(txt)) {
+      const limpio = txt
+        .replace(/<script[\s\S]*?<\/script\s*>/gi, '')
+        .replace(/<foreignObject[\s\S]*?<\/foreignObject\s*>/gi, '')
+        .replace(/\s+on[a-z]+\s*=\s*("[^"]*"|'[^']*'|[^\s>]+)/gi, '')
+        .replace(/(href|xlink:href)\s*=\s*("\s*javascript:[^"]*"|'\s*javascript:[^']*')/gi, '$1=""');
+      img = Buffer.from(limpio, 'utf8');
+      mime = 'image/svg+xml';
+    }
+  }
+  if (!mime || !MIMES_LOGO.has(mime)) {
+    throw new HttpError(400, 'El logo tiene que ser PNG, JPEG, WebP o SVG. El archivo no es ninguno de esos.');
+  }
+  return { img, mime };
+}
+
+export interface MarcaDelAcuerdo {
+  logoSocioUrl?: string | null;
+  logoSocioEnlace?: string | null;
+  /** data URL para subir, null para quitar, undefined para no tocar. */
+  logoSocioImg?: string | null;
+  logoProductoUrl?: string | null;
+  logoProductoEnlace?: string | null;
+  logoProductoImg?: string | null;
+  textoI18n?: Record<string, string> | null;
+  autorizacionMarca?: boolean;
+}
+
+function urlHttps(u: string | null | undefined, que: string): string | null {
+  if (u == null || u === '') return null;
+  if (!/^https:\/\//.test(u)) throw new HttpError(400, `${que} tiene que ser una URL https.`);
+  return u;
+}
+
+/**
+ * Cambiar la marca de un acuerdo que ya existe: logos (URL o imagen subida),
+ * enlaces, texto por idioma y la autorización de marca.
+ *
+ * Es lo único del acuerdo que se edita: fechas, país, proveedor y capacidades
+ * son el acuerdo comercial y no se retocan — se cierra y se crea otro.
+ */
+export async function actualizarMarca(id: string, d: MarcaDelAcuerdo, porQuien: string) {
+  const socioUrl = urlHttps(d.logoSocioUrl, 'El logo del socio');
+  const productoUrl = urlHttps(d.logoProductoUrl, 'El logo del producto');
+  const socioEnlace = urlHttps(d.logoSocioEnlace, 'El enlace del socio');
+  const productoEnlace = urlHttps(d.logoProductoEnlace, 'El enlace del producto');
+  const socioImg = d.logoSocioImg ? logoDesdeDataUrl(d.logoSocioImg) : d.logoSocioImg === null ? null : undefined;
+  const productoImg = d.logoProductoImg ? logoDesdeDataUrl(d.logoProductoImg) : d.logoProductoImg === null ? null : undefined;
+
+  let texto: Record<string, string> | null = null;
+  if (d.textoI18n) {
+    texto = {};
+    for (const [k, v] of Object.entries(d.textoI18n)) {
+      if (!/^[a-z]{2}$/.test(k)) continue;
+      const t = String(v ?? '').trim();
+      if (t.length > 400) throw new HttpError(400, `El texto en «${k}» supera los 400 caracteres.`);
+      if (t) texto[k] = t;
+    }
+    if (Object.keys(texto).length === 0) texto = null;
+  }
+
+  const u = await withOperador(porQuien, (trx) => sql`
+    update acuerdo_exclusividad set
+      logo_socio_url       = ${socioUrl},
+      logo_socio_enlace    = ${socioEnlace},
+      logo_producto_url    = ${productoUrl},
+      logo_producto_enlace = ${productoEnlace},
+      texto_i18n           = ${texto ? JSON.stringify(texto) : null}::jsonb,
+      autorizacion_marca   = ${d.autorizacionMarca ?? false},
+      logo_socio_img       = ${socioImg === undefined ? sql`logo_socio_img` : socioImg ? socioImg.img : null},
+      logo_socio_mime      = ${socioImg === undefined ? sql`logo_socio_mime` : socioImg ? socioImg.mime : null},
+      logo_producto_img    = ${productoImg === undefined ? sql`logo_producto_img` : productoImg ? productoImg.img : null},
+      logo_producto_mime   = ${productoImg === undefined ? sql`logo_producto_mime` : productoImg ? productoImg.mime : null}
+    where id = ${id}::uuid
+  `.execute(trx));
+  if (Number(u.numAffectedRows ?? 0) === 0) throw new HttpError(404, 'No existe ese acuerdo.');
+  return { ok: true };
 }
 
 /**

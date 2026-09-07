@@ -115,6 +115,23 @@
   .grande{display:none}
   @media(min-width:940px){.menu{display:flex}.grande{display:inline-block}}
 
+  /* ============ marca del país (acuerdo de exclusividad, 071) ============
+     Con acuerdo vigente y autorización de marca, la barra reparte tres logos:
+     MiFirma a la izquierda, el socio al centro, el producto a la derecha; el
+     menú baja a una segunda línea. Sin acuerdo, nada de esto existe. */
+  .marca{display:none;align-items:center;height:30px}
+  .marca img{height:30px;max-width:160px;object-fit:contain;display:block}
+  nav.con-marca .marca{display:flex}
+  nav.con-marca .marca-socio{margin:0 auto}
+  nav.con-marca .navacc{margin-left:24px}
+  .submenu{display:none;border-top:1px solid var(--line)}
+  .submenu .menu{display:flex;height:40px;align-items:center;margin-left:0;flex:none}
+  @media(min-width:940px){nav.con-marca .submenu{display:block}}
+  @media(max-width:939px){nav.con-marca .marca-producto{display:none}.marca img{height:24px;max-width:110px}}
+  .respaldo{display:none;align-items:center;gap:12px;margin-top:22px;padding:10px 16px 10px 12px;border:1px solid var(--line);background:var(--paper);border-radius:12px;font-size:14px;color:var(--ink);max-width:560px}
+  .respaldo[data-hay]{display:inline-flex}
+  .respaldo img{height:24px;max-width:96px;object-fit:contain}
+
   /* ============ hero ============ */
   .hero{position:relative;padding:70px 0 92px;overflow:hidden;
     background:
@@ -301,6 +318,8 @@
       <a href="#paises" data-t="nav.paises">Países</a>
       <a href="#planes" data-t="nav.planes">Planes</a>
     </div>
+    <a class="marca marca-socio" id="marcaSocio"><img alt="" /></a>
+    <a class="marca marca-producto" id="marcaProducto"><img alt="" /></a>
     <div class="navacc">
       <div class="lang" role="group">
         <button onclick="idioma('es')" data-l="es">ES</button>
@@ -311,6 +330,7 @@
       <a class="btn btn-p grande" href="#planes" data-t="nav.probar">Probar</a>
     </div>
   </div>
+  <div class="submenu"><div class="wrap" id="submenu"></div></div>
 </nav>
 
 <header class="hero">
@@ -333,6 +353,9 @@
         <svg viewBox="0 0 24 24"><path d="M20 6L9 17l-5-5"/></svg>
         <span data-t="hero.nota">Sin instalar nada. Quien firma no necesita crearse una cuenta.</span>
       </p>
+      <!-- El texto del país, cargado por el operador en el acuerdo de
+           exclusividad (071). Vacío y oculto hasta que /publico/marca diga algo. -->
+      <div class="respaldo" id="marcaTexto"><img id="marcaTextoLogo" alt="" /><span id="marcaTextoTxt"></span></div>
     </div>
 
     <!-- Maqueta del producto. Es HTML, no una imagen: se traduce, se ajusta

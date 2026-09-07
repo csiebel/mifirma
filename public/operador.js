@@ -56,6 +56,9 @@
     documento: 'Por documento',
     circuito: 'Por circuito enviado',
     sms: 'Por SMS enviado',
+    asistente_ia: 'Por consulta al asistente',
+    dispositivo_propio: 'Por firma con dispositivo propio',
+    identidad_digital: 'Por verificación de identidad',
   };
   var AYUDA_METRICA = {
     abono: 'Lo fijo del plan, se cobre o no se use.',
@@ -63,6 +66,22 @@
     documento: 'Cada documento, sin importar cuántos lo firmen.',
     circuito: 'Cada envío a firmar, sin importar cuántos documentos lleve.',
     sms: 'Lo que se le traslada al cliente por cada SMS de aviso.',
+    asistente_ia: 'Sólo si la prestación del plan dice que se cobra por unidad.',
+    dispositivo_propio: 'Cada firma hecha con el token o tarjeta del firmante.',
+    identidad_digital: 'Cada verificación del firmante con su identidad digital (tuID, gov.br…).',
+  };
+  // Las prestaciones del plan (071): qué trae cada plan, con o sin costo.
+  var PRESTACION_NOMBRE = {
+    asistente_ia: 'Asistente de IA',
+    firma_avanzada: 'Firma avanzada con proveedor en la nube',
+    dispositivo_propio: 'Firma con dispositivo propio (token o tarjeta)',
+    identidad_digital: 'Verificación con identidad digital',
+  };
+  var PRESTACION_AYUDA = {
+    asistente_ia: 'Redacción y explicación de documentos con IA.',
+    firma_avanzada: 'Certificado del titular en tuID, SERPRO, e-Firma…',
+    dispositivo_propio: 'El firmante firma con su propio certificado. Sin costo de proveedor; sí de soporte.',
+    identidad_digital: 'Probar quién es el firmante contra su identidad digital antes de firmar.',
   };
   var ETIQUETA_NIVEL = { simple: 'Simple', avanzada: 'Avanzada' };
 
@@ -809,7 +828,25 @@
       '<div><label class="check"><input type="checkbox" id="mActivo" ' +
         (!plan || plan.activo ? 'checked' : '') + ' /> Activo</label></div>' +
       '</div>' +
-      '<label for="mOrden">Orden</label>' +
+      '<h3 style="margin:18px 0 4px;font-size:14.5px">Qué trae el plan</h3>' +
+      '<p class="pista" style="margin:0 0 8px">Incluida: el plan la ofrece. Cobra: el uso se factura; si no, va sin cargo. ' +
+      'Cantidad incluida: unidades sin cargo antes de cobrar. Margen: sobre el costo del proveedor.</p>' +
+      '<table class="prest"><thead><tr>' +
+      '<th>Prestación</th><th>Incluida</th><th>Cobra</th><th>Sin cargo</th><th>Margen %</th>' +
+      '</tr></thead><tbody>' +
+      (DATOS.prestaciones || []).map(function (k) {
+        var x = ((plan && plan.prestaciones) || []).filter(function (y) { return y.prestacion === k; })[0] || {};
+        return '<tr data-pr="' + k + '">' +
+          '<td><b>' + esc(PRESTACION_NOMBRE[k] || k) + '</b><br><span style="font-size:12.5px;color:var(--mut)">' +
+            esc(PRESTACION_AYUDA[k] || '') + '</span></td>' +
+          '<td><input type="checkbox" class="prInc" style="width:auto"' + (x.incluida ? ' checked' : '') + ' /></td>' +
+          '<td><input type="checkbox" class="prCob" style="width:auto"' + (x.cobra !== false ? ' checked' : '') + ' /></td>' +
+          '<td><input class="prCant" inputmode="decimal" style="max-width:70px" title="Unidades sin cargo por período antes de cobrar" value="' + esc(x.cantidad_incluida != null ? x.cantidad_incluida : 0) + '" /></td>' +
+          '<td><input class="prMar" inputmode="decimal" style="max-width:64px" value="' + esc(x.margen_pct != null ? x.margen_pct : 0) + '" /></td>' +
+          '</tr>';
+      }).join('') +
+      '</tbody></table>' +
+      '<label for="mOrden" style="margin-top:14px">Orden</label>' +
       '<input id="mOrden" inputmode="numeric" style="max-width:120px" value="' +
         esc(plan ? plan.orden : 100) + '" />' +
       '<p class="pista">De menor a mayor, de izquierda a derecha en la página.</p>' +
@@ -861,6 +898,15 @@
         destacado: $('mDestacado').checked,
         activo: $('mActivo').checked,
         orden: Number($('mOrden').value || 100),
+        prestaciones: Array.prototype.map.call($('modal').querySelectorAll('tr[data-pr]'), function (tr) {
+          return {
+            prestacion: tr.dataset.pr,
+            incluida: tr.querySelector('.prInc').checked,
+            cobra: tr.querySelector('.prCob').checked,
+            cantidad_incluida: Number(String(tr.querySelector('.prCant').value || 0).replace(',', '.')) || 0,
+            margen_pct: Number(String(tr.querySelector('.prMar').value || 0).replace(',', '.')) || 0,
+          };
+        }),
       };
       $('mOk').disabled = true;
       try {
@@ -1213,7 +1259,9 @@
         '<td>' + esc((a.capacidades || []).join(', ')) + '</td>' +
         '<td>' + (a.vigente_hoy ? '<b>vigente</b>' : '<span class="mut">no vigente</span>') +
           '<br><span class="mut">marca: ' + marca + '</span></td>' +
-        '<td>' + (a.vigente_hoy
+        '<td style="white-space:nowrap">' +
+          '<button class="btn chico" onclick="abrirMarca(\'' + esc(a.id) + '\')">Marca</button> ' +
+          (a.vigente_hoy
           ? '<button class="btn chico" onclick="cerrarAcuerdoForm(\'' + esc(a.id) + '\')">Cerrar</button>'
           : '') + '</td>' +
         '</tr>';
@@ -1280,6 +1328,104 @@
       ok('msgProveedores', 'Acuerdo creado.');
     } catch (e) {
       msg('msgModalAc', e.message, 'err');
+    }
+  }
+
+  // ---- La marca del país (071) ----
+  //
+  // Lo único del acuerdo que se edita en el lugar: los logos (por URL o subidos),
+  // a dónde lleva cada uno, el texto de la página del país y la autorización de
+  // marca. Las fechas, el país y el proveedor no: eso es el acuerdo comercial —
+  // se cierra y se crea otro.
+  var MARCA_IMG = {};   // { socio: dataURL | null | undefined, producto: … }
+
+  function abrirMarca(id) {
+    var a = ACUERDOS.filter(function (x) { return x.id === id; })[0];
+    if (!a) return;
+    MARCA_IMG = {};
+    var ti = a.texto_i18n || {};
+    function bloque(cual, titulo) {
+      var hay = a['logo_' + cual + '_img_hay'];
+      return '<fieldset style="border:1px solid var(--line);border-radius:10px;padding:10px 12px;margin-top:10px">' +
+        '<legend style="font-size:13px;font-weight:600;padding:0 6px">' + titulo + '</legend>' +
+        '<div class="dos">' +
+        '<div><label>Imagen subida</label>' +
+        '<input type="file" id="mc' + cual + 'Arch" accept="image/png,image/jpeg,image/webp,image/svg+xml" onchange="marcaArchivo(\'' + cual + '\')" />' +
+        '<div id="mc' + cual + 'Est" class="mut" style="margin-top:4px">' +
+          (hay ? 'Hay una imagen cargada (' + esc(a['logo_' + cual + '_mime'] || '') + '). ' +
+                 '<a href="#" onclick="marcaQuitar(\'' + cual + '\');return false">Quitar</a>'
+               : 'Sin imagen. PNG, JPEG, WebP o SVG, hasta 300 KB.') +
+        '</div>' +
+        '<img id="mc' + cual + 'Prev" alt="" style="display:none;max-height:40px;max-width:180px;margin-top:6px" /></div>' +
+        '<div><label>O URL de la imagen</label><input id="mc' + cual + 'Url" placeholder="https://…" value="' + esc(a['logo_' + cual + '_url'] || '') + '" />' +
+        '<label style="margin-top:8px">Enlace al hacer clic</label><input id="mc' + cual + 'Enl" placeholder="https://…" value="' + esc(a['logo_' + cual + '_enlace'] || '') + '" /></div>' +
+        '</div></fieldset>';
+    }
+    abrirModal(
+      '<h2>Marca en la página de ' + esc(a.pais) + '</h2>' +
+      '<p class="sub">Los logos salen en la barra del sitio, junto al de MiFirma, cuando el acuerdo está ' +
+      'vigente y hay autorización de marca. La imagen subida manda sobre la URL.</p>' +
+      bloque('socio', 'Logo del socio — ' + esc(a.socio_nombre)) +
+      bloque('producto', 'Logo del producto') +
+      '<fieldset style="border:1px solid var(--line);border-radius:10px;padding:10px 12px;margin-top:10px">' +
+      '<legend style="font-size:13px;font-weight:600;padding:0 6px">Texto de la página del país</legend>' +
+      '<label>Español</label><textarea id="mcTxtEs" rows="2" maxlength="400">' + esc(ti.es || '') + '</textarea>' +
+      '<label style="margin-top:8px">Portugués</label><textarea id="mcTxtPt" rows="2" maxlength="400">' + esc(ti.pt || '') + '</textarea>' +
+      '<label style="margin-top:8px">Inglés</label><textarea id="mcTxtEn" rows="2" maxlength="400">' + esc(ti.en || '') + '</textarea>' +
+      '</fieldset>' +
+      '<label style="display:flex;gap:8px;align-items:flex-start;margin-top:14px;font-size:13.5px">' +
+      '<input type="checkbox" id="mcAutoriz" style="width:auto;margin-top:3px"' + (a.autorizacion_marca ? ' checked' : '') + ' />' +
+      '<span>Tengo la autorización de uso de marca por escrito.<br>' +
+      '<span class="mut">Sin esto no se muestra nada de lo de arriba, aunque esté cargado.</span></span></label>' +
+      '<div id="msgModalMc" style="margin-top:10px"></div>' +
+      '<div class="acciones">' +
+      '<button class="btn btn-s" onclick="cerrarModal()">Cancelar</button>' +
+      '<button class="btn btn-p" onclick="guardarMarcaForm(\'' + esc(id) + '\')">Guardar</button>' +
+      '</div>',
+    );
+  }
+
+  function marcaArchivo(cual) {
+    var f = $('mc' + cual + 'Arch').files[0];
+    if (!f) return;
+    if (f.size > 300 * 1024) {
+      msg('msgModalMc', 'La imagen pesa ' + Math.round(f.size / 1024) + ' KB y el tope es 300 KB.', 'err');
+      $('mc' + cual + 'Arch').value = '';
+      return;
+    }
+    var r = new FileReader();
+    r.onload = function () {
+      MARCA_IMG[cual] = r.result;
+      var p = $('mc' + cual + 'Prev'); p.src = r.result; p.style.display = 'block';
+      $('mc' + cual + 'Est').textContent = 'Se sube al guardar: ' + f.name + ' (' + Math.round(f.size / 1024) + ' KB).';
+      msg('msgModalMc', '', '');
+    };
+    r.readAsDataURL(f);
+  }
+  function marcaQuitar(cual) {
+    MARCA_IMG[cual] = null;
+    $('mc' + cual + 'Est').textContent = 'La imagen se quita al guardar.';
+    var p = $('mc' + cual + 'Prev'); p.removeAttribute('src'); p.style.display = 'none';
+  }
+
+  async function guardarMarcaForm(id) {
+    try {
+      var texto = { es: $('mcTxtEs').value.trim(), pt: $('mcTxtPt').value.trim(), en: $('mcTxtEn').value.trim() };
+      await api('/operador/exclusividad/' + encodeURIComponent(id) + '/marca', 'PATCH', {
+        logo_socio_url: $('mcsocioUrl').value.trim() || null,
+        logo_socio_enlace: $('mcsocioEnl').value.trim() || null,
+        logo_socio_img: MARCA_IMG.socio,
+        logo_producto_url: $('mcproductoUrl').value.trim() || null,
+        logo_producto_enlace: $('mcproductoEnl').value.trim() || null,
+        logo_producto_img: MARCA_IMG.producto,
+        texto_i18n: texto,
+        autorizacion_marca: $('mcAutoriz').checked,
+      });
+      cerrarModal();
+      cargarProveedores();
+      ok('msgProveedores', 'Marca guardada.');
+    } catch (e) {
+      msg('msgModalMc', e.message, 'err');
     }
   }
 
@@ -1911,6 +2057,10 @@
   window.abrirAcuerdo = abrirAcuerdo;
   window.guardarAcuerdoForm = guardarAcuerdoForm;
   window.cerrarAcuerdoForm = cerrarAcuerdoForm;
+  window.abrirMarca = abrirMarca;
+  window.marcaArchivo = marcaArchivo;
+  window.marcaQuitar = marcaQuitar;
+  window.guardarMarcaForm = guardarMarcaForm;
   window.abrirPasarela = abrirPasarela;
   window.guardarPasarelaForm = guardarPasarelaForm;
   window.togglearPasarela = togglearPasarela;
