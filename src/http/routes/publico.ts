@@ -142,8 +142,27 @@ export function registrarRutasPublico(app: FastifyInstance) {
     );
     const a = r.rows[0];
     if (!a) return { marca: null };
+
+    // ⚠ La huella de cada imagen va en la URL. Sin esto, el logo viejo se queda
+    // pegado hasta diez minutos en el navegador de cada visitante después de que
+    // el operador lo cambia — medido el 7/9, cambiando el logo del socio y viendo
+    // el anterior en pantalla. Con la huella, cambiar la imagen cambia la URL y
+    // el caché se resuelve solo. `acuerdo_select` es `using (true)` y `app_rw`
+    // tiene el select, así que el actor anónimo puede calcularla.
+    const v = await anonimo((trx) =>
+      sql<{ socio: string | null; producto: string | null }>`
+        select left(md5(logo_socio_img), 8) as socio, left(md5(logo_producto_img), 8) as producto
+          from acuerdo_exclusividad
+         where pais = ${pais} and autorizacion_marca
+           and vigente_desde <= current_date
+           and (vigente_hasta is null or vigente_hasta >= current_date)
+      `.execute(trx),
+    );
+    const huella = v.rows[0] ?? { socio: null, producto: null };
     const logo = (cual: 'socio' | 'producto', hay: boolean, url: string | null) =>
-      hay ? `/publico/marca-imagen?pais=${pais}&cual=${cual}` : url;
+      hay
+        ? `/publico/marca-imagen?pais=${pais}&cual=${cual}&v=${(huella as any)[cual] ?? '0'}`
+        : url;
     return {
       marca: {
         socio_nombre: a.socio_nombre,
@@ -165,7 +184,9 @@ export function registrarRutasPublico(app: FastifyInstance) {
   // equivocar de archivo.
   app.get('/publico/marca-imagen', async (req, reply) => {
     const q = z
-      .object({ pais: z.string().length(2), cual: z.enum(['socio', 'producto']) })
+      // `v` es la huella de la imagen: no se usa para buscar nada, sólo para que
+      // cambiar el logo cambie la URL. Se acepta y se ignora.
+      .object({ pais: z.string().length(2), cual: z.enum(['socio', 'producto']), v: z.string().max(32).optional() })
       .parse((req as any).query ?? {});
     const r = await anonimo((trx) =>
       sql<{ img: Buffer; mime: string }>`
@@ -178,7 +199,9 @@ export function registrarRutasPublico(app: FastifyInstance) {
       .header('Content-Type', f.mime)
       .header('Content-Security-Policy', "default-src 'none'; style-src 'unsafe-inline'; sandbox")
       .header('X-Content-Type-Options', 'nosniff')
-      .header('Cache-Control', 'public, max-age=600')
+      // Un año: la URL lleva la huella del contenido, así que una imagen distinta
+      // es otra URL. Sin `v` (nadie debería), una hora.
+      .header('Cache-Control', q.v ? 'public, max-age=31536000, immutable' : 'public, max-age=3600')
       .send(f.img);
   });
 

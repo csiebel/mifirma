@@ -419,7 +419,12 @@ const TOPE_LOGO = 300 * 1024;
 export function logoDesdeDataUrl(dataUrl: string): { img: Buffer; mime: string } {
   const m = /^data:([a-z0-9.+\/-]+);base64,([A-Za-z0-9+\/=\s]+)$/i.exec(dataUrl.trim());
   if (!m) throw new HttpError(400, 'El logo tiene que llegar como imagen en base64.');
-  let img = Buffer.from(m[2].replace(/\s+/g, ''), 'base64');
+  return logoDesdeBytes(Buffer.from(m[2].replace(/\s+/g, ''), 'base64'));
+}
+
+/** El mismo control, para bytes que llegaron por cualquier vía. */
+export function logoDesdeBytes(bytes: Buffer): { img: Buffer; mime: string } {
+  let img = bytes;
   if (img.length === 0) throw new HttpError(400, 'El logo está vacío.');
   if (img.length > TOPE_LOGO) throw new HttpError(400, `El logo pesa ${Math.round(img.length / 1024)} KB y el tope es 300 KB.`);
 
@@ -445,14 +450,40 @@ export function logoDesdeDataUrl(dataUrl: string): { img: Buffer; mime: string }
   return { img, mime };
 }
 
+/**
+ * La imagen de un logo TAL COMO ESTÁ GUARDADA, para la vista previa de la
+ * consola.
+ *
+ * ⚠ No pasa por `app.marca_imagen`, y es a propósito: esa función es la puerta
+ * PÚBLICA y aplica la vigencia y la autorización de marca. El operador tiene
+ * que poder ver qué subió ANTES de marcar la autorización — si no, tendría que
+ * publicar para saber cómo queda, que es exactamente al revés.
+ *
+ * La lectura es directa porque `acuerdo_select` (067) es `using (true)` y el
+ * operador ya puede leer la tabla entera.
+ */
+export async function imagenDeAcuerdo(id: string, cual: 'socio' | 'producto', porQuien: string) {
+  const col = cual === 'socio' ? 'logo_socio' : 'logo_producto';
+  const r = await withOperador(porQuien, (trx) => sql<{ img: Buffer | null; mime: string | null }>`
+    select ${sql.ref(col + '_img')} as img, ${sql.ref(col + '_mime')} as mime
+      from acuerdo_exclusividad where id = ${id}::uuid
+  `.execute(trx));
+  const f = r.rows[0];
+  if (!f?.img || !f.mime) return null;
+  return { img: f.img, mime: f.mime };
+}
+
 export interface MarcaDelAcuerdo {
   logoSocioUrl?: string | null;
   logoSocioEnlace?: string | null;
   /** data URL para subir, null para quitar, undefined para no tocar. */
   logoSocioImg?: string | null;
+  /** Si es true, se guarda una copia de lo que haya en `logoSocioUrl`. */
+  copiarSocio?: boolean;
   logoProductoUrl?: string | null;
   logoProductoEnlace?: string | null;
   logoProductoImg?: string | null;
+  copiarProducto?: boolean;
   textoI18n?: Record<string, string> | null;
   autorizacionMarca?: boolean;
 }
@@ -461,6 +492,82 @@ function urlHttps(u: string | null | undefined, que: string): string | null {
   if (u == null || u === '') return null;
   if (!/^https:\/\//.test(u)) throw new HttpError(400, `${que} tiene que ser una URL https.`);
   return u;
+}
+
+/**
+ * Traer una imagen de una URL y quedarnos con una copia.
+ *
+ * ═══ POR QUÉ EL SERVIDOR Y NO EL NAVEGADOR ═══
+ *
+ * El logo de un socio vive en el sitio del socio. Enlazarlo es gratis y frágil:
+ * el día que Antel reorganice su web, la página del país queda sin logo y nadie
+ * se entera. Con una copia propia, la marca del acuerdo tiene la misma vida que
+ * el acuerdo. El navegador del operador no puede hacer esa copia —la política
+ * de contenido de la consola sólo habla con nuestro propio origen—, así que la
+ * trae el servidor.
+ *
+ * ⚠⚠ Un servidor que descarga la URL que le dicen es un ariete: puede alcanzar
+ * lo que el operador no alcanza —la red interna de Railway, un metadata service,
+ * la propia base. Los cinco frenos:
+ *
+ *   1. Sólo `https:` (la URL final también, después de redirecciones).
+ *   2. El host tiene que ser un nombre con punto — nada de `localhost` ni de
+ *      nombres cortos de red interna.
+ *   3. Se rechazan las IPs literales privadas, de loopback y de enlace local.
+ *   4. Diez segundos de paciencia y 300 KB de tope, cortando la lectura por
+ *      partes: un servidor hostil no nos llena la memoria con un chorro infinito.
+ *   5. Lo que llega pasa por el MISMO control que un archivo subido a mano
+ *      (firma del archivo, no lo que declare el `Content-Type`, y el SVG saneado).
+ *
+ * Y sobre todo: esto lo llama un operador autenticado con `gestionar_pagos`.
+ * No hay forma de disparar esto desde afuera.
+ */
+export async function traerLogoDeUrl(url: string): Promise<{ img: Buffer; mime: string }> {
+  let u: URL;
+  try {
+    u = new URL(url);
+  } catch {
+    throw new HttpError(400, 'Esa no es una dirección válida.');
+  }
+  const seguro = (v: URL) => {
+    if (v.protocol !== 'https:') throw new HttpError(400, 'La imagen tiene que venir de una dirección https.');
+    const h = v.hostname.replace(/^\[|\]$/g, '');
+    if (!h.includes('.') || h === 'localhost') throw new HttpError(400, 'Ese host no se puede consultar.');
+    if (/^(?:127\.|10\.|192\.168\.|169\.254\.|0\.|172\.(?:1[6-9]|2\d|3[01])\.)/.test(h) || h === '::1' || /^f[cd]/i.test(h)) {
+      throw new HttpError(400, 'Ese host no se puede consultar.');
+    }
+  };
+  seguro(u);
+
+  const corte = new AbortController();
+  const reloj = setTimeout(() => corte.abort(), 10_000);
+  let r: Response;
+  try {
+    r = await fetch(u, { signal: corte.signal, redirect: 'follow', headers: { Accept: 'image/*' } });
+  } catch (e) {
+    clearTimeout(reloj);
+    throw new HttpError(502, 'No se pudo traer la imagen de esa dirección.');
+  }
+  clearTimeout(reloj);
+  seguro(new URL(r.url));
+  if (!r.ok) throw new HttpError(502, `La dirección contestó ${r.status}.`);
+
+  // Se lee por partes para poder cortar en el tope y no tragarse un chorro sin fin.
+  const partes: Buffer[] = [];
+  let total = 0;
+  const lector = (r.body as any)?.getReader?.();
+  if (!lector) throw new HttpError(502, 'La dirección no devolvió una imagen.');
+  for (;;) {
+    const { done, value } = await lector.read();
+    if (done) break;
+    total += value.length;
+    if (total > 300 * 1024) {
+      try { await lector.cancel(); } catch { /* ya está */ }
+      throw new HttpError(400, 'La imagen de esa dirección pesa más de 300 KB.');
+    }
+    partes.push(Buffer.from(value));
+  }
+  return logoDesdeBytes(Buffer.concat(partes));
 }
 
 /**
@@ -475,8 +582,18 @@ export async function actualizarMarca(id: string, d: MarcaDelAcuerdo, porQuien: 
   const productoUrl = urlHttps(d.logoProductoUrl, 'El logo del producto');
   const socioEnlace = urlHttps(d.logoSocioEnlace, 'El enlace del socio');
   const productoEnlace = urlHttps(d.logoProductoEnlace, 'El enlace del producto');
-  const socioImg = d.logoSocioImg ? logoDesdeDataUrl(d.logoSocioImg) : d.logoSocioImg === null ? null : undefined;
-  const productoImg = d.logoProductoImg ? logoDesdeDataUrl(d.logoProductoImg) : d.logoProductoImg === null ? null : undefined;
+  // Un archivo elegido a mano gana sobre «traer de la URL»: si el operador hizo
+  // las dos cosas, lo que quiso es lo que acaba de elegir.
+  let socioImg = d.logoSocioImg ? logoDesdeDataUrl(d.logoSocioImg) : d.logoSocioImg === null ? null : undefined;
+  let productoImg = d.logoProductoImg ? logoDesdeDataUrl(d.logoProductoImg) : d.logoProductoImg === null ? null : undefined;
+  if (!socioImg && d.copiarSocio) {
+    if (!socioUrl) throw new HttpError(400, 'Marcaste guardar una copia del logo del socio pero no hay dirección.');
+    socioImg = await traerLogoDeUrl(socioUrl);
+  }
+  if (!productoImg && d.copiarProducto) {
+    if (!productoUrl) throw new HttpError(400, 'Marcaste guardar una copia del logo del producto pero no hay dirección.');
+    productoImg = await traerLogoDeUrl(productoUrl);
+  }
 
   let texto: Record<string, string> | null = null;
   if (d.textoI18n) {

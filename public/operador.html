@@ -99,6 +99,20 @@
   .prest td:first-child{width:52%}
   .prest td:first-child span{display:block;line-height:1.35}
   .prest input{margin:0}
+  /* La barra del sitio, a tamaño real, dentro del modal de marca (7/9). Repite
+     las reglas de `sitio.html`: 30px de alto, el que falta no ocupa lugar, y el
+     que queda solo se centra. */
+  .mcBarra{display:flex;align-items:center;gap:0;height:56px;padding:0 14px;margin:0 0 2px;
+    border:1px solid var(--line);border-radius:10px;background:#fff;overflow:hidden}
+  .mcBarra .mf{height:26px;display:block}
+  .mcBarra .lg{max-height:30px;max-width:150px;width:auto;object-fit:contain;display:block}
+  .mcBarra .lg.vacia{display:none}
+  .mcBarra #mcBarraSocio{margin:0 auto}
+  .mcBarra #mcBarraSocio.vacia ~ #mcBarraProducto{margin:0 auto}
+  .mcBarra .bot{margin-left:10px;font-size:11px;font-weight:600;color:var(--mut);
+    border:1px solid var(--line);border-radius:8px;padding:5px 9px;white-space:nowrap}
+  .mcBarra .bot.p{background:#0f1f33;color:#fff;border-color:#0f1f33}
+  .mcBarra #mcBarraSocio.vacia ~ .bot{margin-left:10px}
   tr:last-child td{border-bottom:0}
   td input{padding:8px 10px}
   .pill{display:inline-block;font-size:12px;font-weight:600;padding:3px 10px;border-radius:999px;margin-right:5px}

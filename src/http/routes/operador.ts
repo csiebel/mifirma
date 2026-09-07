@@ -47,6 +47,7 @@ import {
   crearAcuerdo,
   cerrarAcuerdo,
   actualizarMarca,
+  imagenDeAcuerdo,
   CAPACIDADES as CAPACIDADES_PROVEEDOR,
 } from '../../services/proveedores';
 import { adaptadorDe } from '../../services/pagos/registro';
@@ -888,6 +889,24 @@ export function registrarRutasOperador(app: FastifyInstance) {
     });
   });
 
+  // La imagen guardada, para la vista previa del modal de marca. Sin la puerta
+  // pública: el operador mira lo que subió antes de autorizar la marca.
+  app.get('/operador/exclusividad/:id/imagen/:cual', async (req, reply) => {
+    const s = await sesion(req);
+    exigirCap(s, 'gestionar_pagos');
+    const { id, cual } = z
+      .object({ id: z.string().uuid(), cual: z.enum(['socio', 'producto']) })
+      .parse(req.params);
+    const f = await imagenDeAcuerdo(id, cual, s.operadorId);
+    if (!f) return reply.code(404).send({ error: 'sin_imagen' });
+    return reply
+      .header('Content-Type', f.mime)
+      .header('Content-Security-Policy', "default-src 'none'; style-src 'unsafe-inline'; sandbox")
+      .header('X-Content-Type-Options', 'nosniff')
+      .header('Cache-Control', 'no-store')
+      .send(f.img);
+  });
+
   // La marca del país (071): logos subidos o por URL, enlaces, texto por idioma
   // y autorización. Es lo único del acuerdo que se edita en el lugar.
   app.patch('/operador/exclusividad/:id/marca', async (req) => {
@@ -900,9 +919,11 @@ export function registrarRutasOperador(app: FastifyInstance) {
         logo_socio_url: url,
         logo_socio_enlace: url,
         logo_socio_img: z.string().max(600_000).nullable().optional(),
+        copiar_socio: z.boolean().optional(),
         logo_producto_url: url,
         logo_producto_enlace: url,
         logo_producto_img: z.string().max(600_000).nullable().optional(),
+        copiar_producto: z.boolean().optional(),
         texto_i18n: z.record(z.string().max(400)).nullable().optional(),
         autorizacion_marca: z.boolean().optional(),
       })
@@ -911,9 +932,11 @@ export function registrarRutasOperador(app: FastifyInstance) {
       logoSocioUrl: b.logo_socio_url,
       logoSocioEnlace: b.logo_socio_enlace,
       logoSocioImg: b.logo_socio_img,
+      copiarSocio: b.copiar_socio,
       logoProductoUrl: b.logo_producto_url,
       logoProductoEnlace: b.logo_producto_enlace,
       logoProductoImg: b.logo_producto_img,
+      copiarProducto: b.copiar_producto,
       textoI18n: b.texto_i18n,
       autorizacionMarca: b.autorizacion_marca,
     }, s.operadorId);

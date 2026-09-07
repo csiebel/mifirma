@@ -1338,11 +1338,13 @@
   // marca. Las fechas, el país y el proveedor no: eso es el acuerdo comercial —
   // se cierra y se crea otro.
   var MARCA_IMG = {};   // { socio: dataURL | null | undefined, producto: … }
+  var MARCA_ACUERDO = null;
 
   function abrirMarca(id) {
     var a = ACUERDOS.filter(function (x) { return x.id === id; })[0];
     if (!a) return;
     MARCA_IMG = {};
+    MARCA_ACUERDO = a;
     var ti = a.texto_i18n || {};
     function bloque(cual, titulo) {
       var hay = a['logo_' + cual + '_img_hay'];
@@ -1354,17 +1356,42 @@
         '<div id="mc' + cual + 'Est" class="mut" style="margin-top:4px">' +
           (hay ? 'Hay una imagen cargada (' + esc(a['logo_' + cual + '_mime'] || '') + '). ' +
                  '<a href="#" onclick="marcaQuitar(\'' + cual + '\');return false">Quitar</a>'
-               : 'Sin imagen. PNG, JPEG, WebP o SVG, hasta 300 KB.') +
+               : 'Sin imagen. PNG, JPEG, WebP o SVG, hasta 300 KB. Apaisada y con fondo transparente: ' +
+                 'en la barra se muestra a 30 px de alto.') +
         '</div>' +
         '<img id="mc' + cual + 'Prev" alt="" style="display:none;max-height:40px;max-width:180px;margin-top:6px" /></div>' +
         '<div><label>O URL de la imagen</label><input id="mc' + cual + 'Url" placeholder="https://…" value="' + esc(a['logo_' + cual + '_url'] || '') + '" />' +
+        '<label class="check" style="display:flex;gap:7px;align-items:flex-start;margin-top:6px;font-size:12.5px">' +
+        '<input type="checkbox" id="mc' + cual + 'Copia" style="width:auto;margin-top:2px" />' +
+        '<span>Guardar una copia de esa imagen<br><span class="mut">La trae el servidor y queda en nuestra base: ' +
+        'si el socio reorganiza su web, el logo no desaparece.</span></span></label>' +
         '<label style="margin-top:8px">Enlace al hacer clic</label><input id="mc' + cual + 'Enl" placeholder="https://…" value="' + esc(a['logo_' + cual + '_enlace'] || '') + '" /></div>' +
         '</div></fieldset>';
     }
+    // La vista previa se refresca con cada tecla en las URLs, no sólo al elegir
+    // archivo: un logo por URL también tiene que poder mirarse antes.
+    setTimeout(function () {
+      ['socio', 'producto'].forEach(function (cual) {
+        var u = $('mc' + cual + 'Url');
+        if (u) u.addEventListener('input', pintarBarraMarca);
+      });
+      pintarBarraMarca();
+    }, 0);
+
     abrirModal(
       '<h2>Marca en la página de ' + esc(a.pais) + '</h2>' +
       '<p class="sub">Los logos salen en la barra del sitio, junto al de MiFirma, cuando el acuerdo está ' +
       'vigente y hay autorización de marca. La imagen subida manda sobre la URL.</p>' +
+
+      // ⚠ La barra de verdad, a tamaño real. Nació el 7/9: el primer logo cargado
+      // en producción era una FOTO de un teléfono, y a 30 px de alto no se leía —
+      // no había forma de saberlo sin publicar. Acá se ve antes de guardar.
+      '<p class="pista" style="margin:0 0 4px">Así va a quedar la barra del sitio:</p>' +
+      '<div class="mcBarra"><img src="/logo.svg" alt="MiFirma" class="mf" />' +
+      '<img id="mcBarraSocio" class="lg vacia" alt="" />' +
+      '<img id="mcBarraProducto" class="lg vacia" alt="" />' +
+      '<span class="bot">Entrar</span><span class="bot p">Probar</span></div>' +
+      '<p class="pista" id="mcAviso" style="margin:4px 0 0"></p>' +
       bloque('socio', 'Logo del socio — ' + esc(a.socio_nombre)) +
       bloque('producto', 'Logo del producto') +
       '<fieldset style="border:1px solid var(--line);border-radius:10px;padding:10px 12px;margin-top:10px">' +
@@ -1385,6 +1412,50 @@
     );
   }
 
+  /**
+   * Pinta la tira de vista previa con lo que se va a guardar, en el mismo orden
+   * de prioridad que resuelve el servidor: imagen recién elegida → imagen ya
+   * guardada → URL. Y avisa cuando una imagen va a quedar ilegible.
+   *
+   * ⚠ La imagen guardada se pide a `/operador/exclusividad/:id/imagen/:cual` y
+   * NO a `/publico/marca-imagen`: la pública exige autorización de marca, y la
+   * gracia de esto es mirar ANTES de autorizar.
+   */
+  function pintarBarraMarca() {
+    if (!$('mcBarraSocio') || !MARCA_ACUERDO) return;
+    var avisos = [];
+    if ($('mcAviso')) $('mcAviso').textContent = '';
+    ['socio', 'producto'].forEach(function (cual) {
+      var img = $('mcBarra' + cual.charAt(0).toUpperCase() + cual.slice(1));
+      var url = $('mc' + cual + 'Url') ? $('mc' + cual + 'Url').value.trim() : '';
+      var src = null;
+      if (MARCA_IMG[cual]) src = MARCA_IMG[cual];
+      else if (MARCA_IMG[cual] !== null && MARCA_ACUERDO['logo_' + cual + '_img_hay'])
+        src = '/operador/exclusividad/' + MARCA_ACUERDO.id + '/imagen/' + cual + '?t=' + Date.now();
+      else if (/^https:\/\//.test(url)) src = url;
+
+      if (!src) { img.classList.add('vacia'); img.removeAttribute('src'); return; }
+      img.classList.remove('vacia');
+      img.onload = function () {
+        // A 30 px de alto, ¿cuánto mide de ancho? Un logotipo con el nombre es
+        // apaisado —3:1 o más, o sea 90 px o más— y se lee. Una foto o un ícono
+        // cuadrado queda en 30–50 px y en la barra es una manchita.
+        var ancho = Math.round(30 * (img.naturalWidth / img.naturalHeight));
+        if (ancho < 75) {
+          avisos.push('⚠ El logo del ' + cual + ' va a quedar de ' + ancho + ' px de ancho (' +
+            img.naturalWidth + '×' + img.naturalHeight + '): demasiado cuadrado para una barra. ' +
+            'Conviene el logotipo apaisado, con el nombre, y fondo transparente — no una foto ni un ícono.');
+        }
+        if ($('mcAviso')) $('mcAviso').innerHTML = avisos.map(esc).join('<br>');
+      };
+      img.onerror = function () {
+        img.classList.add('vacia');
+        if ($('mcAviso')) $('mcAviso').textContent = 'No se pudo cargar la imagen del ' + cual + '.';
+      };
+      img.src = src;
+    });
+  }
+
   function marcaArchivo(cual) {
     var f = $('mc' + cual + 'Arch').files[0];
     if (!f) return;
@@ -1399,6 +1470,7 @@
       var p = $('mc' + cual + 'Prev'); p.src = r.result; p.style.display = 'block';
       $('mc' + cual + 'Est').textContent = 'Se sube al guardar: ' + f.name + ' (' + Math.round(f.size / 1024) + ' KB).';
       msg('msgModalMc', '', '');
+      pintarBarraMarca();
     };
     r.readAsDataURL(f);
   }
@@ -1406,6 +1478,7 @@
     MARCA_IMG[cual] = null;
     $('mc' + cual + 'Est').textContent = 'La imagen se quita al guardar.';
     var p = $('mc' + cual + 'Prev'); p.removeAttribute('src'); p.style.display = 'none';
+    pintarBarraMarca();
   }
 
   async function guardarMarcaForm(id) {
@@ -1415,9 +1488,11 @@
         logo_socio_url: $('mcsocioUrl').value.trim() || null,
         logo_socio_enlace: $('mcsocioEnl').value.trim() || null,
         logo_socio_img: MARCA_IMG.socio,
+        copiar_socio: $('mcsocioCopia').checked,
         logo_producto_url: $('mcproductoUrl').value.trim() || null,
         logo_producto_enlace: $('mcproductoEnl').value.trim() || null,
         logo_producto_img: MARCA_IMG.producto,
+        copiar_producto: $('mcproductoCopia').checked,
         texto_i18n: texto,
         autorizacion_marca: $('mcAutoriz').checked,
       });

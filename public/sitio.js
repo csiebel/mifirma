@@ -260,6 +260,8 @@
     function logo(id, d, nombre){
       var a = document.getElementById(id); if (!a) return;
       var img = a.querySelector('img');
+      // `vacia` saca la ranura del flujo: un logo que falta no puede correr al otro.
+      a.classList.toggle('vacia', !(hay && d && d.logo));
       if (!hay || !d || !d.logo){ img.removeAttribute('src'); a.removeAttribute('href'); return; }
       img.src = d.logo; img.alt = nombre || '';
       if (d.enlace){ a.href = d.enlace; a.target = '_blank'; a.rel = 'noopener'; }

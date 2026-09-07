@@ -119,15 +119,23 @@
      Con acuerdo vigente y autorización de marca, la barra reparte tres logos:
      MiFirma a la izquierda, el socio al centro, el producto a la derecha; el
      menú baja a una segunda línea. Sin acuerdo, nada de esto existe. */
-  .marca{display:none;align-items:center;height:30px}
-  .marca img{height:30px;max-width:160px;object-fit:contain;display:block}
+  .marca{display:none;align-items:center}
+  /* Alto igual al logo de MiFirma (30px), que es lo que pidió Claudio:
+     «alineados con el logo de MiFirma». El ancho lo decide la imagen. */
+  .marca img{max-height:30px;max-width:200px;width:auto;object-fit:contain;display:block}
   nav.con-marca .marca{display:flex}
+  /* ⚠ Un logo que no está NO ocupa lugar. Sin esto, el hueco vacío se queda con
+     el `margin:0 auto` y empuja al otro logo al medio de la nada — que es
+     exactamente lo que se vio en producción la mañana del 7/9 con el socio sin
+     cargar. Y el que quede solo se centra igual, venga de la ranura que venga. */
+  nav.con-marca .marca.vacia{display:none}
   nav.con-marca .marca-socio{margin:0 auto}
+  nav.con-marca .marca-socio.vacia ~ .marca-producto{margin:0 auto}
   nav.con-marca .navacc{margin-left:24px}
   .submenu{display:none;border-top:1px solid var(--line)}
   .submenu .menu{display:flex;height:40px;align-items:center;margin-left:0;flex:none}
   @media(min-width:940px){nav.con-marca .submenu{display:block}}
-  @media(max-width:939px){nav.con-marca .marca-producto{display:none}.marca img{height:24px;max-width:110px}}
+  @media(max-width:939px){nav.con-marca .marca-producto{display:none}.marca img{max-height:24px;max-width:110px}}
   .respaldo{display:none;align-items:center;gap:12px;margin-top:22px;padding:10px 16px 10px 12px;border:1px solid var(--line);background:var(--paper);border-radius:12px;font-size:14px;color:var(--ink);max-width:560px}
   .respaldo[data-hay]{display:inline-flex}
   .respaldo img{height:24px;max-width:96px;object-fit:contain}
