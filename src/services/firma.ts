@@ -19,18 +19,47 @@ import { marcasAPredeclarar, nombreDeMarca } from './marcas';
 import { HttpError } from '../http/errors';
 
 /**
- * Las dos prestaciones que la pantalla de firma necesita, resueltas por
- * `app.prestacion_de_cuenta` (071): override de la suscripción → plan → no.
- * Una consulta por prestación; son dos y la función es barata.
+ * Las dos prestaciones que la pantalla de firma necesita, y quién las habilita.
+ *
+ * Dos llaves, y alcanza con UNA:
+ *
+ *   1. El PLAN de la empresa emisora (071): `app.prestacion_de_cuenta`, que
+ *      resuelve override de la suscripción → plan → no.
+ *   2. El ACUERDO DE EXCLUSIVIDAD del país del emisor (067). Decisión de
+ *      Claudio del 7/9: con un acuerdo vigente, TODO firmante de un documento
+ *      de ese país ve «firmar con el socio», tenga el emisor el plan que tenga
+ *      o ninguno, y se haya logueado con ese proveedor o no. Es el sentido
+ *      comercial del acuerdo: el socio es la firma de ese país. El plan queda
+ *      para decidir si se cobra y cuánto.
+ *
+ * Qué habilita el acuerdo lo dicen SUS capacidades: `firma` → firmar con el
+ * certificado del titular; `identidad` → verificarse. No la autorización de
+ * marca, que es de los logos y no de la función.
+ *
+ * ⚠ El país es el del EMISOR (T3 del 5/9): es el que el sistema conoce con
+ * certeza. Un firmante externo sin cuenta no tiene país.
  */
-async function prestacionesDelEmisor(trx: any, cuentaId: string | null | undefined) {
+async function prestacionesDelEmisor(trx: any, cuentaId: string | null | undefined, pais: string | null | undefined) {
   const out = { identidad_digital: false, firma_avanzada: false };
-  if (!cuentaId) return out;
-  for (const k of ['identidad_digital', 'firma_avanzada'] as const) {
-    const r = await sql<{ incluida: boolean }>`
-      select incluida from app.prestacion_de_cuenta(${cuentaId}::uuid, ${k})
+  if (cuentaId) {
+    for (const k of ['identidad_digital', 'firma_avanzada'] as const) {
+      const r = await sql<{ incluida: boolean }>`
+        select incluida from app.prestacion_de_cuenta(${cuentaId}::uuid, ${k})
+      `.execute(trx);
+      out[k] = r.rows[0]?.incluida === true;
+    }
+  }
+  if (pais) {
+    const a = await sql<{ capacidades: string[] }>`
+      select capacidades from acuerdo_exclusividad
+       where pais = ${pais.toUpperCase()}
+         and vigente_desde <= current_date
+         and (vigente_hasta is null or vigente_hasta >= current_date)
+       limit 1
     `.execute(trx);
-    out[k] = r.rows[0]?.incluida === true;
+    const caps = a.rows[0]?.capacidades ?? [];
+    if (caps.includes('firma')) out.firma_avanzada = true;
+    if (caps.includes('identidad')) out.identidad_digital = true;
   }
   return out;
 }
@@ -219,7 +248,7 @@ export async function abrirParaFirmar(
     // proveedor esté encendido. La regla vive en `app.prestacion_de_cuenta`,
     // que devuelve SIEMPRE una fila (sin suscripción = no incluida): acá no hay
     // NULL que leer como «sí».
-    const plan = await prestacionesDelEmisor(trx, f.cuenta_propietaria_id);
+    const plan = await prestacionesDelEmisor(trx, f.cuenta_propietaria_id, f.pais_emisor);
 
     return {
       titulo: f.titulo,
@@ -496,10 +525,10 @@ export async function firmar(token: string, input: FirmaInput) {
     if (f.estado === 'firmada') throw new HttpError(409, 'Ya firmaste este documento.');
     if (f.estado === 'rechazada') throw new HttpError(409, 'Ya rechazaste este documento.');
     if (!f.me_toca) throw new HttpError(409, 'Todavía no es tu turno: falta que firme alguien antes que vos.');
-    // ⚠ La llave del plan se comprueba también acá y no sólo en `abrirParaFirmar`:
-    // la pantalla esconde el botón, pero el servidor es el que decide (071).
-    if (input.conTuid && !(await prestacionesDelEmisor(trx, f.cuenta_propietaria_id)).firma_avanzada) {
-      throw new HttpError(403, 'El plan de la empresa emisora no incluye la firma con certificado del titular.');
+    // ⚠ La llave —plan o acuerdo— se comprueba también acá y no sólo en
+    // `abrirParaFirmar`: la pantalla esconde el botón, pero el servidor decide.
+    if (input.conTuid && !(await prestacionesDelEmisor(trx, f.cuenta_propietaria_id, f.pais)).firma_avanzada) {
+      throw new HttpError(403, 'Ni el plan de la empresa emisora ni un acuerdo vigente en su país incluyen la firma con certificado del titular.');
     }
     return f;
   });
