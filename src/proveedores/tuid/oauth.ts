@@ -372,36 +372,68 @@ export interface IdentidadDeFirma {
 }
 
 export async function listarIdentidadesDeFirma(cfg: ConfigTuid, token: TokenTuid): Promise<IdentidadDeFirma[]> {
-  const r = await fetch(`${cfg.baseRecursos.replace(/\/+$/, '')}/trustedx-resources/esigp/v1/sign_identities?labels=server`, {
-    headers: { Authorization: `Bearer ${token.accessToken}` },
-    signal: AbortSignal.timeout(15_000),
-  });
-  if (!r.ok) throw new HttpError(502, `TuID no devolvió las identidades de firma (HTTP ${r.status}).`);
+  const base = cfg.baseRecursos.replace(/\/+$/, '');
+  const cab = { headers: { Authorization: `Bearer ${token.accessToken}` }, signal: AbortSignal.timeout(15_000) };
 
-  // ⚠ La forma exacta de la LISTA no está en el PDF: está la de UNA identidad
-  // (§5.3.3.4.3) y la del listado por grupos (§5.3.1.4.6). Se aceptan las dos
-  // envolturas razonables —`{ sign_identities: [...] }` y un arreglo pelado— y
-  // si viene otra cosa se dice, en vez de devolver vacío y que parezca «no
-  // tiene certificado».
-  const j = (await r.json()) as unknown;
-  const lista: unknown[] = Array.isArray(j)
-    ? j
-    : j && typeof j === 'object' && Array.isArray((j as { sign_identities?: unknown }).sign_identities)
-      ? ((j as { sign_identities: unknown[] }).sign_identities)
-      : [];
-  if (!Array.isArray(j) && lista.length === 0 && j && typeof j === 'object' && !('sign_identities' in (j as object))) {
-    throw new HttpError(502, `TuID devolvió las identidades de firma en una forma que no reconocemos (claves: ${Object.keys(j as object).join(', ')}).`);
+  // ⚠ Dos puertas, porque el 7/9 la primera dijo «no tenés certificado» a una
+  // cuenta que sí lo tiene. La que documenta el PDF v1.14 (§5.3.1) es la de
+  // GRUPOS, con las identidades adentro de cada grupo; la de `esigp/v1/
+  // sign_identities` salió de la colección de Postman y no trae ejemplo de
+  // respuesta. Se prueba la documentada primero y la otra después, y se
+  // aceptan las tres formas razonables: grupos con identidades, lista
+  // envuelta y arreglo pelado.
+  const puertas = [
+    `${base}/trustedx-resources/rap/v2/sign_identities_groups?expand=sign_identities_groups.sign_identities&labels=server`,
+    `${base}/trustedx-resources/esigp/v1/sign_identities?labels=server`,
+  ];
+  const vistas: string[] = [];
+  for (const url of puertas) {
+    const r = await fetch(url, cab);
+    if (!r.ok) {
+      vistas.push(`${url.split('/trustedx-resources/')[1]?.split('?')[0]} → HTTP ${r.status}`);
+      continue;
+    }
+    const j = (await r.json()) as unknown;
+    const lista = aplanarIdentidades(j);
+    const salida = normalizarIdentidades(lista);
+    if (salida.length) return salida;
+    // Vacío: se anota QUÉ vino, para no volver a adivinar. Nada de esto es
+    // secreto —son claves de un JSON y cantidades—; el certificado, si viniera,
+    // es público por definición.
+    vistas.push(`${url.split('/trustedx-resources/')[1]?.split('?')[0]} → ${formaDe(j, lista)}`);
   }
+  console.warn(`[tuid] identidades de firma: ninguna usable. ${vistas.join(' · ')}`);
+  return [];
+}
 
+/** Saca las identidades de cualquiera de las envolturas conocidas. */
+function aplanarIdentidades(j: unknown): unknown[] {
+  if (Array.isArray(j)) return j;
+  if (!j || typeof j !== 'object') return [];
+  const o = j as Record<string, unknown>;
+  if (Array.isArray(o.sign_identities)) return o.sign_identities;
+  if (Array.isArray(o.sign_identities_groups)) {
+    const out: unknown[] = [];
+    for (const g of o.sign_identities_groups) {
+      const gi = (g ?? {}) as Record<string, unknown>;
+      if (Array.isArray(gi.sign_identities)) out.push(...gi.sign_identities);
+    }
+    return out;
+  }
+  return [];
+}
+
+function normalizarIdentidades(lista: unknown[]): IdentidadDeFirma[] {
   const salida: IdentidadDeFirma[] = [];
   for (const x of lista) {
     if (!x || typeof x !== 'object') continue;
     const o = x as Record<string, unknown>;
     const id = str(o.id);
     const det = (o.details ?? {}) as Record<string, unknown>;
-    const cert = str(det.certificate);
+    const cert = str(det.certificate) || str(o.certificate);
     if (!id || !cert) continue;
-    const estado = ((o.status ?? {}) as Record<string, unknown>).value;
+    const st = o.status;
+    const estado = typeof st === 'string' ? st : ((st ?? {}) as Record<string, unknown>).value;
     salida.push({
       id,
       // Puede venir con saltos de línea (así lo imprime el PDF): se limpian.
@@ -411,6 +443,16 @@ export async function listarIdentidadesDeFirma(cfg: ConfigTuid, token: TokenTuid
     });
   }
   return salida;
+}
+
+/** Una descripción corta de la forma de una respuesta, para el log. */
+function formaDe(j: unknown, lista: unknown[]): string {
+  if (Array.isArray(j)) return `arreglo de ${j.length}`;
+  if (!j || typeof j !== 'object') return `un ${typeof j}`;
+  const claves = Object.keys(j as object).join(',');
+  const primero = lista[0];
+  const clavesPrimero = primero && typeof primero === 'object' ? Object.keys(primero as object).join(',') : '—';
+  return `objeto {${claves}} con ${lista.length} identidad(es); la primera tiene {${clavesPrimero}}`;
 }
 
 // ═══════════════════════════════════════════════════════════════════════════
