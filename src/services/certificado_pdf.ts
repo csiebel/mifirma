@@ -112,6 +112,11 @@ export interface DatosCertificado {
     estado: string; firmada_en: string | null;
     nivel_garantia: string | null;
     identificacion: Array<{ tipo: string; probado_en: string }>;
+    /** Con qué se hizo la firma (desde la plantilla 4). Ausente en certificados viejos. */
+    firma?: {
+      con: string; nivel: string; titular: string | null; emisor: string | null;
+      valido_hasta: string | null; proveedor: string | null;
+    };
     certificado: { sujeto: string | null; emisor: string | null } | null;
     sello: { autoridad: string; sellado_en: string; serie: string } | null;
     cronologia: Array<{ tipo: string; cuando: string; ip: string | null }>;
@@ -122,6 +127,9 @@ export interface DatosCertificado {
     hash_raiz: string;
   };
 }
+
+/** Cómo se nombra cada proveedor en el certificado. Lo que no esté acá sale como su código. */
+const NOMBRE_PROVEEDOR: Record<string, string> = { tuid: 'TuID (Antel, Uruguay)' };
 
 // ---------------------------------------------------------------------------
 // Los textos, por idioma
@@ -160,6 +168,10 @@ interface TextosCert {
   firmo: string; rechazoFirmar: string;
   lCorreo: string; lMotivo: string; lFirmoEl: string; lGarantia: string;
   garantias: Record<string, string>;
+  lFirmaCon: string; lNivelObtenido: string;
+  instrumentoSello: string; instrumentoCert: (proveedor: string) => string;
+  lCertTitular: string; lCertEmisor: string; lCertHasta: string;
+  obtenidoResumen: (n: number, total: number) => string;
   lComoId: string; sinFactores: string;
   probadoEl: (f: string) => string;
   anclaje: Record<string, string>;
@@ -178,6 +190,11 @@ interface TextosCert {
 
 const TEXTOS: Record<'es' | 'pt' | 'en', TextosCert> = {
   es: {
+    lFirmaCon: 'Firma hecha con', lNivelObtenido: 'Nivel obtenido',
+    instrumentoSello: 'el sello de la plataforma MiFirma',
+    instrumentoCert: (p) => `el certificado del propio firmante en ${p}`,
+    lCertTitular: 'Titular del certificado', lCertEmisor: 'Emitido por', lCertHasta: 'Válido hasta',
+    obtenidoResumen: (n, t) => `avanzada en ${n} de ${t} firma(s), con certificado del propio firmante`,
     tituloDoc: 'Certificado de finalización',
     emitido: (f) => `Emitido por MiFirma el ${f}. Todo lo que dice sale del expediente del documento y del PDF firmado.`,
     alarmaCadena: (h, r) => 'La cadena de evidencia de este documento NO cierra: hay ' + h +
@@ -247,6 +264,11 @@ const TEXTOS: Record<'es' | 'pt' | 'en', TextosCert> = {
   },
 
   pt: {
+    lFirmaCon: 'Assinatura feita com', lNivelObtenido: 'Nível obtido',
+    instrumentoSello: 'o selo da plataforma MiFirma',
+    instrumentoCert: (p) => `o certificado do próprio signatário em ${p}`,
+    lCertTitular: 'Titular do certificado', lCertEmisor: 'Emitido por', lCertHasta: 'Válido até',
+    obtenidoResumen: (n, t) => `avançada em ${n} de ${t} assinatura(s), com certificado do próprio signatário`,
     tituloDoc: 'Certificado de conclusão',
     emitido: (f) => `Emitido pela MiFirma em ${f}. Tudo o que este certificado afirma sai do dossiê de evidências do documento e do PDF assinado.`,
     alarmaCadena: (h, r) => 'A cadeia de evidências deste documento NÃO fecha: há ' + h +
@@ -316,6 +338,11 @@ const TEXTOS: Record<'es' | 'pt' | 'en', TextosCert> = {
   },
 
   en: {
+    lFirmaCon: 'Signature made with', lNivelObtenido: 'Level obtained',
+    instrumentoSello: 'the MiFirma platform seal',
+    instrumentoCert: (p) => `the signer's own certificate at ${p}`,
+    lCertTitular: 'Certificate holder', lCertEmisor: 'Issued by', lCertHasta: 'Valid until',
+    obtenidoResumen: (n, t) => `advanced in ${n} of ${t} signature(s), with the signer's own certificate`,
     tituloDoc: 'Certificate of completion',
     emitido: (f) => `Issued by MiFirma on ${f}. Everything it states comes from the document's evidence file and the signed PDF.`,
     alarmaCadena: (h, r) => 'The evidence chain of this document does NOT close: ' + h +
@@ -569,6 +596,17 @@ export function dibujar(d: DatosCertificado): Promise<Buffer> {
     campo(T.lModo, T.modos[d.circuito.modo] ?? d.circuito.modo);
     campo(T.lNivel, (T.niveles[d.circuito.nivel_firma] ?? d.circuito.nivel_firma) +
       (d.circuito.pais ? T.marcoLegal(d.circuito.pais) : ''));
+    // ⚠ Lo que el circuito PIDIÓ y lo que la firma PRODUJO son dos hechos.
+    // Un circuito «simple» firmado con el certificado del titular en tuID es
+    // una firma avanzada, y el certificado tiene que decirlo — el 7/9 decía
+    // «simple» sobre la primera firma avanzada del producto.
+    {
+      const firmadas = d.firmantes.filter((f) => f.estado === 'firmada' && f.papel === 'firmante');
+      const avanzadas = firmadas.filter((f) => f.firma?.nivel === 'avanzada').length;
+      if (avanzadas > 0 && d.circuito.nivel_firma !== 'avanzada') {
+        campo(T.lNivelObtenido, T.obtenidoResumen(avanzadas, firmadas.length));
+      }
+    }
     campo(T.lEstado, T.estadosCircuito[d.circuito.estado] ?? d.circuito.estado);
     campo(T.lCreado, F(d.circuito.creado_en));
     campo(T.lEnviado, F(d.circuito.enviado_en));
@@ -634,6 +672,20 @@ export function dibujar(d: DatosCertificado): Promise<Buffer> {
         doc.moveDown(0.3);
       } else {
         campo(T.lComoId, T.sinFactores, true);
+      }
+
+      // ── Con qué se firmó: el sello de la plataforma o el certificado propio.
+      if (f.estado === 'firmada' && f.firma) {
+        const nivel = T.niveles[f.firma.nivel] ?? f.firma.nivel;
+        const instrumento = f.firma.con === 'sello'
+          ? T.instrumentoSello
+          : T.instrumentoCert(NOMBRE_PROVEEDOR[f.firma.con] ?? f.firma.proveedor ?? f.firma.con);
+        campo(T.lFirmaCon, `${instrumento} — ${nivel}`);
+        if (f.firma.con !== 'sello') {
+          if (f.firma.titular) campo(T.lCertTitular, f.firma.titular);
+          if (f.firma.emisor) campo(T.lCertEmisor, f.firma.emisor);
+          if (f.firma.valido_hasta) campo(T.lCertHasta, F(f.firma.valido_hasta));
+        }
       }
 
       if (f.sello) {

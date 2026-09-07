@@ -59,7 +59,7 @@ import { dibujar, type DatosCertificado } from './certificado_pdf';
 // es el catálogo que mantiene el operador. En castellano también cambia la
 // presentación de dos valores que salían en código crudo: el estado del
 // circuito («Completo») y el nivel de garantía.
-const VERSION_PLANTILLA = 3;
+const VERSION_PLANTILLA = 4;   // 4 (7/9): el instrumento de cada firma y el nivel obtenido
 
 // ---------------------------------------------------------------------------
 // Los datos
@@ -225,6 +225,11 @@ async function reunir(trx: any, instanciaId: string): Promise<DatosCertificado> 
       identificacion: anclajes.rows
         .filter((a) => a.identidad_id === x.identidad_id)
         .map((a) => ({ tipo: a.tipo, probado_en: iso(a.probado_en)! })),
+      // ⚠ Con qué se hizo la firma: lo dice el evento `firma.aplicada` desde
+      // el 6/9 (`sello`, `titular_certificado`, `nivel_firma_obtenido`,
+      // `proveedor_firma`). Un evento anterior no lo trae: entonces fue el
+      // sello de la plataforma, que era el único instrumento que existía.
+      firma: instrumentoDe(eventos.rows.find((e) => e.participacion_id === x.id && e.tipo === 'firma.aplicada')?.datos),
       certificado: null,
       sello: sellos.rows[n]
         ? {
@@ -243,6 +248,28 @@ async function reunir(trx: any, instanciaId: string): Promise<DatosCertificado> 
       cadena_ok: cadena.huecos === 0 && cadena.rotos === 0,
       hash_raiz: ultimo.rows[0]?.hash_propio ?? '',
     },
+  };
+}
+
+/**
+ * El instrumento de una firma, para el certificado: sello de la plataforma o
+ * certificado del titular en un proveedor. Todo sale del evento; nada se
+ * infiere del estado de hoy del catálogo.
+ */
+function instrumentoDe(datos: any): {
+  con: string; nivel: string; titular: string | null; emisor: string | null;
+  valido_hasta: string | null; proveedor: string | null;
+} {
+  const d = datos && typeof datos === 'object' ? datos : {};
+  const con = typeof d.sello === 'string' && d.sello ? d.sello : 'sello';
+  const pf = d.proveedor_firma && typeof d.proveedor_firma === 'object' ? d.proveedor_firma : null;
+  return {
+    con,
+    nivel: typeof d.nivel_firma_obtenido === 'string' ? d.nivel_firma_obtenido : 'simple',
+    titular: typeof d.titular_certificado === 'string' ? d.titular_certificado : null,
+    emisor: pf && typeof pf.emisor_certificado === 'string' ? pf.emisor_certificado : null,
+    valido_hasta: pf && typeof pf.certificado_valido_hasta === 'string' ? pf.certificado_valido_hasta : null,
+    proveedor: pf && typeof pf.codigo === 'string' ? pf.codigo : null,
   };
 }
 
