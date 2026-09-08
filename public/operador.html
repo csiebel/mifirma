@@ -104,6 +104,9 @@
   .provLista.off,.dos.off{opacity:.42;pointer-events:none}
   .tagExcl{margin-left:6px;font-size:11px;font-weight:600;color:#0b6b58;background:#e6f6f1;border-radius:99px;padding:2px 8px}
   .msg.alerta{background:#fffbeb;border:1px solid #fde68a;color:#b45309}
+  .cabTarjeta{display:flex;align-items:baseline;gap:10px;padding:14px 18px 0}
+  .cabTarjeta .mut{font-size:12.5px}
+  .filaSel{background:var(--soft)}
   /* Precio propio de un proveedor: cuelga de la fila general de arriba (073). */
   .filaProv td:first-child{padding-left:34px;position:relative}
   .filaProv td:first-child::before{content:"└";position:absolute;left:16px;color:var(--mut)}
@@ -194,6 +197,14 @@
     <button onclick="ir('planes')" data-v="planes">
       <svg viewBox="0 0 24 24"><path d="M3 6a2 2 0 012-2h14a2 2 0 012 2v12a2 2 0 01-2 2H5a2 2 0 01-2-2z"/><path d="M3 10h18M8 15h4"/></svg>
       Planes y precios
+    </button>
+    <button onclick="ir('empresas')" data-v="empresas">
+      <svg viewBox="0 0 24 24"><path d="M3 21h18M5 21V7l7-4 7 4v14"/><path d="M9 9h2M9 13h2M13 9h2M13 13h2M9 21v-4h6v4"/></svg>
+      Empresas
+    </button>
+    <button onclick="ir('consumos')" data-v="consumos">
+      <svg viewBox="0 0 24 24"><path d="M3 3v18h18"/><path d="M7 15l4-5 3 3 5-7"/></svg>
+      Consumos
     </button>
     <button onclick="ir('paises')" data-v="paises">
       <svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="9"/><path d="M3 12h18M12 3c2.5 2.7 2.5 15.3 0 18M12 3c-2.5 2.7-2.5 15.3 0 18"/></svg>
@@ -376,6 +387,76 @@
   <!-- ============ Países ============
        La moneda de cobro es el dólar salvo que acá diga otra cosa. Un país sin
        fila cobra en USD y funciona sin configurar nada. -->
+  <section id="vEmpresas" class="hidden">
+    <div class="cab">
+      <div>
+        <h1>Empresas</h1>
+        <p>Qué plan tiene cada una y qué le trae <b>de verdad</b>: un ajuste por empresa pisa lo que
+           dice el plan, y hasta que no se mira acá no se ve.</p>
+      </div>
+      <input id="qEmpresas" placeholder="Buscar por nombre" style="max-width:260px;margin:0" />
+    </div>
+    <div id="msgEmpresas"></div>
+    <div class="tarjeta">
+      <table>
+        <thead><tr>
+          <th>Empresa</th><th>País</th><th>Plan</th><th>Cobranza</th><th>Usuarios</th><th>Documentos</th><th></th>
+        </tr></thead>
+        <tbody id="tEmpresas"></tbody>
+      </table>
+    </div>
+    <div class="tarjeta" id="detEmpresa" style="margin-top:18px"></div>
+  </section>
+
+  <section id="vConsumos" class="hidden">
+    <div class="cab">
+      <div>
+        <h1>Consumos</h1>
+        <p>Lo que consumió cada empresa en el mes, con lo que se le cobra y lo que nos costó.
+           Y lo que le debemos a cada proveedor.</p>
+      </div>
+      <input id="periodoConsumos" placeholder="AAAA-MM" style="max-width:130px;margin:0" />
+    </div>
+    <div id="msgConsumos"></div>
+    <div id="avisoMedidor"></div>
+
+    <div class="tarjeta">
+      <div class="cabTarjeta"><b>Firmas</b><span class="mut">Una línea por empresa, nivel y proveedor.</span></div>
+      <table>
+        <thead><tr><th>Empresa</th><th>Nivel</th><th>Proveedor</th><th>Firmas</th><th>Se cobra</th><th>Nos cuesta</th><th>A liquidar</th></tr></thead>
+        <tbody id="tConsFirmas"></tbody>
+      </table>
+    </div>
+
+    <div class="tarjeta" style="margin-top:18px">
+      <div class="cabTarjeta"><b>Asistente de IA</b><span class="mut">Costo del modelo y precio con el margen del plan.</span></div>
+      <table>
+        <thead><tr><th>Empresa</th><th>Modelo</th><th>Tokens entrada</th><th>Tokens salida</th><th>Costo</th><th>Margen</th><th>Se cobra</th></tr></thead>
+        <tbody id="tConsIa"></tbody>
+      </table>
+    </div>
+
+    <div class="tarjeta" style="margin-top:18px">
+      <div class="cabTarjeta"><b>Almacenamiento</b><span class="mut">⚠ Es una foto de hoy, no del período: el disco se mide cuando se mira.</span></div>
+      <table>
+        <thead><tr><th>Empresa</th><th>Documentos</th><th>Espacio</th><th>Su plan</th></tr></thead>
+        <tbody id="tConsDisco"></tbody>
+      </table>
+    </div>
+
+    <div class="tarjeta" style="margin-top:18px">
+      <div class="cabTarjeta"><b>Liquidación a proveedores</b><span class="mut">Lo que le debemos a cada uno. Emitir congela el número.</span></div>
+      <table>
+        <thead><tr><th>Proveedor</th><th>País</th><th>Firmas</th><th>Ingreso</th><th>A liquidar</th><th></th></tr></thead>
+        <tbody id="tLiqPend"></tbody>
+      </table>
+      <table style="margin-top:10px">
+        <thead><tr><th>Emitidas</th><th>Período</th><th>A liquidar</th><th>Estado</th><th></th></tr></thead>
+        <tbody id="tLiqEmit"></tbody>
+      </table>
+    </div>
+  </section>
+
   <section id="vPaises" class="hidden">
     <div class="cab">
       <div>

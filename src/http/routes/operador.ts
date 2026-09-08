@@ -89,6 +89,12 @@ import {
   bajaPrecio,
   PRESTACIONES,
 } from '../../services/planes';
+import {
+  listarEmpresas, verEmpresa, asignarPlan, setOverridePrestacion, quitarOverridePrestacion,
+} from '../../services/empresas';
+import {
+  consumosDelPeriodo, liquidaciones, emitirLiquidacion, pagarLiquidacion,
+} from '../../services/consumos';
 
 // Autenticación de la consola: sesión de operador (JWT propio). El login con
 // usuario/contraseña la emite; cada acción exige el privilegio que corresponde.
@@ -341,6 +347,105 @@ export function registrarRutasOperador(app: FastifyInstance) {
     const { id } = req.params as { id: string };
     return eliminarTarifaIa(id);
   });
+  // ---- Empresas: qué plan tienen y qué les trae de verdad ----
+  //
+  // ⚠ Hasta el 7/9 esta pantalla no existía y el plan de una cuenta sólo se
+  // podía ver con psql. La ruta de abajo (`/ia`) es de la 013 y apuntaba a una
+  // pantalla que nunca se construyó: ahora hay una que la usa, y otra genérica
+  // para las otras cinco prestaciones.
+  app.get('/operador/empresas', async (req) => {
+    const s = await sesion(req);
+    exigirCap(s, 'gestionar_planes');
+    const { q } = (req.query ?? {}) as { q?: string };
+    return listarEmpresas(s.operadorId, q);
+  });
+
+  app.get('/operador/empresas/:id', async (req) => {
+    const s = await sesion(req);
+    exigirCap(s, 'gestionar_planes');
+    const { id } = z.object({ id: z.string().uuid() }).parse(req.params);
+    return verEmpresa(s.operadorId, id);
+  });
+
+  app.put('/operador/empresas/:id/plan', async (req) => {
+    const s = await sesion(req);
+    exigirCap(s, 'gestionar_planes');
+    const { id } = z.object({ id: z.string().uuid() }).parse(req.params);
+    const b = z
+      .object({
+        plan_id: z.string().uuid(),
+        medio_cobro: z.enum(['tarjeta', 'transferencia', 'debito_bancario', 'manual']).optional(),
+      })
+      .parse(req.body);
+    return asignarPlan(s.operadorId, id, b.plan_id, b.medio_cobro);
+  });
+
+  app.put('/operador/empresas/:id/prestacion', async (req) => {
+    const s = await sesion(req);
+    exigirCap(s, 'gestionar_planes');
+    const { id } = z.object({ id: z.string().uuid() }).parse(req.params);
+    const b = z
+      .object({
+        prestacion: z.enum(PRESTACIONES),
+        // null en un campo = vuelve a heredar del plan, que no es lo mismo que
+        // ponerle el mismo valor: lo heredado cambia si el plan cambia.
+        incluida: z.boolean().nullable().optional(),
+        cobra: z.boolean().nullable().optional(),
+        cantidad_incluida: z.coerce.number().min(0).nullable().optional(),
+        margen_pct: z.coerce.number().min(0).nullable().optional(),
+      })
+      .parse(req.body);
+    return setOverridePrestacion(s.operadorId, id, b.prestacion, b);
+  });
+
+  app.delete('/operador/empresas/:id/prestacion/:prestacion', async (req) => {
+    const s = await sesion(req);
+    exigirCap(s, 'gestionar_planes');
+    const { id, prestacion } = z
+      .object({ id: z.string().uuid(), prestacion: z.enum(PRESTACIONES) })
+      .parse(req.params);
+    return quitarOverridePrestacion(s.operadorId, id, prestacion);
+  });
+
+  // ---- Consumos y liquidaciones ----
+  app.get('/operador/consumos', async (req) => {
+    const s = await sesion(req);
+    exigirCap(s, 'gestionar_planes');
+    const q = z
+      .object({ periodo: z.string().regex(/^\d{4}-\d{2}$/), cuenta_id: z.string().uuid().optional() })
+      .parse(req.query ?? {});
+    return consumosDelPeriodo(s.operadorId, q.periodo, q.cuenta_id);
+  });
+
+  app.get('/operador/liquidaciones', async (req) => {
+    const s = await sesion(req);
+    exigirCap(s, 'gestionar_pagos');
+    const q = z.object({ periodo: z.string().regex(/^\d{4}-\d{2}$/) }).parse(req.query ?? {});
+    return liquidaciones(s.operadorId, q.periodo);
+  });
+
+  app.post('/operador/liquidaciones', async (req) => {
+    const s = await sesion(req);
+    exigirCap(s, 'gestionar_pagos');
+    const b = z
+      .object({
+        proveedor_id: z.string().uuid(),
+        pais: z.string().length(2),
+        periodo: z.string().regex(/^\d{4}-\d{2}$/),
+        moneda: z.string().length(3),
+      })
+      .parse(req.body);
+    return emitirLiquidacion(s.operadorId, b);
+  });
+
+  app.patch('/operador/liquidaciones/:id/pagada', async (req) => {
+    const s = await sesion(req);
+    exigirCap(s, 'gestionar_pagos');
+    const { id } = z.object({ id: z.string().uuid() }).parse(req.params);
+    const b = z.object({ referencia: z.string().max(200).optional() }).parse(req.body ?? {});
+    return pagarLiquidacion(s.operadorId, id, b.referencia);
+  });
+
   app.patch('/operador/empresas/:id/ia', async (req) => {
     const s = await sesion(req);
     exigirCap(s, 'gestionar_planes');

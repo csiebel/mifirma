@@ -28,7 +28,7 @@
   var DATOS = null;       // respuesta de /operador/planes
   var PLAN_SEL = null;
 
-  var VISTAS = ['correo', 'twilio', 'planes', 'paises', 'proveedores', 'pasarelas', 'operadores', 'plata', 'bitacora'];
+  var VISTAS = ['correo', 'twilio', 'planes', 'empresas', 'consumos', 'paises', 'proveedores', 'pasarelas', 'operadores', 'plata', 'bitacora'];
 
   // El catálogo de países, tal como lo devuelve la base. Antes acá había un
   // `{ UY:'UYU', PY:'PYG', BR:'BRL' }` escrito a mano: agregar Chile era editar
@@ -255,6 +255,8 @@
     if (vista === 'correo') cargarCorreo();
     if (vista === 'twilio') cargarTwilio();
     if (vista === 'planes') cargarPlanes();
+    if (vista === 'empresas') cargarEmpresas();
+    if (vista === 'consumos') cargarConsumos();
     if (vista === 'paises') cargarPaises();
     if (vista === 'proveedores') cargarProveedores();
     if (vista === 'pasarelas') cargarPasarelas();
@@ -480,6 +482,294 @@
   function texto(m) {
     if (!m) return '';
     return m.es || m.pt || m.en || Object.values(m)[0] || '';
+  }
+
+
+  // ===========================================================================
+  // EMPRESAS
+  //
+  // ⚠ Todo lo que muestra sale de las funciones de la base
+  // (`app.prestaciones_de_cuenta`, `app.custodia_de_cuenta`, `app.custodia_usada`),
+  // no de una copia hecha en el navegador: si la regla cambia, esta pantalla la
+  // refleja sola.
+  // ===========================================================================
+  var EMPRESAS = [];
+  var EMPRESA_SEL = null;
+
+  async function cargarEmpresas() {
+    try {
+      var q = ($('qEmpresas').value || '').trim();
+      var d = await api('/operador/empresas' + (q ? '?q=' + encodeURIComponent(q) : ''));
+      EMPRESAS = d.empresas || [];
+      pintarEmpresas();
+    } catch (e) { msg('msgEmpresas', e.message, 'err'); }
+  }
+
+  function pintarEmpresas() {
+    var t = $('tEmpresas');
+    if (!EMPRESAS.length) {
+      t.innerHTML = '<tr><td colspan="7" class="mut">No hay empresas.</td></tr>';
+      return;
+    }
+    t.innerHTML = EMPRESAS.map(function (e) {
+      // ⚠ «Sin plan» no es un detalle: sin plan no hay prestaciones ni precios,
+      // o sea que a esa empresa no se le puede cobrar nada.
+      var plan = e.plan_codigo
+        ? esc(e.plan_codigo)
+        : '<span class="pill off">sin plan</span>';
+      var cob = e.estado_cobranza === 'al_dia' ? '<span class="mut">al día</span>'
+        : '<b style="color:var(--danger)">' + esc(e.estado_cobranza.replace('_', ' ')) + '</b>';
+      return '<tr data-emp="' + esc(e.id) + '"' + (EMPRESA_SEL === e.id ? ' class="filaSel"' : '') + '>' +
+        '<td><b>' + esc(e.nombre_mostrado) + '</b></td>' +
+        '<td>' + esc(e.pais) + ' · ' + esc(e.moneda) + '</td>' +
+        '<td>' + plan + '</td>' +
+        '<td>' + cob + '</td>' +
+        '<td>' + e.usuarios + '</td>' +
+        '<td>' + e.documentos + '</td>' +
+        '<td><button class="btn btn-s chico" data-ver="' + esc(e.id) + '">Ver</button></td>' +
+        '</tr>';
+    }).join('');
+    t.querySelectorAll('[data-ver]').forEach(function (b) {
+      b.addEventListener('click', function () { verEmpresa(b.dataset.ver); });
+    });
+  }
+
+  async function verEmpresa(id) {
+    EMPRESA_SEL = id;
+    pintarEmpresas();
+    try {
+      var d = await api('/operador/empresas/' + id);
+      var e = d.empresa;
+      var mb = function (b) { return b == null ? '—' : (b / 1048576).toFixed(1) + ' MB'; };
+
+      // El tope, si lo hay, con lo usado al lado: es la pregunta que el operador
+      // se hace cuando llama un cliente («¿me queda espacio?»).
+      var cu = d.custodia;
+      var custodiaTxt = cu.modo === 'sin_custodia'
+        ? 'No se guardan los PDF (el expediente sí, siempre)'
+        : cu.modo === 'sin_tope' ? 'Sin límite'
+        : 'Con tope: ' + (cu.tope_documentos != null ? cu.tope_documentos + ' documentos' : '') +
+          (cu.tope_documentos != null && cu.tope_bytes != null ? ' · ' : '') +
+          (cu.tope_bytes != null ? mb(cu.tope_bytes) : '');
+      var dias = [];
+      if (cu.dias_emisor != null) dias.push('emisor: ' + cu.dias_emisor + ' días');
+      if (cu.dias_firmante != null) dias.push('firmante: ' + cu.dias_firmante + ' días');
+
+      var planes = (d.planes || []).map(function (p) {
+        return '<option value="' + esc(p.id) + '"' + (p.id === e.plan_id ? ' selected' : '') + '>' +
+          esc(p.codigo) + (p.activo ? '' : ' (desactivado)') + '</option>';
+      }).join('');
+
+      $('detEmpresa').innerHTML =
+        '<div class="cabTarjeta"><b>' + esc(e.nombre_mostrado) + '</b>' +
+        '<span class="mut">' + esc(e.pais) + ' · ' + esc(e.moneda) + ' · ' + esc(e.idioma) +
+        ' · desde ' + esc((e.creada_en || '').slice(0, 10)) + '</span></div>' +
+
+        '<div style="padding:14px 18px">' +
+        '<div class="dos" style="align-items:end">' +
+        '<div><label>Plan contratado</label><select id="empPlan">' + planes + '</select>' +
+        (e.suscripcion_id
+          ? '<span class="mut">Desde ' + esc((e.suscripcion_desde || '').slice(0, 10)) + ' · cobro: ' + esc(e.medio_cobro || '—') + '</span>'
+          : '<span class="mut">⚠ Esta empresa no tiene plan: no se le puede cobrar nada.</span>') +
+        '</div>' +
+        '<div><button class="btn btn-p" id="empGuardarPlan">Asignar plan</button></div>' +
+        '</div>' +
+
+        '<h3 style="margin:20px 0 4px;font-size:14.5px">Qué le trae su plan</h3>' +
+        '<p class="pista" style="margin:0 0 8px">Lo que dice acá es lo que rige. ' +
+        '«Ajustada» quiere decir que esta empresa tiene un valor propio que pisa al del plan.</p>' +
+        '<table class="prest"><thead><tr><th>Prestación</th><th>Incluida</th><th>Cobra</th>' +
+        '<th>Sin cargo</th><th>Margen %</th><th>Origen</th><th></th></tr></thead><tbody>' +
+        (d.prestaciones || []).map(function (x) {
+          var propio = x.origen === 'suscripcion';
+          return '<tr data-pe="' + esc(x.prestacion) + '">' +
+            '<td><b>' + esc(PRESTACION_NOMBRE[x.prestacion] || x.prestacion) + '</b></td>' +
+            '<td><input type="checkbox" class="peInc" style="width:auto"' + (x.incluida ? ' checked' : '') + ' /></td>' +
+            '<td><input type="checkbox" class="peCob" style="width:auto"' + (x.cobra ? ' checked' : '') + ' /></td>' +
+            '<td><input class="peCant" inputmode="decimal" style="max-width:70px" value="' + esc(x.cantidad_incluida) + '" /></td>' +
+            '<td><input class="peMar" inputmode="decimal" style="max-width:64px" value="' + esc(x.margen_pct) + '" /></td>' +
+            '<td>' + (propio ? '<b>ajustada</b>' : '<span class="mut">' + esc(x.origen === 'plan' ? 'del plan' : x.origen.replace('_', ' ')) + '</span>') + '</td>' +
+            '<td style="white-space:nowrap">' +
+            '<button class="btn btn-s chico" data-ajustar="' + esc(x.prestacion) + '">Ajustar</button> ' +
+            (propio ? '<button class="btn btn-d chico" data-heredar="' + esc(x.prestacion) + '">Volver al plan</button>' : '') +
+            '</td></tr>';
+        }).join('') +
+        '</tbody></table>' +
+
+        '<h3 style="margin:20px 0 4px;font-size:14.5px">Documentos guardados</h3>' +
+        '<p style="margin:0">' + esc(custodiaTxt) +
+        (dias.length ? ' <span class="mut">· se borran — ' + esc(dias.join(' · ')) + '</span>' : '') + '</p>' +
+        '<p class="pista">Lleva usado: <b>' + d.usado.documentos + ' documentos</b> · <b>' + mb(d.usado.bytes) + '</b>' +
+        (cu.tope_documentos != null ? ' de ' + cu.tope_documentos : '') +
+        (cu.tope_bytes != null ? ' · de ' + mb(cu.tope_bytes) : '') + '</p>' +
+
+        '<div id="msgEmpresa" style="margin-top:12px"></div>' +
+        '</div>';
+
+      $('empGuardarPlan').addEventListener('click', function () { asignarPlan(id); });
+      $('detEmpresa').querySelectorAll('[data-ajustar]').forEach(function (b) {
+        b.addEventListener('click', function () { ajustarPrestacion(id, b.dataset.ajustar); });
+      });
+      $('detEmpresa').querySelectorAll('[data-heredar]').forEach(function (b) {
+        b.addEventListener('click', function () { heredarPrestacion(id, b.dataset.heredar); });
+      });
+      $('detEmpresa').scrollIntoView({ block: 'nearest' });
+    } catch (e) { msg('msgEmpresas', e.message, 'err'); }
+  }
+
+  async function asignarPlan(id) {
+    try {
+      await api('/operador/empresas/' + id + '/plan', 'PUT', { plan_id: $('empPlan').value });
+      ok('msgEmpresa', 'Plan asignado. El anterior queda cancelado, no borrado: es lo que permite contestar en qué plan estaba en marzo.');
+      await cargarEmpresas();
+      await verEmpresa(id);
+    } catch (e) { msg('msgEmpresa', e.message, 'err'); }
+  }
+
+  async function ajustarPrestacion(id, prestacion) {
+    var tr = $('detEmpresa').querySelector('tr[data-pe="' + prestacion + '"]');
+    var num = function (sel) {
+      var v = String(tr.querySelector(sel).value || '').trim().replace(',', '.');
+      return v === '' ? 0 : Number(v);
+    };
+    try {
+      await api('/operador/empresas/' + id + '/prestacion', 'PUT', {
+        prestacion: prestacion,
+        incluida: tr.querySelector('.peInc').checked,
+        cobra: tr.querySelector('.peCob').checked,
+        cantidad_incluida: num('.peCant'),
+        margen_pct: num('.peMar'),
+      });
+      ok('msgEmpresa', 'Ajustado para esta empresa. Ahora no sigue al plan en esta prestación.');
+      await verEmpresa(id);
+    } catch (e) { msg('msgEmpresa', e.message, 'err'); }
+  }
+
+  async function heredarPrestacion(id, prestacion) {
+    try {
+      await api('/operador/empresas/' + id + '/prestacion/' + prestacion, 'DELETE');
+      ok('msgEmpresa', 'Vuelve a lo que diga su plan.');
+      await verEmpresa(id);
+    } catch (e) { msg('msgEmpresa', e.message, 'err'); }
+  }
+
+  // ===========================================================================
+  // CONSUMOS
+  // ===========================================================================
+  function periodoDeHoy() {
+    var d = new Date();
+    return d.getFullYear() + '-' + String(d.getMonth() + 1).padStart(2, '0');
+  }
+
+  async function cargarConsumos() {
+    if (!$('periodoConsumos').value) $('periodoConsumos').value = periodoDeHoy();
+    var periodo = $('periodoConsumos').value.trim();
+    if (!/^\d{4}-\d{2}$/.test(periodo)) return msg('msgConsumos', 'El período va como AAAA-MM.', 'err');
+    try {
+      var d = await api('/operador/consumos?periodo=' + encodeURIComponent(periodo));
+      pintarConsumos(d);
+      var l = await api('/operador/liquidaciones?periodo=' + encodeURIComponent(periodo));
+      pintarLiquidaciones(l);
+      msg('msgConsumos', '', '');
+    } catch (e) { msg('msgConsumos', e.message, 'err'); }
+  }
+
+  function pintarConsumos(d) {
+    // ⚠ Sin medidor, las firmas dan cero. Un cero sin explicación se lee como un
+    // dato, y no lo es: hay que decir que nadie está contando todavía.
+    $('avisoMedidor').innerHTML = d.firmas.length ? '' :
+      '<div class="msg alerta">No hay firmas registradas en este período. ' +
+      '⚠ El medidor todavía no existe: nada cuenta una firma al firmarla, así que ' +
+      'esta tabla va a estar vacía aunque se esté firmando.</div>';
+
+    var n2 = function (x) { return (Math.round(x * 100) / 100).toFixed(2); };
+
+    $('tConsFirmas').innerHTML = d.firmas.length ? d.firmas.map(function (f) {
+      return '<tr><td><b>' + esc(f.nombre) + '</b></td>' +
+        '<td>' + esc(ETIQUETA_NIVEL[f.nivel_firma] || f.nivel_firma) + '</td>' +
+        '<td>' + (f.proveedor ? esc(f.proveedor) : '<span class="mut">sello de la plataforma</span>') + '</td>' +
+        '<td>' + f.firmas + (f.cobradas !== f.firmas ? ' <span class="mut">(' + f.cobradas + ' cobradas)</span>' : '') + '</td>' +
+        '<td>' + esc(f.moneda) + ' ' + n2(f.ingreso) + '</td>' +
+        '<td>' + (f.costo ? esc(f.moneda) + ' ' + n2(f.costo) : '<span class="mut">—</span>') + '</td>' +
+        '<td>' + (f.a_liquidar ? '<b>' + esc(f.moneda) + ' ' + n2(f.a_liquidar) + '</b>' : '<span class="mut">—</span>') + '</td></tr>';
+    }).join('') : '<tr><td colspan="7" class="mut">Sin firmas en el período.</td></tr>';
+
+    $('tConsIa').innerHTML = d.ia.length ? d.ia.map(function (x) {
+      return '<tr><td><b>' + esc(x.nombre) + '</b></td><td>' + esc(x.modelo) + '</td>' +
+        '<td>' + x.input_tokens.toLocaleString('es-UY') + '</td>' +
+        '<td>' + x.output_tokens.toLocaleString('es-UY') + '</td>' +
+        '<td>' + esc(x.moneda) + ' ' + x.costo.toFixed(6) + '</td>' +
+        '<td>' + x.margen_pct + '%</td>' +
+        '<td>' + (x.cobra ? '<b>' + esc(x.moneda) + ' ' + x.precio.toFixed(6) + '</b>' : '<span class="mut">sin cargo</span>') +
+        (x.incluido ? ' <span class="mut">· ' + x.incluido + ' incluidas</span>' : '') + '</td></tr>';
+    }).join('') : '<tr><td colspan="7" class="mut">Sin consumo de IA en el período.</td></tr>';
+
+    var mb = function (b) { return (b / 1048576).toFixed(1) + ' MB'; };
+    $('tConsDisco').innerHTML = d.disco.length ? d.disco.map(function (x) {
+      var tope = x.modo === 'sin_custodia' ? 'no guarda'
+        : x.modo === 'sin_tope' ? 'sin límite'
+        : [x.tope_documentos != null ? x.tope_documentos + ' doc' : null,
+           x.tope_bytes != null ? mb(x.tope_bytes) : null].filter(Boolean).join(' · ');
+      var pasado = (x.tope_documentos != null && x.documentos > x.tope_documentos) ||
+                   (x.tope_bytes != null && x.bytes > x.tope_bytes);
+      return '<tr><td><b>' + esc(x.nombre) + '</b></td><td>' + x.documentos + '</td>' +
+        '<td>' + mb(x.bytes) + '</td>' +
+        '<td>' + (pasado ? '<b style="color:var(--danger)">' + esc(tope) + ' — pasado</b>' : '<span class="mut">' + esc(tope) + '</span>') +
+        '</td></tr>';
+    }).join('') : '<tr><td colspan="4" class="mut">Ninguna empresa tiene documentos guardados.</td></tr>';
+  }
+
+  function pintarLiquidaciones(l) {
+    var n2 = function (x) { return (Math.round(x * 100) / 100).toFixed(2); };
+    $('tLiqPend').innerHTML = l.pendiente.length ? l.pendiente.map(function (x) {
+      return '<tr><td><b>' + esc(x.nombre) + '</b></td><td>' + esc(x.pais) + '</td>' +
+        '<td>' + x.firmas + '</td><td>' + esc(x.moneda) + ' ' + n2(x.ingreso) + '</td>' +
+        '<td><b>' + esc(x.moneda) + ' ' + n2(x.a_liquidar) + '</b></td>' +
+        '<td><button class="btn btn-p chico" data-emitir=\'' +
+          esc(JSON.stringify({ proveedor_id: x.proveedor_id, pais: x.pais, moneda: x.moneda })) +
+          '\'>Emitir</button></td></tr>';
+    }).join('') : '<tr><td colspan="6" class="mut">Nada pendiente de liquidar en este período.</td></tr>';
+
+    $('tLiqEmit').innerHTML = l.emitidas.length ? l.emitidas.map(function (x) {
+      return '<tr><td><b>' + esc(x.proveedor) + '</b> <span class="mut">' + esc(x.pais) + '</span></td>' +
+        '<td>' + esc(x.periodo) + '</td>' +
+        '<td>' + esc(x.moneda) + ' ' + n2(x.a_liquidar) + ' <span class="mut">(' + x.firmas + ' firmas)</span></td>' +
+        '<td>' + (x.estado === 'pagada'
+          ? '<span class="mut">pagada ' + esc((x.pagada_en || '').slice(0, 10)) + (x.referencia_pago ? ' · ' + esc(x.referencia_pago) : '') + '</span>'
+          : '<b>emitida</b>') + '</td>' +
+        '<td>' + (x.estado === 'emitida'
+          ? '<button class="btn btn-s chico" data-pagar="' + esc(x.id) + '">Marcar pagada</button>' : '') + '</td></tr>';
+    }).join('') : '<tr><td colspan="5" class="mut">Todavía no se emitió ninguna.</td></tr>';
+
+    $('tLiqPend').querySelectorAll('[data-emitir]').forEach(function (b) {
+      b.addEventListener('click', function () { emitirLiquidacion(JSON.parse(b.dataset.emitir)); });
+    });
+    $('tLiqEmit').querySelectorAll('[data-pagar]').forEach(function (b) {
+      b.addEventListener('click', function () { pagarLiquidacion(b.dataset.pagar); });
+    });
+  }
+
+  async function emitirLiquidacion(d) {
+    d.periodo = $('periodoConsumos').value.trim();
+    // ⚠ Emitir congela el número y marca las líneas: lo que llegue después va al
+    // período siguiente. Por eso se pregunta.
+    if (!confirm('Se emite la liquidación de este período y el número queda fijo. ' +
+                 'Las firmas que lleguen después van a la próxima. ¿Seguimos?')) return;
+    try {
+      await api('/operador/liquidaciones', 'POST', d);
+      ok('msgConsumos', 'Liquidación emitida.');
+      await cargarConsumos();
+    } catch (e) { msg('msgConsumos', e.message, 'err'); }
+  }
+
+  async function pagarLiquidacion(id) {
+    var ref = prompt('Referencia del pago (transferencia, recibo…). Podés dejarlo vacío.');
+    if (ref === null) return;
+    try {
+      await api('/operador/liquidaciones/' + id + '/pagada', 'PATCH', { referencia: ref || undefined });
+      ok('msgConsumos', 'Marcada como pagada.');
+      await cargarConsumos();
+    } catch (e) { msg('msgConsumos', e.message, 'err'); }
   }
 
   // ===========================================================================
@@ -1178,10 +1468,22 @@
   // ===========================================================================
   // Arranque
   // ===========================================================================
+  // Los dos campos que filtran, enganchados una sola vez al arrancar.
+  function engancharFiltros() {
+    var q = $('qEmpresas');
+    if (q) {
+      var t;
+      q.addEventListener('input', function () { clearTimeout(t); t = setTimeout(cargarEmpresas, 300); });
+    }
+    var p = $('periodoConsumos');
+    if (p) p.addEventListener('change', cargarConsumos);
+  }
+
   async function arrancar() {
     try {
       YO = await api('/operador/yo');
       mostrarConsola();
+      engancharFiltros();
       window.addEventListener('hashchange', function () {
         if (YO) ir((location.hash || '').slice(1));
       });
@@ -2296,6 +2598,7 @@
   window.abrirAcuerdo = abrirAcuerdo;
   window.guardarAcuerdoForm = guardarAcuerdoForm;
   window.cerrarAcuerdoForm = cerrarAcuerdoForm;
+  window.verEmpresa = verEmpresa;
   window.abrirMarca = abrirMarca;
   window.marcaArchivo = marcaArchivo;
   window.marcaQuitar = marcaQuitar;
