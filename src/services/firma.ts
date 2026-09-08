@@ -953,6 +953,23 @@ export async function firmar(token: string, input: FirmaInput) {
        where id = ${ctx.participacion_id}::uuid
     `.execute(trx);
 
+    // ── La línea contable de esta firma (el medidor, 7/9).
+    //
+    // ⚠ La escribe la BASE (app.medir_firma, migración 076), no este código: el
+    // precio, las cantidades incluidas y el porcentaje del proveedor viven ahí,
+    // y la policy de firma_facturable exige actor 'sistema' — quien firma es
+    // una cuenta o un externo sin cuenta. Va DESPUÉS de que la participación
+    // quedó firmada, porque mide un hecho consumado, y dentro de la misma
+    // transacción, para que no exista una firma medida que no se firmó.
+    //
+    // ⚠⚠ La función nunca lanza: si no puede medir, avisa por warning en el log
+    // de la base y devuelve null. Una firma no se pierde porque no se haya
+    // podido cobrar. Lo que se le pasa es lo que la firma PRODUJO (el nivel
+    // obtenido y el sello usado), no lo que el circuito pidió.
+    await sql`
+      select app.medir_firma(${ctx.participacion_id}::uuid, ${firmante.nivel}, ${firmante.codigo})
+    `.execute(trx);
+
     const pend = await sql<{ n: string }>`
       select count(*)::text as n from participacion
        where instancia_id = ${ctx.instancia_id}::uuid and papel = 'firmante'
