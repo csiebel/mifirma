@@ -151,6 +151,19 @@ const planSchema = z.object({
       }),
     )
     .optional(),
+  // Con qué se firma y qué se guarda (072).
+  proveedores: z
+    .object({ modo: z.enum(['todos', 'lista']), ids: z.array(z.string().uuid()) })
+    .optional(),
+  custodia: z
+    .object({
+      modo: z.enum(['sin_custodia', 'con_tope', 'sin_tope']),
+      tope_documentos: z.coerce.number().int().positive().nullable(),
+      tope_bytes: z.coerce.number().int().positive().nullable(),
+      dias_emisor: z.coerce.number().int().min(0).nullable(),
+      dias_firmante: z.coerce.number().int().min(0).nullable(),
+    })
+    .optional(),
 });
 
 const guardarCorreoSchema = z.object({
@@ -238,7 +251,9 @@ export function registrarRutasOperador(app: FastifyInstance) {
         moneda: z.string().length(3),
         metrica: z.string().min(1),
         nivel_firma: z.string().nullable().optional(),
+        proveedor_id: z.string().uuid().nullable().optional(),
         precio: z.coerce.number().min(0),
+        cantidad_incluida: z.coerce.number().min(0).optional(),
       })
       .parse(req.body);
     return setPrecio(s.operadorId, b);

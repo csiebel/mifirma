@@ -99,6 +99,14 @@
   .prest td:first-child{width:52%}
   .prest td:first-child span{display:block;line-height:1.35}
   .prest input{margin:0}
+  /* Con qué se firma y qué se guarda, en el modal del plan (072). */
+  .provLista{margin:8px 0 0 24px;padding:10px 12px;border:1px solid var(--line);border-radius:9px;background:var(--soft)}
+  .provLista.off,.dos.off{opacity:.42;pointer-events:none}
+  .tagExcl{margin-left:6px;font-size:11px;font-weight:600;color:#0b6b58;background:#e6f6f1;border-radius:99px;padding:2px 8px}
+  .msg.alerta{background:#fffbeb;border:1px solid #fde68a;color:#b45309}
+  /* Precio propio de un proveedor: cuelga de la fila general de arriba (073). */
+  .filaProv td:first-child{padding-left:34px;position:relative}
+  .filaProv td:first-child::before{content:"└";position:absolute;left:16px;color:var(--mut)}
   /* La barra del sitio, a tamaño real, dentro del modal de marca (7/9). Repite
      las reglas de `sitio.html`: 30px de alto, el que falta no ocupa lugar, y el
      que queda solo se centra. */
@@ -358,7 +366,7 @@
         </div>
       </div>
       <table>
-        <thead><tr><th>Qué se cobra</th><th>Nivel de firma</th><th>Moneda</th><th>Precio</th><th></th></tr></thead>
+        <thead><tr><th>Qué se cobra</th><th>Nivel de firma</th><th>Moneda</th><th>Precio</th><th>Sin cargo</th><th></th></tr></thead>
         <tbody id="tPrecios"></tbody>
       </table>
       <div id="msgPrecios" style="padding:0 18px 18px"></div>

@@ -59,6 +59,7 @@
     asistente_ia: 'Por consulta al asistente',
     dispositivo_propio: 'Por firma con dispositivo propio',
     identidad_digital: 'Por verificación de identidad',
+    almacenamiento: 'Almacenamiento',
   };
   var AYUDA_METRICA = {
     abono: 'Lo fijo del plan, se cobre o no se use.',
@@ -69,15 +70,20 @@
     asistente_ia: 'Sólo si la prestación del plan dice que se cobra por unidad.',
     dispositivo_propio: 'Cada firma hecha con el token o tarjeta del firmante.',
     identidad_digital: 'Cada verificación del firmante con su identidad digital (tuID, gov.br…).',
+    almacenamiento: 'Lo que se cobra por guardar documentos. La unidad la definís vos al cargar el precio.',
   };
   // Las prestaciones del plan (071): qué trae cada plan, con o sin costo.
   var PRESTACION_NOMBRE = {
+    firma_simple: 'Firma simple',
+    custodia: 'Custodia de documentos',
     asistente_ia: 'Asistente de IA',
     firma_avanzada: 'Firma avanzada con proveedor en la nube',
     dispositivo_propio: 'Firma con dispositivo propio (token o tarjeta)',
     identidad_digital: 'Verificación con identidad digital',
   };
   var PRESTACION_AYUDA = {
+    firma_simple: 'El sello de la plataforma. Apagala para vender un plan de sólo firma avanzada.',
+    custodia: 'Guardar los PDF. El detalle va abajo, en «Documentos guardados».',
     asistente_ia: 'Redacción y explicación de documentos con IA.',
     firma_avanzada: 'Certificado del titular en tuID, SERPRO, e-Firma…',
     dispositivo_propio: 'El firmante firma con su propio certificado. Sin costo de proveedor; sí de soporte.',
@@ -715,31 +721,52 @@
 
     // Una fila por combinación posible. Las métricas de firma se abren en los
     // dos niveles porque una firma avanzada cuesta certificado y la simple no.
+    // ⚠ Desde la 073 el precio depende también del PROVEEDOR: firmar con tuID no
+    // tiene por qué costar lo mismo que firmar con otro. Por eso la firma
+    // avanzada abre una fila general («cualquier proveedor») y una por cada
+    // proveedor habilitado en ESTE país. La simple no: la hace el sello de la
+    // plataforma y no tiene proveedor.
+    var provsDelPais = (DATOS.catalogo_proveedores || []).filter(function (p) {
+      return (p.paises || []).indexOf(pais) >= 0;
+    });
     var filas = [];
     DATOS.metricas.forEach(function (m) {
       if (DATOS.admite_nivel[m]) {
-        DATOS.niveles.forEach(function (n) { filas.push({ metrica: m, nivel: n }); });
+        DATOS.niveles.forEach(function (n) {
+          filas.push({ metrica: m, nivel: n, proveedor: null });
+          if (m === 'firma' && n === 'avanzada') {
+            provsDelPais.forEach(function (p) {
+              filas.push({ metrica: m, nivel: n, proveedor: p.id, provNombre: p.nombre_mostrado });
+            });
+          }
+        });
       } else {
-        filas.push({ metrica: m, nivel: null });
+        filas.push({ metrica: m, nivel: null, proveedor: null });
       }
     });
 
     var vigentes = {};
     PLAN_SEL.precios.forEach(function (x) {
-      if (x.pais === pais) vigentes[x.metrica + '|' + (x.nivel_firma || '')] = x;
+      if (x.pais === pais) vigentes[x.metrica + '|' + (x.nivel_firma || '') + '|' + (x.proveedor_id || '')] = x;
     });
 
     $('tPrecios').innerHTML = filas
       .map(function (f) {
-        var k = f.metrica + '|' + (f.nivel || '');
+        var k = f.metrica + '|' + (f.nivel || '') + '|' + (f.proveedor || '');
         var v = vigentes[k];
+        var nombre = f.proveedor
+          ? '<b>' + esc(f.provNombre) + '</b><br><span style="font-size:12.5px;color:var(--mut)">' +
+            'Precio propio para este proveedor. Sin fila acá, vale el general de arriba.</span>'
+          : '<b>' + esc(ETIQUETA_METRICA[f.metrica] || f.metrica) + '</b>' +
+            '<br><span style="font-size:12.5px;color:var(--mut)">' + esc(AYUDA_METRICA[f.metrica] || '') + '</span>';
         return (
-          '<tr><td><b>' + esc(ETIQUETA_METRICA[f.metrica] || f.metrica) + '</b>' +
-          '<br><span style="font-size:12.5px;color:var(--mut)">' + esc(AYUDA_METRICA[f.metrica] || '') + '</span></td>' +
+          '<tr' + (f.proveedor ? ' class="filaProv"' : '') + '><td>' + nombre + '</td>' +
           '<td>' + (f.nivel ? esc(ETIQUETA_NIVEL[f.nivel]) : '—') + '</td>' +
           '<td>' + esc(v ? v.moneda : moneda) + '</td>' +
-          '<td><input data-k="' + esc(k) + '" inputmode="decimal" style="max-width:130px" value="' +
+          '<td><input data-k="' + esc(k) + '" inputmode="decimal" style="max-width:110px" value="' +
           esc(v ? v.precio : '') + '" placeholder="—" /></td>' +
+          '<td><input data-inc="' + esc(k) + '" inputmode="decimal" style="max-width:90px" value="' +
+          esc(v && Number(v.cantidad_incluida) ? v.cantidad_incluida : '') + '" placeholder="0" /></td>' +
           '<td><div class="acc" style="justify-content:flex-end">' +
           '<button class="btn btn-s chico" data-guardar="' + esc(k) + '">Guardar</button>' +
           (v ? '<button class="btn btn-d chico" data-baja="' + esc(v.id) + '">Quitar</button>' : '') +
@@ -765,8 +792,10 @@
   async function guardarPrecio(k, pais, moneda) {
     var partes = k.split('|');
     var input = $('tPrecios').querySelector('input[data-k="' + k + '"]');
+    var inc = $('tPrecios').querySelector('input[data-inc="' + k + '"]');
     var valor = (input.value || '').trim().replace(',', '.');
     if (valor === '') return msg('msgPrecios', 'Escribí un precio, o usá «Quitar» para darlo de baja.', 'err');
+    var incluida = ((inc && inc.value) || '').trim().replace(',', '.');
     try {
       await api('/operador/precios', 'PUT', {
         plan_id: PLAN_SEL.id,
@@ -774,7 +803,9 @@
         moneda: moneda,
         metrica: partes[0],
         nivel_firma: partes[1] || null,
+        proveedor_id: partes[2] || null,
         precio: Number(valor),
+        cantidad_incluida: incluida === '' ? 0 : Number(incluida),
       });
       ok('msgPrecios', 'Guardado.');
       await cargarPlanes();
@@ -793,8 +824,36 @@
   var IDIOMAS = ['es', 'pt', 'en'];
   var NOMBRE_IDIOMA = { es: 'Español', pt: 'Português', en: 'English' };
 
+  /**
+   * El catálogo de proveedores, con el aviso de exclusividad. Nace de la 072:
+   * si el plan lista proveedores y saca al socio de un país con acuerdo, ese
+   * plan se queda SIN firma avanzada ahí — porque el catálogo ya excluyó a los
+   * demás. Es la consecuencia de que el filtro del plan mande, y el operador no
+   * tiene otra forma de verla.
+   */
+  function pintarCatalogoProv(elegidos) {
+    var cat = DATOS.catalogo_proveedores || [];
+    if (!cat.length) return '<span class="mut">No hay proveedores en el catálogo.</span>';
+    return cat.map(function (p) {
+      var excl = (p.exclusividades || []).join(', ');
+      return '<label class="check" style="font-weight:400;padding:4px 0">' +
+        '<input type="checkbox" class="provChk" value="' + esc(p.id) + '" style="width:auto"' +
+          (elegidos.indexOf(p.id) >= 0 ? ' checked' : '') + ' /> ' +
+        esc(p.nombre_mostrado) +
+        (p.paises && p.paises.length ? ' <span class="mut">· ' + esc(p.paises.join(', ')) + '</span>' : '') +
+        (p.activo_global ? '' : ' <span class="mut">· apagado en el catálogo</span>') +
+        (excl ? ' <span class="tagExcl">acuerdo ' + esc(excl) + '</span>' : '') +
+        '</label>';
+    }).join('');
+  }
+
   function abrirPlan(plan) {
     var nuevo = !plan;
+    var prov = (plan && plan.proveedores) || { modo: 'todos', ids: [] };
+    var modoProv = prov.modo || 'todos';
+    var elegidos = (prov.ids || []).slice();
+    var cust = (plan && plan.custodia) ||
+      { modo: 'sin_tope', tope_documentos: null, tope_bytes: null, dias_emisor: null, dias_firmante: null };
     var datos = {
       nombre: Object.assign({}, plan ? plan.nombre_i18n : {}),
       descripcion: Object.assign({}, plan ? plan.descripcion_i18n : {}),
@@ -846,6 +905,49 @@
           '</tr>';
       }).join('') +
       '</tbody></table>' +
+      '<div id="mSinFirma"></div>' +
+
+      // ── Con qué se firma (072) ──
+      '<h3 style="margin:20px 0 3px;font-size:14.5px">Con qué se firma</h3>' +
+      '<p class="pista" style="margin:0 0 8px">De lo que el catálogo habilite en cada país, qué ofrece este plan.</p>' +
+      '<label class="check" style="align-items:flex-start;gap:7px;font-weight:400">' +
+      '<input type="radio" name="mProvModo" value="todos" style="width:auto;margin-top:3px"' +
+        (modoProv === 'todos' ? ' checked' : '') + ' />' +
+      '<span><b>Todos los habilitados</b><br><span class="mut">Lo que el operador tenga encendido en cada país. Es lo natural.</span></span></label>' +
+      '<label class="check" style="align-items:flex-start;gap:7px;margin-top:6px;font-weight:400">' +
+      '<input type="radio" name="mProvModo" value="lista" style="width:auto;margin-top:3px"' +
+        (modoProv === 'lista' ? ' checked' : '') + ' />' +
+      '<span><b>Sólo estos</b><br><span class="mut">Para vender «firmás con X». Lo que no esté acá no se ofrece, en ningún país.</span></span></label>' +
+      '<div id="mProvLista" class="provLista">' + pintarCatalogoProv(elegidos) + '</div>' +
+      '<div id="mAvisoExcl"></div>' +
+
+      // ── Documentos guardados (072) ──
+      '<h3 style="margin:20px 0 3px;font-size:14.5px">Documentos guardados</h3>' +
+      '<p class="pista" style="margin:0 0 8px">Lo que se puede dejar de guardar son los PDF. El expediente de evidencias, ' +
+      'los hashes y el certificado quedan siempre — sin eso no podríamos probar nada después.</p>' +
+      ['sin_tope', 'con_tope', 'sin_custodia'].map(function (m) {
+        var t = { sin_tope: ['Sin límite', 'Se guarda todo, para siempre.'],
+                  con_tope: ['Con tope', 'Hasta una cantidad de documentos y/o de espacio.'],
+                  sin_custodia: ['No guardar', 'El PDF se entrega y no se custodia.'] }[m];
+        return '<label class="check" style="align-items:flex-start;gap:7px;margin-top:6px;font-weight:400">' +
+          '<input type="radio" name="mCustModo" value="' + m + '" style="width:auto;margin-top:3px"' +
+            (cust.modo === m ? ' checked' : '') + ' />' +
+          '<span><b>' + t[0] + '</b><br><span class="mut">' + t[1] + '</span></span></label>';
+      }).join('') +
+      '<div id="mCustTopes" class="dos" style="margin-top:10px">' +
+      '<div><label>Tope de documentos</label><input id="mCustDocs" inputmode="numeric" placeholder="sin tope" value="' +
+        esc(cust.tope_documentos == null ? '' : cust.tope_documentos) + '" /></div>' +
+      '<div><label>Tope de espacio (MB)</label><input id="mCustMb" inputmode="numeric" placeholder="sin tope" value="' +
+        esc(cust.tope_bytes == null ? '' : Math.round(cust.tope_bytes / 1048576)) + '" /></div>' +
+      '</div>' +
+      '<div class="dos" style="margin-top:10px">' +
+      '<div><label>Días que se guarda el del emisor</label><input id="mCustDiasE" inputmode="numeric" placeholder="para siempre" value="' +
+        esc(cust.dias_emisor == null ? '' : cust.dias_emisor) + '" /></div>' +
+      '<div><label>Días que se guarda el del firmante</label><input id="mCustDiasF" inputmode="numeric" placeholder="para siempre" value="' +
+        esc(cust.dias_firmante == null ? '' : cust.dias_firmante) + '" />' +
+      '<span class="pista">Se le manda por correo igual: esto es hasta cuándo lo puede volver a bajar de acá.</span></div>' +
+      '</div>' +
+
       '<label for="mOrden" style="margin-top:14px">Orden</label>' +
       '<input id="mOrden" inputmode="numeric" style="max-width:120px" value="' +
         esc(plan ? plan.orden : 100) + '" />' +
@@ -871,6 +973,48 @@
       if (d) datos.descripcion[lang] = d; else delete datos.descripcion[lang];
       if (i.length) datos.incluye[lang] = i; else delete datos.incluye[lang];
     }
+
+    // ── El estado vivo del modal ──
+    //
+    // ⚠ El aviso de «sin forma de firmar» no es cosmética: la 072 tiene una
+    // tranca en la base que rechaza ese plan. Sin esto, el operador descubriría
+    // la regla por un error del servidor después de llenar todo el formulario.
+    function refrescar() {
+      var modo = ($('modal').querySelector('input[name=mProvModo]:checked') || {}).value || 'todos';
+      $('mProvLista').classList.toggle('off', modo !== 'lista');
+      var cm = ($('modal').querySelector('input[name=mCustModo]:checked') || {}).value || 'sin_tope';
+      $('mCustTopes').classList.toggle('off', cm !== 'con_tope');
+
+      var inc = function (k) {
+        var tr = $('modal').querySelector('tr[data-pr="' + k + '"]');
+        return !!(tr && tr.querySelector('.prInc').checked);
+      };
+      var hayProv = modo === 'todos' ||
+        $('modal').querySelectorAll('.provChk:checked').length > 0;
+      var puedeFirmar = inc('firma_simple') || inc('dispositivo_propio') ||
+        (inc('firma_avanzada') && hayProv);
+      $('mSinFirma').innerHTML = puedeFirmar ? '' :
+        '<div class="msg err" style="margin-top:10px">Con esto <b>nadie podría firmar</b>: no hay firma simple, ' +
+        'ni dispositivo propio, ni ningún proveedor para la avanzada. Incluí alguna de las tres.</div>';
+      $('mOk').disabled = !puedeFirmar;
+
+      // El aviso del acuerdo: sólo tiene sentido con lista, y sólo si el socio
+      // quedó afuera.
+      var av = [];
+      if (modo === 'lista') {
+        var marcados = Array.prototype.map.call($('modal').querySelectorAll('.provChk:checked'), function (c) { return c.value; });
+        (DATOS.catalogo_proveedores || []).forEach(function (p) {
+          if ((p.exclusividades || []).length && marcados.indexOf(p.id) < 0) {
+            av.push('⚠ ' + p.nombre_mostrado + ' tiene acuerdo de exclusividad en ' + p.exclusividades.join(', ') +
+              '. Si no está en la lista, este plan se queda sin firma avanzada ahí.');
+          }
+        });
+      }
+      var caja = $('mAvisoExcl');
+      if (caja) caja.innerHTML = av.length ? '<div class="msg alerta">' + av.map(esc).join('<br>') + '</div>' : '';
+    }
+    $('modal').addEventListener('change', refrescar);
+    refrescar();
 
     volcar();
     $('mIdiomas').querySelectorAll('button').forEach(function (b) {
@@ -898,6 +1042,26 @@
         destacado: $('mDestacado').checked,
         activo: $('mActivo').checked,
         orden: Number($('mOrden').value || 100),
+        proveedores: {
+          modo: ($('modal').querySelector('input[name=mProvModo]:checked') || {}).value || 'todos',
+          ids: Array.prototype.map.call($('modal').querySelectorAll('.provChk:checked'), function (c) { return c.value; }),
+        },
+        custodia: (function () {
+          var m = ($('modal').querySelector('input[name=mCustModo]:checked') || {}).value || 'sin_tope';
+          var n = function (id) {
+            var v = String($(id).value || '').trim();
+            return v === '' ? null : Number(v.replace(',', '.'));
+          };
+          var mb = n('mCustMb');
+          return {
+            modo: m,
+            tope_documentos: m === 'con_tope' ? n('mCustDocs') : null,
+            // El operador escribe MB; la base guarda bytes.
+            tope_bytes: m === 'con_tope' && mb != null ? Math.round(mb * 1048576) : null,
+            dias_emisor: n('mCustDiasE'),
+            dias_firmante: n('mCustDiasF'),
+          };
+        })(),
         prestaciones: Array.prototype.map.call($('modal').querySelectorAll('tr[data-pr]'), function (tr) {
           return {
             prestacion: tr.dataset.pr,
