@@ -224,7 +224,16 @@ export function urlDeAutorizacion(
   // aunque el navegador tenga sesión abierta en tuID, vuelve a pedir que la
   // persona se identifique. Sin él, tuID reusa su sesión y va derecho al PIN.
   if (opciones.reautenticar) u.searchParams.set('prompt', 'login');
-  return u.toString();
+  if (!opciones.reautenticar) return u.toString();
+  // ⚠ 8/9: tuID (preproducción) IGNORA `prompt=login` y reusa su sesión (probado
+  // dos veces en producción, con y sin `openid` — este último da invalid_scope).
+  // Hasta que Antel lo corrija, se pasa por su cierre de sesión (manual v1.14
+  // §11.2.4): TuID cierra la sesión de ese navegador y redirige a `redirect_uri`,
+  // que acá es la propia autorización. Queda `prompt=login` igual, para el día
+  // que lo respeten.
+  const salida = new URL(`${cfg.baseAuth.replace(/\/+$/, '')}/trustedx-authserver/TuID-idp/logout`);
+  salida.searchParams.set('redirect_uri', u.toString());
+  return salida.toString();
 }
 
 // ═══════════════════════════════════════════════════════════════════════════
