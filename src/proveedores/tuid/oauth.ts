@@ -102,7 +102,9 @@ const SCOPES_IDENTIDAD = 'profile identity_profile full_profile';
 // ⚠ Lleva TAMBIÉN los de identidad (`identity_profile full_profile`): para
 // firmar hace falta saber de quién es la clave, porque si el emisor exigió
 // una cédula, la firma tiene que ser de ESA cédula (T6 aplicada a la firma).
-const SCOPES_FIRMA = 'profile identity_profile full_profile urn:eidas:sign:identity:use:server urn:safelayer:eidas:sign:identity:profile';
+// `openid` (8/9): el manual v1.14 ata la semántica OpenID Connect a este scope,
+// y `prompt=login` sin él no desactivó el SSO de tuID (probado en producción).
+const SCOPES_FIRMA = 'openid profile identity_profile full_profile urn:eidas:sign:identity:use:server urn:safelayer:eidas:sign:identity:profile';
 
 // ═══════════════════════════════════════════════════════════════════════════
 // El `state`, que la colección de Postman no trae
