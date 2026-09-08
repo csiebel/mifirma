@@ -99,14 +99,30 @@ function redirectUri(): string {
 // Ida
 // ═══════════════════════════════════════════════════════════════════════════
 
-export async function iniciarAutorizacionFirma(tokenEnlace: string, volverA?: string): Promise<{ url: string }> {
+/**
+ * `sesion` es la sesión de Mi Firma que venga en la misma request (la cookie
+ * `sess_emp` tiene Path=/ y llega también a /firmar), o `null` si no hay.
+ *
+ * Regla de Claudio (8/9): tuID tiene que volver a identificar a la persona
+ * SALVO que haya entrado a Mi Firma con tuID. Un firmante externo sin cuenta,
+ * uno que entró con contraseña, o una sesión de OTRA persona que la del
+ * enlace → `prompt=login`. Sólo cuando la sesión es de la misma identidad del
+ * enlace y se abrió con este proveedor se deja que tuID reuse su SSO.
+ */
+export async function iniciarAutorizacionFirma(
+  tokenEnlace: string,
+  volverA?: string,
+  sesion: { identidadId: string; via?: string } | null = null,
+): Promise<{ url: string }> {
   const enlace = await verificarEnlaceFirma(tokenEnlace);
   const cfg = await withExterno(enlace.otorgamientoId, enlace.identidadId, (trx) => configConSecreto(trx));
   const state = await emitirState(
     { otorgamientoId: enlace.otorgamientoId, participacionId: enlace.participacionId, volverA },
     'tuid_firma',
   );
-  return { url: urlDeAutorizacion(cfg, state, 'firma') };
+  const entroConTuid =
+    sesion !== null && sesion.identidadId === enlace.identidadId && sesion.via === `idp:${CODIGO_PROVEEDOR}`;
+  return { url: urlDeAutorizacion(cfg, state, 'firma', { reautenticar: !entroConTuid }) };
 }
 
 // ═══════════════════════════════════════════════════════════════════════════

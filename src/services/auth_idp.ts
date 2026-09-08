@@ -352,7 +352,9 @@ export async function completarLogin(
   // anclaje, y eso es periferia de firma: se decide y se hace con fable.
   // Mientras tanto, decir 'alto' acá sería afirmar en el expediente algo que
   // ninguna fila sostiene.
-  const datos = { anclajesProbados: [] as string[], nivelGarantia: 'bajo' as const };
+  // `via` queda en el token: la ida a firmar con tuID lo lee para decidir si
+  // le pide a tuID que vuelva a identificar a la persona (8/9).
+  const datos = { anclajesProbados: [] as string[], nivelGarantia: 'bajo' as const, via: `idp:${viaje.proveedor}` };
 
   if (cuentas.length > 1) {
     return {

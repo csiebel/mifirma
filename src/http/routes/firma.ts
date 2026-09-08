@@ -18,6 +18,8 @@ import { estadoDeCuenta, crearCuentaDesdeFirma } from '../../services/cuenta_del
 import { camposParaFirmar, guardarValor } from '../../services/campos';
 import { iniciarVerificacion } from '../../services/tuid_identidad';
 import { iniciarAutorizacionFirma } from '../../services/tuid_firma';
+import { autenticar } from '../../auth/identity';
+import { tokenDeCookie } from '../cookies_sesion';
 import { HttpError } from '../errors';
 
 /**
@@ -51,6 +53,24 @@ function guardarToken(req: FastifyRequest, reply: FastifyReply, token: string) {
     path: '/firmar',
     maxAge: TTL_SEG,
   });
+}
+
+/**
+ * La sesión de Mi Firma que venga en la misma request, si hay una y vale.
+ * NO es la llave para firmar (ésa es la cookie del enlace, `tokenDe`): sólo
+ * dice por dónde entró esta persona, para que la ida a tuID sepa si tiene
+ * que pedirle que se identifique de nuevo. Una sesión vencida o ajena vale
+ * lo mismo que ninguna: se le pide de nuevo.
+ */
+async function sesionDeMiFirma(req: FastifyRequest): Promise<{ identidadId: string; via?: string } | null> {
+  const t = tokenDeCookie(req, 'emp');
+  if (!t) return null;
+  try {
+    const s = await autenticar(`Bearer ${t}`);
+    return { identidadId: s.identidadId, via: s.via };
+  } catch {
+    return null;
+  }
 }
 
 function tokenDe(req: FastifyRequest): string {
@@ -117,7 +137,7 @@ export function registrarRutasFirma(app: FastifyInstance) {
   app.post(
     '/firmar/tuid/iniciar',
     { config: { rateLimit: { max: 10, timeWindow: '10 minutes' } } },
-    async (req) => iniciarAutorizacionFirma(tokenDe(req)),
+    async (req) => iniciarAutorizacionFirma(tokenDe(req), undefined, await sesionDeMiFirma(req)),
   );
 
   app.get('/firmar/documento', async (req, reply) => {

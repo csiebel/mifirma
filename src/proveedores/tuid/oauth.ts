@@ -202,7 +202,12 @@ export async function propositoDelState(state: string): Promise<PropositoTuid | 
  * 'firma' (además, permiso para usar su clave). Pedir el de firma para
  * verificar sería pedir de más; pedir sólo identidad para firmar no alcanza.
  */
-export function urlDeAutorizacion(cfg: ConfigTuid, state: string, para: 'identidad' | 'firma' = 'identidad'): string {
+export function urlDeAutorizacion(
+  cfg: ConfigTuid,
+  state: string,
+  para: 'identidad' | 'firma' = 'identidad',
+  opciones: { reautenticar?: boolean } = {},
+): string {
   const u = new URL(`${cfg.baseAuth.replace(/\/+$/, '')}/trustedx-authserver/oauth/as-principal`);
   u.searchParams.set('response_type', 'code');
   u.searchParams.set('client_id', cfg.clientId);
@@ -211,6 +216,10 @@ export function urlDeAutorizacion(cfg: ConfigTuid, state: string, para: 'identid
   u.searchParams.set('state', state);
   // El nivel exigido lo pone el operador; sin él, TuID ofrece todos sus métodos.
   if (cfg.acrValues) u.searchParams.set('acr_values', cfg.acrValues);
+  // `prompt=login` desactiva el SSO de tuID (manual v1.14, parámetro `prompt`):
+  // aunque el navegador tenga sesión abierta en tuID, vuelve a pedir que la
+  // persona se identifique. Sin él, tuID reusa su sesión y va derecho al PIN.
+  if (opciones.reautenticar) u.searchParams.set('prompt', 'login');
   return u.toString();
 }
 

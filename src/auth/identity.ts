@@ -24,6 +24,14 @@ export interface Identidad {
   anclajesProbados: string[];
   nivelGarantia: NivelGarantia;
   idioma?: string;
+  /**
+   * Por dónde se abrió la sesión: `'password'` o `'idp:<código>'` (p. ej.
+   * `'idp:tuid'`). Lo consulta la ida a firmar con tuID (8/9): si la persona
+   * ya se identificó ante ese mismo proveedor para ENTRAR, no se le pide de
+   * nuevo; en cualquier otro caso se manda `prompt=login` y tuID desactiva su
+   * SSO. Ausente en tokens anteriores a este cambio = como contraseña.
+   */
+  via?: string;
 }
 
 const jwks = process.env.AUTH_JWKS_URL
@@ -47,6 +55,7 @@ export interface DatosDeSesion {
   anclajesProbados?: string[];
   nivelGarantia?: NivelGarantia;
   idioma?: string;
+  via?: string;
 }
 
 /** Sesión de trabajo: identidad + cuenta activa + lo que probó al entrar. */
@@ -60,6 +69,7 @@ export async function emitirSesion(
     anc: datos.anclajesProbados ?? [],
     niv: datos.nivelGarantia ?? 'bajo',
     lang: datos.idioma,
+    via: datos.via,
   })
     .setProtectedHeader({ alg: 'HS256' })
     .setSubject(identidadId)
@@ -109,6 +119,7 @@ export async function autenticar(authHeader?: string): Promise<Identidad> {
       : [],
     nivelGarantia: esNivel(payload.niv) ? payload.niv : 'bajo',
     idioma: typeof payload.lang === 'string' ? payload.lang : undefined,
+    via: typeof payload.via === 'string' ? payload.via : undefined,
   };
 }
 
@@ -166,6 +177,7 @@ export async function firmarDesafioCuenta(
     anc: datos.anclajesProbados ?? [],
     niv: datos.nivelGarantia ?? 'bajo',
     lang: datos.idioma,
+    via: datos.via,
     purpose: 'elegir_cuenta',
   })
     .setProtectedHeader({ alg: 'HS256' })
@@ -192,6 +204,7 @@ export async function verificarDesafioCuenta(
         : [],
       nivelGarantia: esNivel(payload.niv) ? payload.niv : 'bajo',
       idioma: typeof payload.lang === 'string' ? payload.lang : undefined,
+      via: typeof payload.via === 'string' ? payload.via : undefined,
     },
   };
 }
