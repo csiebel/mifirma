@@ -16,11 +16,12 @@
 //
 // ⚠ Subir el número de CACHE también sirve para desalojar cualquier resto que
 // haya quedado de payroll en un navegador que alguna vez abrió `/mi`.
+// ⚠ v6 (10/9): la excepción de `/cdn-cgi/*` (la vuelta de Cloudflare Access).
 // ⚠ v5 (6/9): además de estrenar la excepción de `/identidad/*`, subir el
 // número DESALOJA lo que la versión anterior alcanzó a guardar de esas
 // vueltas — el `caches.put` de abajo las cacheaba por camino, así que un
 // navegador que ya hizo un viaje tiene guardada la respuesta de un canje.
-const CACHE = 'mifirma-shell-v5';
+const CACHE = 'mifirma-shell-v6';
 const SHELL = ['/app', '/entrar'];
 
 self.addEventListener('install', (e) => {
@@ -79,6 +80,22 @@ self.addEventListener('fetch', (e) => {
   // > derecho. El worker sólo puede responder navegaciones que devuelven una
   // > página.
   if (url.pathname.startsWith('/identidad/')) return;
+
+  // ⚠⚠ Y LA VUELTA DE CLOUDFLARE ACCESS ES EL MISMO CASO, POR TERCERA VEZ.
+  //
+  // `/cdn-cgi/access/authorized?...` es adonde Cloudflare manda al navegador
+  // después de la pantalla de Access, y desde ahí lo redirige a `/operador`.
+  // Es una navegación que TERMINA EN UNA REDIRECCIÓN: el worker la interceptaba,
+  // el `fetch` seguía el salto, y el navegador rechazaba la respuesta con
+  // `ERR_FAILED`. Se vio el 7/9 (y «se arregló solo al reintentar», porque al
+  // segundo intento la cookie ya estaba y Access no redirigía) y el 10/9, que
+  // fue cuando se entendió. `/cdn-cgi/` entero es de Cloudflare — Access,
+  // desafíos, lo que agreguen mañana — y nada de eso es de esta app.
+  //
+  // > Tres veces la misma regla en tres puertas distintas (15/8, 6/9, 10/9):
+  // > lo que se autentica afuera y lo que termina en una redirección, pasan
+  // > derecho. La próxima puerta nueva se agrega acá ANTES de probarla.
+  if (url.pathname.startsWith('/cdn-cgi/')) return;
 
   // Navegación: red primero (sin pasar por el cache HTTP del navegador, que en
   // iOS a veces ignora no-store), cache como respaldo offline por ruta real.
