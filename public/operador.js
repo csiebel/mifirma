@@ -472,6 +472,7 @@
       }
       llenarSelectorPaisPrecio();
       pintarPlanes();
+      cargarPaquetes();
       var sigue = PLAN_SEL && DATOS.planes.filter(function (p) { return p.id === PLAN_SEL.id; })[0];
       seleccionarPlan(sigue || DATOS.planes[0] || null);
     } catch (e) {
@@ -539,6 +540,12 @@
     pintarEmpresas();
     try {
       var d = await api('/operador/empresas/' + id);
+      // ⚠ El saldo no puede tumbar la pantalla de empresas: si la 078 todavía no
+      // está aplicada en este servidor, o la consulta falla, el resto se ve igual
+      // y el bloque de saldo no aparece. Una pantalla a medias es mejor que una
+      // pantalla en blanco.
+      var sal = null;
+      try { sal = await api('/operador/empresas/' + id + '/saldo'); } catch (err) { sal = null; }
       var e = d.empresa;
       var mb = function (b) { return b == null ? '—' : (b / 1048576).toFixed(1) + ' MB'; };
 
@@ -596,6 +603,9 @@
         }).join('') +
         '</tbody></table>' +
 
+        // ── Saldo y modalidad (078, 10/9)
+        bloqueSaldo(sal) +
+
         '<h3 style="margin:20px 0 4px;font-size:14.5px">Documentos guardados</h3>' +
         '<p style="margin:0">' + esc(custodiaTxt) +
         (dias.length ? ' <span class="mut">· se borran — ' + esc(dias.join(' · ')) + '</span>' : '') + '</p>' +
@@ -607,6 +617,9 @@
         '</div>';
 
       $('empGuardarPlan').addEventListener('click', function () { asignarPlan(id); });
+      $('detEmpresa').querySelectorAll('[data-saldo]').forEach(function (b) {
+        b.addEventListener('click', function () { accionSaldo(id, b.dataset.saldo, sal); });
+      });
       $('detEmpresa').querySelectorAll('[data-ajustar]').forEach(function (b) {
         b.addEventListener('click', function () { ajustarPrestacion(id, b.dataset.ajustar); });
       });
@@ -615,6 +628,220 @@
       });
       $('detEmpresa').scrollIntoView({ block: 'nearest' });
     } catch (e) { msg('msgEmpresas', e.message, 'err'); }
+  }
+
+  // ===========================================================================
+  // SALDO Y MODALIDAD (078, 10/9)
+  //
+  // Todo lo que se ve acá lo calcula la base (`app.estado_de_saldo`): la misma
+  // función que decide si un despacho sale. Si la pantalla lo recalculara con
+  // sus propias cuentas, un día diría «tenés saldo» sobre un despacho frenado.
+  // ===========================================================================
+
+  function plata(n, moneda) {
+    if (n == null) return '—';
+    return Number(n).toLocaleString('es-UY', { minimumFractionDigits: 2, maximumFractionDigits: 2 }) +
+      (moneda ? ' ' + moneda : '');
+  }
+
+  function bloqueSaldo(sal) {
+    var e = sal && sal.estado;
+    if (!e) return '';
+    var prepago = e.modalidad === 'prepago';
+    var origen = e.origen === 'cuenta' ? '<b>excepción de esta empresa</b>'
+               : e.origen === 'por_omision' ? '<span class="mut">por omisión (el plan no lo define)</span>'
+               : '<span class="mut">del plan</span>';
+
+    var aviso = '';
+    if (e.frenada) {
+      aviso = '<div class="msg err" style="margin:8px 0">⛔ <b>Frenada:</b> ' +
+        (prepago ? 'sin saldo, no puede enviar más documentos hasta recargar.'
+                 : 'llegó al tope del mes, no puede enviar más documentos.') +
+        ' Lo ya enviado se sigue firmando igual.</div>';
+    } else if (e.cerca_del_limite) {
+      aviso = '<div class="msg alerta" style="margin:8px 0">⚠ <b>Cerca del límite.</b> ' +
+        (prepago ? 'Le quedan ' + plata(e.saldo, e.moneda) + ' y el aviso está en ' + plata(e.umbral_aviso_saldo, e.moneda) + '.'
+                 : 'Va ' + e.consumidas_mes + ' firmas de ' + ((e.incluido_mensual || 0) + (e.tope_excedente || 0)) + ' este mes.') +
+        '</div>';
+    }
+    if (e.levante) {
+      aviso += '<div class="msg alerta" style="margin:8px 0">Freno levantado hasta <b>' +
+        esc(String(e.levante.hasta).slice(0, 16).replace('T', ' ')) + '</b>' +
+        (e.levante.monto_extra != null ? ' por ' + plata(e.levante.monto_extra, e.moneda) : ' sin límite') +
+        ' · <button class="btn btn-s chico" data-saldo="revocar">Revocar</button></div>';
+    }
+
+    var kpis = prepago
+      ? [['saldo disponible · ' + e.moneda, plata(e.saldo)],
+         ['reservado por circuitos en curso', plata(e.reservado)],
+         ['firmas cobradas este mes', e.consumidas_mes],
+         ['avisar por debajo de', e.umbral_aviso_saldo == null ? '—' : plata(e.umbral_aviso_saldo)]]
+      : [['firmas cobradas este mes', e.consumidas_mes],
+         ['incluidas por mes', e.incluido_mensual == null ? '—' : e.incluido_mensual],
+         ['tope de excedente', e.tope_excedente == null ? 'sin tope' : e.tope_excedente],
+         ['reservado por circuitos en curso', plata(e.reservado)]];
+
+    return '<h3 style="margin:20px 0 4px;font-size:14.5px">Saldo y cómo se cobra</h3>' +
+      '<p style="margin:0 0 6px">Modalidad: <b>' + (prepago ? 'Prepago' : 'Pospago') + '</b> · ' + origen +
+      ' &nbsp; <button class="btn btn-s chico" data-saldo="modalidad">Poner una excepción</button>' +
+      (sal.estado.origen === 'cuenta'
+        ? ' <button class="btn btn-d chico" data-saldo="heredar">Volver a la del plan</button>' : '') + '</p>' +
+      aviso +
+      '<div class="kpis">' + kpis.map(function (k) {
+        return '<div><b>' + esc(String(k[1])) + '</b><span>' + esc(k[0]) + '</span></div>';
+      }).join('') + '</div>' +
+      '<p style="margin:8px 0 0">' +
+      (prepago ? '<button class="btn btn-p chico" data-saldo="recarga">Acreditar una recarga</button> ' : '') +
+      '<button class="btn btn-s chico" data-saldo="ajuste">Ajuste manual</button> ' +
+      '<button class="btn btn-s chico" data-saldo="levante">Levantar el freno</button></p>' +
+      (sal.movimientos && sal.movimientos.length
+        ? '<details style="margin-top:10px"><summary class="mut">Últimos movimientos (' + sal.movimientos.length + ')</summary>' +
+          '<table class="prest" style="margin-top:8px"><thead><tr><th>Fecha</th><th>Tipo</th><th>Monto</th><th>Detalle</th></tr></thead><tbody>' +
+          sal.movimientos.slice(0, 25).map(function (m) {
+            return '<tr><td class="mut">' + esc(String(m.creado_en).slice(0, 16).replace('T', ' ')) + '</td>' +
+              '<td>' + esc(m.tipo) + '</td>' +
+              '<td style="text-align:right">' + (m.monto > 0 ? '+' : '') + plata(m.monto) + '</td>' +
+              '<td class="mut">' + esc(m.motivo || m.creado_por || '') + '</td></tr>';
+          }).join('') + '</tbody></table></details>'
+        : '<p class="pista">Sin movimientos todavía.</p>');
+  }
+
+  function accionSaldo(id, que, sal) {
+    var e = sal.estado;
+    if (que === 'revocar') return revocarLevante(id);
+    if (que === 'heredar') return quitarModalidadEmpresa(id);
+
+    if (que === 'modalidad') {
+      abrirModal(
+        '<h2>Excepción para esta empresa</h2>' +
+        '<p class="sub">Pisa lo que dice el plan, sólo para ella. Para volver atrás, «Volver a la del plan».</p>' +
+        '<label for="exModo">Modalidad</label><select id="exModo">' +
+        [['pospago', 'Pospago — se factura a mes vencido'], ['prepago', 'Prepago — con saldo por adelantado']]
+          .map(function (o) {
+            return '<option value="' + o[0] + '"' + (e.modalidad === o[0] ? ' selected' : '') + '>' + esc(o[1]) + '</option>';
+          }).join('') + '</select>' +
+        '<div class="dos" style="margin-top:10px">' +
+        '<div><label>Firmas incluidas por mes</label><input id="exIncl" inputmode="numeric" value="' +
+          esc(e.incluido_mensual == null ? '' : e.incluido_mensual) + '" placeholder="ninguna" /></div>' +
+        '<div><label>Tope de excedente</label><input id="exTope" inputmode="numeric" value="' +
+          esc(e.tope_excedente == null ? '' : e.tope_excedente) + '" placeholder="sin tope" /></div>' +
+        '</div>' +
+        '<label for="exUmbral">Avisar cuando el saldo baje de</label>' +
+        '<input id="exUmbral" inputmode="decimal" value="' + esc(e.umbral_aviso_saldo == null ? '' : e.umbral_aviso_saldo) + '" placeholder="no avisar" />' +
+        '<div id="msgModal"></div><div class="acc">' +
+        '<button class="btn btn-s" onclick="cerrarModal()">Cancelar</button>' +
+        '<button class="btn btn-p" id="mOk">Guardar</button></div>'
+      );
+      $('mOk').addEventListener('click', async function () {
+        var ent = function (x) { var v = String($(x).value || '').trim(); return v === '' ? null : Math.round(Number(v.replace(',', '.'))); };
+        var dec = function (x) { var v = String($(x).value || '').trim(); return v === '' ? null : Number(v.replace(',', '.')); };
+        try {
+          await api('/operador/empresas/' + id + '/modalidad', 'PUT', {
+            modalidad: $('exModo').value, incluido_mensual: ent('exIncl'),
+            tope_excedente: ent('exTope'), umbral_aviso_saldo: dec('exUmbral'),
+          });
+          cerrarModal(); await verEmpresa(id); ok('msgEmpresa', 'Excepción guardada.');
+        } catch (err) { msg('msgModal', err.message, 'err'); }
+      });
+      return;
+    }
+
+    if (que === 'recarga') {
+      abrirModal(
+        '<h2>Acreditar una recarga</h2>' +
+        '<p class="sub">Para una transferencia que ya recibiste. La plata entra al saldo en el acto y ' +
+        'queda en la bitácora con tu nombre.</p>' +
+        '<div class="dos">' +
+        '<div><label>Monto pagado (' + esc(e.moneda) + ')</label><input id="reMonto" inputmode="decimal" /></div>' +
+        '<div><label>Bono</label><input id="reBono" inputmode="decimal" placeholder="0" />' +
+        '<span class="pista">Lo que se le acredita de más (el descuento del paquete).</span></div>' +
+        '</div>' +
+        '<label for="reMotivo">De dónde salió</label>' +
+        '<input id="reMotivo" maxlength="300" placeholder="transferencia BROU 8841" />' +
+        '<div id="msgModal"></div><div class="acc">' +
+        '<button class="btn btn-s" onclick="cerrarModal()">Cancelar</button>' +
+        '<button class="btn btn-p" id="mOk">Acreditar</button></div>'
+      );
+      $('mOk').addEventListener('click', async function () {
+        try {
+          var r = await api('/operador/empresas/' + id + '/recargas', 'POST', {
+            monto: Number(String($('reMonto').value || '').replace(',', '.')),
+            bono: Number(String($('reBono').value || '0').replace(',', '.')) || 0,
+            motivo: $('reMotivo').value,
+          });
+          cerrarModal(); await verEmpresa(id);
+          ok('msgEmpresa', 'Acreditado: ' + plata(r.acreditado, r.moneda) + '.');
+        } catch (err) { msg('msgModal', err.message, 'err'); }
+      });
+      return;
+    }
+
+    if (que === 'ajuste') {
+      abrirModal(
+        '<h2>Ajuste manual del saldo</h2>' +
+        '<p class="sub">Con signo: negativo para descontar. No corrige un movimiento anterior —eso no se ' +
+        'toca nunca— sino que agrega uno nuevo que lo compensa.</p>' +
+        '<label for="ajMonto">Monto (' + esc(e.moneda) + ')</label><input id="ajMonto" inputmode="decimal" placeholder="-250 o 250" />' +
+        '<label for="ajMotivo">Por qué</label><input id="ajMotivo" maxlength="300" placeholder="obligatorio" />' +
+        '<div id="msgModal"></div><div class="acc">' +
+        '<button class="btn btn-s" onclick="cerrarModal()">Cancelar</button>' +
+        '<button class="btn btn-p" id="mOk">Guardar</button></div>'
+      );
+      $('mOk').addEventListener('click', async function () {
+        try {
+          await api('/operador/empresas/' + id + '/ajuste', 'POST', {
+            monto: Number(String($('ajMonto').value || '').replace(',', '.')),
+            motivo: $('ajMotivo').value,
+          });
+          cerrarModal(); await verEmpresa(id); ok('msgEmpresa', 'Ajuste registrado.');
+        } catch (err) { msg('msgModal', err.message, 'err'); }
+      });
+      return;
+    }
+
+    if (que === 'levante') {
+      var manana = new Date(Date.now() + 7 * 86400000).toISOString().slice(0, 10);
+      abrirModal(
+        '<h2>Levantar el freno</h2>' +
+        '<p class="sub">Deja despachar por encima del saldo o del tope, hasta la fecha que pongas. ' +
+        'Es una decisión comercial y queda registrada con tu nombre y el motivo.</p>' +
+        '<div class="dos">' +
+        '<div><label>Hasta</label><input id="lvHasta" type="date" value="' + manana + '" /></div>' +
+        '<div><label>Monto extra (' + esc(e.moneda) + ')</label><input id="lvMonto" inputmode="decimal" placeholder="sin límite" /></div>' +
+        '</div>' +
+        '<label for="lvMotivo">Por qué</label><input id="lvMotivo" maxlength="300" placeholder="obligatorio" />' +
+        '<div id="msgModal"></div><div class="acc">' +
+        '<button class="btn btn-s" onclick="cerrarModal()">Cancelar</button>' +
+        '<button class="btn btn-p" id="mOk">Levantar</button></div>'
+      );
+      $('mOk').addEventListener('click', async function () {
+        var m = String($('lvMonto').value || '').trim();
+        try {
+          await api('/operador/empresas/' + id + '/levante', 'POST', {
+            hasta: $('lvHasta').value + 'T23:59:59',
+            monto_extra: m === '' ? null : Number(m.replace(',', '.')),
+            motivo: $('lvMotivo').value,
+          });
+          cerrarModal(); await verEmpresa(id); ok('msgEmpresa', 'Freno levantado.');
+        } catch (err) { msg('msgModal', err.message, 'err'); }
+      });
+    }
+  }
+
+  async function revocarLevante(id) {
+    try {
+      await api('/operador/empresas/' + id + '/levante', 'DELETE');
+      await verEmpresa(id);
+      ok('msgEmpresa', 'Levante revocado: vuelve a regir el límite.');
+    } catch (e) { msg('msgEmpresa', e.message, 'err'); }
+  }
+
+  async function quitarModalidadEmpresa(id) {
+    try {
+      await api('/operador/empresas/' + id + '/modalidad', 'DELETE');
+      await verEmpresa(id);
+      ok('msgEmpresa', 'La empresa vuelve a la modalidad de su plan.');
+    } catch (e) { msg('msgEmpresa', e.message, 'err'); }
   }
 
   async function asignarPlan(id) {
@@ -1142,6 +1369,8 @@
     var elegidos = (prov.ids || []).slice();
     var cust = (plan && plan.custodia) ||
       { modo: 'sin_tope', tope_documentos: null, tope_bytes: null, dias_emisor: null, dias_firmante: null };
+    var cobro = (plan && plan.cobro) ||
+      { modalidad: 'pospago', incluido_mensual: null, tope_excedente: null, umbral_aviso_saldo: null };
     var datos = {
       nombre: Object.assign({}, plan ? plan.nombre_i18n : {}),
       descripcion: Object.assign({}, plan ? plan.descripcion_i18n : {}),
@@ -1234,6 +1463,31 @@
       '<div><label>Días que se guarda el del firmante</label><input id="mCustDiasF" inputmode="numeric" placeholder="para siempre" value="' +
         esc(cust.dias_firmante == null ? '' : cust.dias_firmante) + '" />' +
       '<span class="pista">Se le manda por correo igual: esto es hasta cuándo lo puede volver a bajar de acá.</span></div>' +
+      '</div>' +
+
+      // ── Cómo se cobra (078, 10/9). Rige para todas las empresas del plan,
+      // salvo que el operador le ponga una excepción a alguna.
+      '<h3 style="margin:18px 0 4px;font-size:14.5px">Cómo se cobra</h3>' +
+      '<span class="mut">Prepago: la empresa carga saldo y cada firma lo descuenta. Pospago: se ' +
+      'factura a mes vencido. En los dos casos, al llegar al límite <b>no se puede enviar más</b> ' +
+      'hasta recargar o hasta que vos levantes el freno — lo ya enviado sigue firmándose igual.</span>' +
+      '<div class="dos" style="margin-top:10px">' +
+      '<div><label>Modalidad</label><select id="mCobroModo">' +
+      [['pospago', 'Pospago — se factura a mes vencido'],
+       ['prepago', 'Prepago — con saldo por adelantado']].map(function (o) {
+        return '<option value="' + o[0] + '"' + (cobro.modalidad === o[0] ? ' selected' : '') + '>' + esc(o[1]) + '</option>';
+      }).join('') + '</select></div>' +
+      '<div><label>Firmas incluidas por mes</label><input id="mCobroIncl" inputmode="numeric" placeholder="ninguna" value="' +
+        esc(cobro.incluido_mensual == null ? '' : cobro.incluido_mensual) + '" /></div>' +
+      '</div>' +
+      '<div class="dos" style="margin-top:10px">' +
+      '<div><label>Tope de excedente (firmas)</label><input id="mCobroTope" inputmode="numeric" placeholder="sin tope" value="' +
+        esc(cobro.tope_excedente == null ? '' : cobro.tope_excedente) + '" />' +
+      '<span class="pista">Sólo pospago. Vacío = sin tope. Protege al cliente de su propio error: ' +
+      'una planilla con 30.000 filas en vez de 3.000.</span></div>' +
+      '<div><label>Avisar cuando el saldo baje de</label><input id="mCobroUmbral" inputmode="decimal" placeholder="no avisar" value="' +
+        esc(cobro.umbral_aviso_saldo == null ? '' : cobro.umbral_aviso_saldo) + '" />' +
+      '<span class="pista">Sólo prepago, en la moneda del plan.</span></div>' +
       '</div>' +
 
       '<label for="mOrden" style="margin-top:14px">Orden</label>' +
@@ -1360,20 +1614,139 @@
           };
         }),
       };
+      // Cómo se cobra vive en `billing_config`, no en `plan`: va en su propia
+      // llamada, después de que el plan exista (uno nuevo todavía no tiene id).
+      var ent = function (id) {
+        var v = String($(id).value || '').trim();
+        return v === '' ? null : Math.round(Number(v.replace(',', '.')));
+      };
+      var cobroCuerpo = {
+        modalidad: $('mCobroModo').value,
+        incluido_mensual: ent('mCobroIncl'),
+        tope_excedente: ent('mCobroTope'),
+        umbral_aviso_saldo: (function () {
+          var v = String($('mCobroUmbral').value || '').trim();
+          return v === '' ? null : Number(v.replace(',', '.'));
+        })(),
+      };
       $('mOk').disabled = true;
       try {
+        var idPlan = plan && plan.id;
         if (nuevo) {
           var codigo = $('mCodigo').value.trim();
           if (!codigo) { $('mOk').disabled = false; return msg('msgModal', 'Falta el código.', 'err'); }
           cuerpo.codigo = codigo;
-          await api('/operador/planes', 'POST', cuerpo);
+          var creado = await api('/operador/planes', 'POST', cuerpo);
+          idPlan = creado && creado.id;
         } else {
           await api('/operador/planes/' + plan.id, 'PUT', cuerpo);
         }
+        if (idPlan) await api('/operador/planes/' + idPlan + '/modalidad', 'PUT', cobroCuerpo);
         cerrarModal();
         cargarPlanes();
       } catch (e) { msg('msgModal', e.message, 'err'); $('mOk').disabled = false; }
     });
+  }
+
+  // ── Paquetes de recarga (078, 10/9) ───────────────────────────────────────
+
+  var PAQUETES = [];
+
+  async function cargarPaquetes() {
+    try {
+      PAQUETES = (await api('/operador/paquetes')).paquetes || [];
+      pintarPaquetes();
+    } catch (e) { msg('msgPaquetes', e.message, 'err'); }
+  }
+
+  function pintarPaquetes() {
+    var t = $('tPaquetes');
+    if (!PAQUETES.length) {
+      t.innerHTML = '<tr><td colspan="8" class="mut">Ninguno todavía. Sin paquetes, una empresa ' +
+        'prepaga igual puede recargar un monto libre.</td></tr>';
+      return;
+    }
+    t.innerHTML = PAQUETES.map(function (p) {
+      return '<tr><td><b>' + esc(p.codigo) + '</b></td>' +
+        '<td>' + esc(texto(p.nombre_i18n) || '') + '</td>' +
+        '<td>' + (p.pais ? esc(p.pais) : '<span class="mut">todos</span>') + '</td>' +
+        '<td style="text-align:right">' + plata(p.monto, p.moneda) + '</td>' +
+        '<td style="text-align:right">' + (p.bono ? plata(p.bono) : '<span class="mut">—</span>') + '</td>' +
+        '<td style="text-align:right"><b>' + plata(p.monto + p.bono) + '</b></td>' +
+        '<td>' + (p.activo ? '<span class="pill on">activo</span>' : '<span class="pill off">apagado</span>') + '</td>' +
+        '<td style="text-align:right;white-space:nowrap">' +
+        '<button class="btn btn-s chico" data-paq="' + esc(p.codigo) + '">Editar</button> ' +
+        '<button class="btn btn-d chico" data-paqdel="' + esc(p.codigo) + '">Quitar</button></td></tr>';
+    }).join('');
+    t.querySelectorAll('[data-paq]').forEach(function (b) {
+      b.addEventListener('click', function () {
+        abrirPaquete(PAQUETES.filter(function (x) { return x.codigo === b.dataset.paq; })[0]);
+      });
+    });
+    t.querySelectorAll('[data-paqdel]').forEach(function (b) {
+      b.addEventListener('click', function () { borrarPaquete(b.dataset.paqdel); });
+    });
+  }
+
+  function abrirPaquete(p) {
+    var nuevo = !p;
+    var paises = PAISES.map(function (x) {
+      return '<option value="' + esc(x.codigo) + '"' + (p && p.pais === x.codigo ? ' selected' : '') + '>' +
+        esc(x.codigo) + ' · ' + esc(x.moneda || '') + '</option>';
+    }).join('');
+    abrirModal(
+      '<h2>' + (nuevo ? 'Nuevo paquete' : 'Editar «' + esc(p.codigo) + '»') + '</h2>' +
+      '<p class="sub">La empresa paga el monto y se le acredita el monto más el bono. Para un 20% de ' +
+      'descuento sobre 5.000, el monto es 4.000 y el bono 1.000.</p>' +
+      (nuevo
+        ? '<label for="pqCod">Código</label><input id="pqCod" maxlength="40" placeholder="uy_500" />'
+        : '<p class="pista" style="margin:0 0 8px">Código: <b>' + esc(p.codigo) + '</b></p>') +
+      '<label for="pqNom">Nombre (castellano)</label>' +
+      '<input id="pqNom" maxlength="80" placeholder="500 firmas" value="' + esc(p ? (texto(p.nombre_i18n) || '') : '') + '" />' +
+      '<div class="dos" style="margin-top:10px">' +
+      '<div><label>País</label><select id="pqPais"><option value="">Todos</option>' + paises + '</select></div>' +
+      '<div><label>Moneda</label><input id="pqMoneda" maxlength="3" style="text-transform:uppercase" value="' +
+        esc(p ? p.moneda : '') + '" placeholder="UYU" /></div>' +
+      '</div>' +
+      '<div class="dos" style="margin-top:10px">' +
+      '<div><label>Paga</label><input id="pqMonto" inputmode="decimal" value="' + esc(p ? p.monto : '') + '" /></div>' +
+      '<div><label>Bono</label><input id="pqBono" inputmode="decimal" value="' + esc(p ? p.bono : '0') + '" /></div>' +
+      '</div>' +
+      '<div class="dos" style="margin-top:10px">' +
+      '<div><label>Orden</label><input id="pqOrden" inputmode="numeric" value="' + esc(p ? p.orden : 100) + '" /></div>' +
+      '<div><label style="margin-top:22px"><input type="checkbox" id="pqActivo" style="width:auto"' +
+        (!p || p.activo ? ' checked' : '') + ' /> Activo</label></div>' +
+      '</div>' +
+      '<div id="msgModal"></div><div class="acc">' +
+      '<button class="btn btn-s" onclick="cerrarModal()">Cancelar</button>' +
+      '<button class="btn btn-p" id="mOk">Guardar</button></div>'
+    );
+    $('mOk').addEventListener('click', async function () {
+      var num = function (id) { return Number(String($(id).value || '0').replace(',', '.')); };
+      try {
+        await api('/operador/paquetes', 'PUT', {
+          codigo: nuevo ? $('pqCod').value.trim() : p.codigo,
+          nombre_i18n: { es: $('pqNom').value.trim() },
+          pais: $('pqPais').value || null,
+          moneda: ($('pqMoneda').value || '').trim().toUpperCase(),
+          monto: num('pqMonto'),
+          bono: num('pqBono'),
+          activo: $('pqActivo').checked,
+          orden: Number($('pqOrden').value || 100),
+        });
+        cerrarModal(); cargarPaquetes(); ok('msgPaquetes', 'Paquete guardado.');
+      } catch (e) { msg('msgModal', e.message, 'err'); }
+    });
+  }
+
+  async function borrarPaquete(codigo) {
+    try {
+      var r = await api('/operador/paquetes/' + encodeURIComponent(codigo), 'DELETE');
+      cargarPaquetes();
+      ok('msgPaquetes', r.apagado
+        ? 'Ya lo usó alguna recarga, así que no se borra: quedó apagado y deja de ofrecerse.'
+        : 'Paquete borrado.');
+    } catch (e) { msg('msgPaquetes', e.message, 'err'); }
   }
 
   function borrarPlan(plan) {
@@ -2711,6 +3084,7 @@
   window.cerrarModal = cerrarModal;
   window.abrirProveedor = abrirProveedor;
   window.abrirCargarSello = abrirCargarSello;
+  window.abrirPaquete = abrirPaquete;
   window.guardarProveedorForm = guardarProveedorForm;
   window.togglearProveedor = togglearProveedor;
   window.abrirAcuerdo = abrirAcuerdo;

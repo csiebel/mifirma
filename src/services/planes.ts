@@ -222,6 +222,27 @@ export async function listarPlanes(operadorId: string) {
       provPorPlan.set(x.plan_id, a);
     }
 
+    // Cómo se cobra el plan (078): la fila de `billing_config` sin país ni
+    // cuenta. Viaja junto al plan para que el modal la muestre sin otra vuelta.
+    const modal = await sql<{
+      plan_id: string; modalidad: string; incluido_mensual: number | null;
+      tope_excedente: number | null; umbral_aviso_saldo: string | null;
+    }>`
+      select distinct on (plan_id) plan_id, modalidad, incluido_mensual, tope_excedente,
+             umbral_aviso_saldo::text as umbral_aviso_saldo
+        from billing_config
+       where cuenta_id is null and pais is null and plan_id is not null and vigente_hasta is null
+       order by plan_id, vigente_desde desc
+    `.execute(trx);
+    const modalPorPlan = new Map<string, any>();
+    for (const x of modal.rows) {
+      modalPorPlan.set(x.plan_id, {
+        modalidad: x.modalidad, incluido_mensual: x.incluido_mensual,
+        tope_excedente: x.tope_excedente,
+        umbral_aviso_saldo: x.umbral_aviso_saldo == null ? null : Number(x.umbral_aviso_saldo),
+      });
+    }
+
     const cust = await sql<{
       plan_id: string; modo: string; tope_documentos: number | null; tope_bytes: string | null;
       dias_emisor: number | null; dias_firmante: number | null;
@@ -283,6 +304,9 @@ export async function listarPlanes(operadorId: string) {
         proveedores: { modo: (p as any).proveedores_modo ?? 'todos', ids: provPorPlan.get(p.id) ?? [] },
         custodia: custPorPlan.get(p.id) ?? {
           modo: 'sin_tope', tope_documentos: null, tope_bytes: null, dias_emisor: null, dias_firmante: null,
+        },
+        cobro: modalPorPlan.get(p.id) ?? {
+          modalidad: 'pospago', incluido_mensual: null, tope_excedente: null, umbral_aviso_saldo: null,
         },
       })),
     };

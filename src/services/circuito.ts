@@ -1219,6 +1219,25 @@ export async function despachar(
       ? sql`now() + (${c.dias_vigencia} || ' days')::interval`
       : sql`null`;
 
+    // ── La plata, antes de que salga (078, 10/9).
+    //
+    // La base reserva lo estimado (firmantes × precio del nivel del circuito):
+    // en prepago contra el saldo, en pospago contra el tope del mes. Si no
+    // alcanza, lanza con el faltante y el despacho NO sale — salvo que el
+    // operador haya levantado el freno para esta empresa. Los circuitos que ya
+    // salieron nunca se frenan por esto: el firmante externo no tiene la culpa.
+    try {
+      await sql`select app.reservar_despacho(${circuitoId}::uuid)`.execute(trx);
+    } catch (e: any) {
+      if (e?.code === 'P0402') {
+        // El mensaje de la base viene con un prefijo para la máquina
+        // («SIN_SALDO: …», «TOPE_ALCANZADO: …»); a la persona le llega el resto.
+        const texto = String(e.message ?? '').replace(/^[A-Z_]+:\s*/, '');
+        throw new HttpError(402, texto + ' Recargá el saldo o hablá con el operador.');
+      }
+      throw e;
+    }
+
     await sql`
       update circuito
          set estado = 'enviado', enviado_en = now(), vence_en = ${vence}

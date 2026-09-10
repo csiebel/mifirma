@@ -93,6 +93,11 @@
      font-weight:700;padding:12px 18px;border-bottom:1px solid var(--line);background:var(--soft)}
   td{padding:12px 18px;border-bottom:1px solid var(--line);font-size:14.5px;vertical-align:middle}
   /* La grilla de prestaciones del plan (071), adentro del modal: más apretada. */
+.kpis{display:grid;grid-template-columns:repeat(4,1fr);gap:10px;margin:10px 0 4px}
+  .kpis div{background:#f7f9fb;border-radius:8px;padding:9px 11px}
+  .kpis b{display:block;font-size:19px;line-height:1.25}
+  .kpis span{font-size:11.5px;color:var(--mut)}
+  @media (max-width:820px){.kpis{grid-template-columns:repeat(2,1fr)}}
   .prest{width:100%}
   .prest th{padding:6px 8px;white-space:nowrap}
   .prest td{padding:8px;font-size:13.5px}
@@ -381,6 +386,25 @@
         <tbody id="tPrecios"></tbody>
       </table>
       <div id="msgPrecios" style="padding:0 18px 18px"></div>
+    </div>
+
+    <div class="cab" style="margin-top:26px">
+      <div>
+        <h2 style="font-size:17px">Paquetes de recarga (prepago)</h2>
+        <p>Lo que una empresa prepaga puede comprar. Paga el monto y se le acredita el monto más el
+           bono: <b>el descuento por volumen es el bono</b>. Además siempre puede recargar un monto
+           libre, sin bono.</p>
+      </div>
+      <button class="btn btn-p" onclick="abrirPaquete(null)">Agregar paquete</button>
+    </div>
+
+    <div class="panel">
+      <table>
+        <thead><tr><th>Código</th><th>Nombre</th><th>País</th><th>Paga</th><th>Bono</th>
+          <th>Se acredita</th><th>Estado</th><th></th></tr></thead>
+        <tbody id="tPaquetes"></tbody>
+      </table>
+      <div id="msgPaquetes" style="padding:0 18px 18px"></div>
     </div>
   </section>
 

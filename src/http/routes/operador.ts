@@ -61,6 +61,12 @@ import { asistirOperador } from '../../services/asistente_operador';
 import { listarPaises, guardarPais, borrarPais } from '../../services/paises';
 import { estadoDelCertificado, cargarCertificadoDelSitio } from '../../services/sello';
 import {
+  modalidadDelPlan, guardarModalidadDelPlan, guardarModalidadDeEmpresa, quitarModalidadDeEmpresa,
+  saldoDeEmpresa, recargaManual, ajusteDeSaldo, levantarLimite, revocarLevante,
+  listarPaquetes, guardarPaquete, borrarPaquete,
+} from '../../services/billing';
+import { withOperador } from '../../db/pool';
+import {
   listarIndustriasOperador,
   crearIndustria,
   editarIndustria,
@@ -366,6 +372,120 @@ export function registrarRutasOperador(app: FastifyInstance) {
     exigirCap(s, 'gestionar_planes');
     const { id } = z.object({ id: z.string().uuid() }).parse(req.params);
     return verEmpresa(s.operadorId, id);
+  });
+
+  // ── Prepago y pospago (078, 10/9) ─────────────────────────────────────────
+  const modalidadSchema = z.object({
+    modalidad: z.enum(['prepago', 'pospago']),
+    incluido_mensual: z.number().int().min(0).nullable().optional(),
+    tope_excedente: z.number().int().min(0).nullable().optional(),
+    umbral_aviso_saldo: z.number().min(0).nullable().optional(),
+  });
+
+  app.get('/operador/planes/:id/modalidad', async (req) => {
+    const s = await sesion(req);
+    exigirCap(s, 'gestionar_planes');
+    const { id } = z.object({ id: z.string().uuid() }).parse(req.params);
+    return withOperador(s.operadorId, async (trx) => ({ modalidad: await modalidadDelPlan(trx, id) }));
+  });
+  app.put('/operador/planes/:id/modalidad', async (req) => {
+    const s = await sesion(req);
+    exigirCap(s, 'gestionar_planes');
+    const { id } = z.object({ id: z.string().uuid() }).parse(req.params);
+    return guardarModalidadDelPlan(s.operadorId, id, modalidadSchema.parse(req.body));
+  });
+
+  app.get('/operador/empresas/:id/saldo', async (req) => {
+    const s = await sesion(req);
+    exigirCap(s, 'gestionar_planes');
+    const { id } = z.object({ id: z.string().uuid() }).parse(req.params);
+    return saldoDeEmpresa(s.operadorId, id);
+  });
+  app.put('/operador/empresas/:id/modalidad', async (req) => {
+    const s = await sesion(req);
+    exigirCap(s, 'gestionar_planes');
+    const { id } = z.object({ id: z.string().uuid() }).parse(req.params);
+    return guardarModalidadDeEmpresa(s.operadorId, id, modalidadSchema.parse(req.body));
+  });
+  app.delete('/operador/empresas/:id/modalidad', async (req) => {
+    const s = await sesion(req);
+    exigirCap(s, 'gestionar_planes');
+    const { id } = z.object({ id: z.string().uuid() }).parse(req.params);
+    return quitarModalidadDeEmpresa(s.operadorId, id);
+  });
+  app.post('/operador/empresas/:id/recargas', async (req) => {
+    const s = await sesion(req);
+    exigirCap(s, 'gestionar_planes');
+    const { id } = z.object({ id: z.string().uuid() }).parse(req.params);
+    const b = z.object({
+      monto: z.number().positive(), moneda: z.string().length(3).optional(),
+      bono: z.number().min(0).optional(), motivo: z.string().min(1).max(300),
+      paquete_id: z.string().uuid().nullable().optional(),
+    }).parse(req.body);
+    const r = await recargaManual(s.operadorId, id, b);
+    await registrarPlataforma(null, {
+      accion: 'saldo.recarga_manual', recursoTipo: 'cuenta', recursoId: id,
+      despues: { monto: b.monto, bono: b.bono ?? 0, moneda: r.moneda, motivo: b.motivo, por: s.operadorId },
+      ip: req.ip, userAgent: req.headers['user-agent'] ?? null,
+    });
+    return r;
+  });
+  app.post('/operador/empresas/:id/ajuste', async (req) => {
+    const s = await sesion(req);
+    exigirCap(s, 'gestionar_planes');
+    const { id } = z.object({ id: z.string().uuid() }).parse(req.params);
+    const b = z.object({ monto: z.number(), motivo: z.string().min(1).max(300) }).parse(req.body);
+    const r = await ajusteDeSaldo(s.operadorId, id, b);
+    await registrarPlataforma(null, {
+      accion: 'saldo.ajuste', recursoTipo: 'cuenta', recursoId: id,
+      despues: { monto: b.monto, motivo: b.motivo, por: s.operadorId },
+      ip: req.ip, userAgent: req.headers['user-agent'] ?? null,
+    });
+    return r;
+  });
+  app.post('/operador/empresas/:id/levante', async (req) => {
+    const s = await sesion(req);
+    exigirCap(s, 'gestionar_planes');
+    const { id } = z.object({ id: z.string().uuid() }).parse(req.params);
+    const b = z.object({
+      hasta: z.string().min(10), monto_extra: z.number().positive().nullable().optional(), motivo: z.string().min(1).max(300),
+    }).parse(req.body);
+    const r = await levantarLimite(s.operadorId, id, b);
+    await registrarPlataforma(null, {
+      accion: 'saldo.levante', recursoTipo: 'cuenta', recursoId: id,
+      despues: { hasta: b.hasta, monto_extra: b.monto_extra ?? null, motivo: b.motivo, por: s.operadorId },
+      ip: req.ip, userAgent: req.headers['user-agent'] ?? null,
+    });
+    return r;
+  });
+  app.delete('/operador/empresas/:id/levante', async (req) => {
+    const s = await sesion(req);
+    exigirCap(s, 'gestionar_planes');
+    const { id } = z.object({ id: z.string().uuid() }).parse(req.params);
+    return revocarLevante(s.operadorId, id);
+  });
+
+  app.get('/operador/paquetes', async (req) => {
+    const s = await sesion(req);
+    exigirCap(s, 'gestionar_planes');
+    return listarPaquetes(s.operadorId);
+  });
+  app.put('/operador/paquetes', async (req) => {
+    const s = await sesion(req);
+    exigirCap(s, 'gestionar_planes');
+    const b = z.object({
+      codigo: z.string().min(2).max(40), nombre_i18n: z.record(z.string(), z.string()),
+      pais: z.string().length(2).nullable().optional(), moneda: z.string().length(3),
+      monto: z.number().positive(), bono: z.number().min(0).optional(),
+      activo: z.boolean().optional(), orden: z.number().int().optional(),
+    }).parse(req.body);
+    return guardarPaquete(s.operadorId, b);
+  });
+  app.delete('/operador/paquetes/:codigo', async (req) => {
+    const s = await sesion(req);
+    exigirCap(s, 'gestionar_planes');
+    const { codigo } = z.object({ codigo: z.string() }).parse(req.params);
+    return borrarPaquete(s.operadorId, codigo);
   });
 
   app.put('/operador/empresas/:id/plan', async (req) => {

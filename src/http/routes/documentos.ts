@@ -4,6 +4,7 @@ import * as branding from '../../services/branding';
 import { listarIndustrias, verIndustriaCuenta, setIndustriaCuenta } from '../../services/industrias';
 import { verDatosCuenta, setDatosCuenta } from '../../services/empresa';
 import { quienSoy } from '../../services/cuenta';
+import { saldoDeMiCuenta } from '../../services/billing';
 
 /**
  * Marca y datos de la cuenta.
@@ -37,6 +38,16 @@ export function registrarRutasDocumentos(app: FastifyInstance) {
   app.get('/cuenta/marca', async (req) => {
     const { cuentaId, identidadId } = req.identidad;
     return branding.verMarca(cuentaId, identidadId);
+  });
+
+  // ---- Saldo y modalidad (078, 10/9) ----
+  //
+  // Lo que la empresa ve de su plata: prepago o pospago, cuánto hay, cuánto
+  // está reservado por circuitos en curso, si está cerca del límite o frenada,
+  // y los paquetes de recarga que le aplican. Lo calcula la base.
+  app.get('/cuenta/saldo', async (req) => {
+    const { cuentaId, identidadId } = req.identidad;
+    return saldoDeMiCuenta(cuentaId, identidadId);
   });
 
   app.put('/cuenta/logo', async (req) => {
