@@ -11,9 +11,9 @@ import { withOperador } from '../db/pool';
  * lista de precios de hoy — un precio que cambió en marzo no puede cambiar lo
  * que se consumió en febrero.
  *
- * ⚠ Esa tabla la llena el MEDIDOR, que al escribir esto todavía no existe. Hasta
- * que exista, esta pantalla muestra ceros y lo dice: mostrar cero sin explicar
- * por qué es peor que no mostrar nada, porque parece un dato.
+ * Esa tabla la llena el MEDIDOR (`app.medir_firma`, migración 076), que
+ * escribe desde `firmar()` y midió su primera firma en producción el 8/9. Hasta
+ * ese día esta pantalla mostraba ceros y lo decía; ahora un cero es un cero.
  *
  * La IA sí tiene datos desde la 013: `consumo_ia` acumula tokens y costo por
  * (cuenta, período, modelo). Lo que ahí NO está es el margen —vive en la

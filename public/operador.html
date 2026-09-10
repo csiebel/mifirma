@@ -503,6 +503,26 @@
 
     <div class="cab" style="margin-top:26px">
       <div>
+        <h2 style="font-size:17px">Certificado del sitio</h2>
+        <p>Con esto MiFirma sella cada firma <b>simple</b>: el documento sale con una firma
+           criptográfica nuestra que prueba que no cambió. Uno por país, y uno global para los demás.
+           <b>No convierte la firma simple en avanzada.</b></p>
+        <p class="mut">Se guarda cifrado como cualquier credencial; el archivo no se vuelve a mostrar.
+           Un certificado nuevo se usa en la próxima firma, sin reiniciar nada.</p>
+      </div>
+    </div>
+
+    <div class="panel">
+      <div id="selloUsa" class="mut" style="padding:12px 18px;border-bottom:1px solid var(--linea,#e5e9ee)"></div>
+      <table>
+        <thead><tr><th>Ámbito</th><th>Certificado</th><th>Vence</th><th>Cargado</th><th></th></tr></thead>
+        <tbody id="tSello"></tbody>
+      </table>
+      <div id="msgSello" style="padding:0 18px 18px"></div>
+    </div>
+
+    <div class="cab" style="margin-top:26px">
+      <div>
         <h2 style="font-size:17px">Exclusividad por país</h2>
         <p>Mientras un acuerdo está vigente, en ese país sólo se ofrece el socio, y sus logos
            aparecen en el sitio, en la pantalla de firma y en los correos de las cuentas de ese

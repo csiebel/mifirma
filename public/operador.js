@@ -675,12 +675,10 @@
   }
 
   function pintarConsumos(d) {
-    // ⚠ Sin medidor, las firmas dan cero. Un cero sin explicación se lee como un
-    // dato, y no lo es: hay que decir que nadie está contando todavía.
-    $('avisoMedidor').innerHTML = d.firmas.length ? '' :
-      '<div class="msg alerta">No hay firmas registradas en este período. ' +
-      '⚠ El medidor todavía no existe: nada cuenta una firma al firmarla, así que ' +
-      'esta tabla va a estar vacía aunque se esté firmando.</div>';
+    // Hasta el 10/9 acá había un aviso que decía «el medidor todavía no existe».
+    // Existe desde la 076 y midió su primera firma el 8/9 en producción, así que
+    // un mes vacío es un mes sin firmas y nada más: la tabla ya lo dice.
+    $('avisoMedidor').innerHTML = '';
 
     var n2 = function (x) { return (Math.round(x * 100) / 100).toFixed(2); };
 
@@ -1520,14 +1518,131 @@
     } catch (e) {
       msg('msgProveedores', e.message, 'err');
     }
+    cargarSello();
+  }
+
+  // ===========================================================================
+  // EL CERTIFICADO DEL SITIO (077, 10/9)
+  //
+  // Son filas del catálogo de proveedores (parametros.rol = 'sello'), pero no se
+  // administran como un proveedor: no tienen URLs ni client_id, tienen un
+  // archivo y una contraseña. Por eso tienen su tarjeta y no salen en la tabla
+  // de arriba — ahí dirían «sin URLs» y «falta credencial», que para un
+  // certificado no significan nada.
+  // ===========================================================================
+
+  var NOMBRE_AMBITO = { global: 'Global', UY: 'Uruguay', PY: 'Paraguay', BR: 'Brasil' };
+
+  async function cargarSello() {
+    try {
+      var d = await api('/operador/sello');
+      pintarSello(d);
+    } catch (e) {
+      msg('msgSello', e.message, 'err');
+    }
+  }
+
+  function pintarSello(d) {
+    var fecha = function (iso) { return iso ? String(iso).slice(0, 10).split('-').reverse().join('/') : '—'; };
+    var dias = function (iso) { return Math.round((new Date(iso) - new Date()) / 86400000); };
+
+    // Qué se usa HOY en cada país, según la misma función que consulta la firma.
+    var usa = Object.keys(d.usa || {}).map(function (pais) {
+      var c = d.usa[pais];
+      var que = c === 'entorno' ? 'el de la variable de entorno'
+              : c === 'sello_plataforma' ? 'el global'
+              : 'el suyo';
+      return '<b>' + esc(NOMBRE_AMBITO[pais] || pais) + '</b> → ' + que;
+    }).join(' &nbsp;·&nbsp; ');
+    $('selloUsa').innerHTML = 'Hoy firma con: ' + usa +
+      (d.entorno_configurado
+        ? ' &nbsp;·&nbsp; Si no hubiera ninguno cargado, se usaría el de la variable de entorno (SELLO_P12), que está configurada.'
+        : ' &nbsp;·&nbsp; <b>No hay variable de entorno de respaldo:</b> sin certificado cargado no se puede firmar.');
+
+    $('tSello').innerHTML = (d.ambitos || []).map(function (a) {
+      var cert, vence;
+      if (!a.existe) {
+        cert = '<span class="pill off">falta la migración 077</span>'; vence = '—';
+      } else if (!a.cargado) {
+        cert = '<span class="pill off">sin certificado</span><br><span class="mut">' +
+               (a.ambito === 'global' ? 'usa el de la variable de entorno' : 'usa el global') + '</span>';
+        vence = '—';
+      } else {
+        cert = '<span class="pill on">cargado</span>' +
+               (a.usable_aca ? '' :
+                 ' <span class="msg alerta" style="display:inline-block;padding:2px 8px">cifrado con otra clave: ' +
+                 'este servidor no lo puede usar y firma con el del entorno</span>') +
+               '<br>' + esc(a.titular || '') +
+               '<br><span class="mut">' + esc(a.emisor || '') + '</span>';
+        var n = a.vigente_hasta ? dias(a.vigente_hasta) : null;
+        vence = (a.vencido ? '<span class="msg err" style="display:inline-block;padding:2px 8px">vencido</span><br>'
+                : (n !== null && n < 60 ? '<span class="msg alerta" style="display:inline-block;padding:2px 8px">vence en ' + n + ' días</span><br>' : '')) +
+                fecha(a.vigente_hasta);
+      }
+      return '<tr><td><b>' + esc(NOMBRE_AMBITO[a.ambito] || a.ambito) + '</b>' +
+        (a.ambito === 'global' ? '<br><span class="mut">para todo país sin certificado propio</span>' : '') + '</td>' +
+        '<td>' + cert + '</td>' +
+        '<td>' + vence + '</td>' +
+        '<td class="mut">' + (a.cargado ? fecha(a.cargado_en) + '<br>' + esc(a.cargado_por || '') : '—') + '</td>' +
+        '<td style="text-align:right">' + (a.existe
+          ? '<button class="btn ' + (a.cargado ? 'btn-s' : 'btn-p') + '" onclick="abrirCargarSello(\'' + esc(a.ambito) + '\')">' +
+            (a.cargado ? 'Reemplazar' : 'Cargar') + '</button>'
+          : '') + '</td></tr>';
+    }).join('');
+  }
+
+  function abrirCargarSello(ambito) {
+    abrirModal(
+      '<h2>Cargar el certificado · ' + esc(NOMBRE_AMBITO[ambito] || ambito) + '</h2>' +
+      '<p class="sub">Un archivo .p12 o .pfx con el certificado y su clave privada, y la contraseña con la que se exportó.</p>' +
+      '<label class="campo" for="selloArchivo">Archivo (.p12 / .pfx)</label>' +
+      '<input id="selloArchivo" type="file" accept=".p12,.pfx,application/x-pkcs12" />' +
+      '<label class="campo" for="selloPass">Contraseña del archivo</label>' +
+      '<input id="selloPass" type="password" autocomplete="new-password" placeholder="La del P12, no la de la consola" />' +
+      '<p class="pista">Antes de guardarlo se abre en el servidor: si la contraseña no es la suya, o está vencido, ' +
+      'no se guarda y te lo dice. Después se ve titular, emisor y vencimiento; el archivo, nunca más.</p>' +
+      '<div id="msgModalSello"></div>' +
+      '<div class="acciones">' +
+      '<button class="btn btn-s" onclick="cerrarModal()">Cancelar</button>' +
+      '<button class="btn btn-p" id="selloOk">Guardar</button></div>'
+    );
+    $('selloOk').addEventListener('click', function () { guardarSello(ambito); });
+  }
+
+  async function guardarSello(ambito) {
+    var f = $('selloArchivo').files[0];
+    if (!f) return msg('msgModalSello', 'Elegí el archivo .p12 / .pfx.', 'err');
+    if (f.size > 64 * 1024) return msg('msgModalSello', 'Ese archivo es demasiado grande para ser un P12 (más de 64 KB).', 'err');
+    var pass = $('selloPass').value;
+    // El archivo va en base64 dentro del JSON: son unos KB. No pasa por ningún
+    // lado más que el servidor, que lo cifra y lo guarda.
+    var b64 = await new Promise(function (res, rej) {
+      var r = new FileReader();
+      r.onload = function () { res(String(r.result).split(',')[1] || ''); };
+      r.onerror = function () { rej(new Error('No se pudo leer el archivo.')); };
+      r.readAsDataURL(f);
+    });
+    var boton = $('selloOk'); boton.disabled = true; boton.textContent = 'Comprobando…';
+    try {
+      var r = await api('/operador/sello/' + encodeURIComponent(ambito), 'PUT', { p12_b64: b64, password: pass });
+      cerrarModal();
+      ok('msgSello', 'Certificado cargado: ' + r.titular + ' (' + r.emisor + '), vence el ' +
+         String(r.vigente_hasta).slice(0, 10).split('-').reverse().join('/') + '.');
+      cargarSello();
+    } catch (e) {
+      msg('msgModalSello', e.message, 'err');
+      boton.disabled = false; boton.textContent = 'Guardar';
+    }
   }
 
   function pintarProveedores() {
     var t = $('tProveedores');
-    if (!PROVEEDORES.length) {
+    // Los certificados del sitio (rol 'sello') tienen su propia tarjeta abajo.
+    var lista = PROVEEDORES.filter(function (p) { return !(p.parametros && p.parametros.rol === 'sello'); });
+    if (!lista.length) {
       t.innerHTML = '<tr><td colspan="7" class="mut">Todavía no hay ningún proveedor configurado.</td></tr>';
     } else {
-      t.innerHTML = PROVEEDORES.map(function (p) {
+      t.innerHTML = lista.map(function (p) {
         var caps = (p.paises || []).map(function (x) {
           return esc(x.pais) + ': ' + (x.capacidades || []).join(', ') + (x.activo ? '' : ' (apagado)');
         }).join('<br>') || '<span class="mut">sin países</span>';
@@ -1735,7 +1850,9 @@
   }
 
   function abrirAcuerdo() {
-    var opciones = PROVEEDORES.map(function (p) {
+    // Un acuerdo de exclusividad es con un socio externo: los certificados del
+    // sitio no son candidatos.
+    var opciones = PROVEEDORES.filter(function (p) { return !(p.parametros && p.parametros.rol === 'sello'); }).map(function (p) {
       return '<option value="' + esc(p.id) + '">' + esc(p.nombre_mostrado) + '</option>';
     }).join('');
 
@@ -2593,6 +2710,7 @@
   window.cargarBitacora = cargarBitacora;
   window.cerrarModal = cerrarModal;
   window.abrirProveedor = abrirProveedor;
+  window.abrirCargarSello = abrirCargarSello;
   window.guardarProveedorForm = guardarProveedorForm;
   window.togglearProveedor = togglearProveedor;
   window.abrirAcuerdo = abrirAcuerdo;

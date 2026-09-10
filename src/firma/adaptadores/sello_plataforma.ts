@@ -36,7 +36,7 @@ import type { Firmante } from './tipos';
  * Por eso `nivel` es 'simple' y no se puede configurar para que diga otra cosa.
  */
 class SelloPlataforma implements Firmante {
-  readonly codigo = 'sello_plataforma';
+  readonly codigo: string;
   readonly nivel = 'simple' as const;
   readonly titular: string;
 
@@ -44,8 +44,12 @@ class SelloPlataforma implements Firmante {
     private readonly p12: Buffer,
     private readonly passphrase: string,
     titular: string,
+    // Desde el 10/9 hay más de un sello: el global y uno por país, cargados
+    // desde la consola (077). El código dice cuál se usó y va al expediente.
+    codigo: string = 'sello_plataforma',
   ) {
     this.titular = titular;
+    this.codigo = codigo;
   }
 
   signer() {
@@ -56,8 +60,64 @@ class SelloPlataforma implements Firmante {
 
 let _sello: SelloPlataforma | null = null;
 
+/** Lo que dice un P12 de sí mismo, para mostrarlo en la consola y anotarlo. */
+export interface DatosCertificado {
+  titular: string;
+  emisor: string;
+  vigente_desde: string;   // ISO
+  vigente_hasta: string;   // ISO
+}
+
 /**
- * Carga el sello desde el entorno.
+ * Abre un P12 y devuelve quién es su certificado. Falla si la contraseña no
+ * es la de ese archivo, o si adentro no hay certificado.
+ *
+ * Es la misma lectura que hace `selloDePlataforma()` para el del entorno,
+ * sacada a una función para que la consola (10/9) pueda comprobar un
+ * certificado ANTES de guardarlo: una contraseña equivocada tiene que fallar
+ * al cargar, no en la primera firma de un cliente.
+ *
+ * ⚠ Es una función pura: no toca la base ni el entorno. La regla del
+ * catálogo —los adaptadores reciben la configuración resuelta, no la buscan—
+ * se mantiene.
+ */
+export function leerCertificadoP12(p12: Buffer, passphrase: string): DatosCertificado {
+  let cert: any;
+  try {
+    const asn1 = forge.asn1.fromDer(p12.toString('binary'));
+    const bolsa = forge.pkcs12.pkcs12FromAsn1(asn1, false, passphrase);
+    const certs = bolsa.getBags({ bagType: forge.pki.oids.certBag })[forge.pki.oids.certBag];
+    cert = certs?.[0]?.cert;
+  } catch {
+    throw new HttpError(400, 'El archivo no se pudo abrir: no es un P12/PFX válido o la contraseña no es la suya.');
+  }
+  if (!cert) throw new HttpError(400, 'El archivo se abrió pero no tiene ningún certificado adentro.');
+  const campo = (n: any, k: string) => n?.getField(k)?.value ?? null;
+  return {
+    titular: campo(cert.subject, 'CN') ?? campo(cert.subject, 'O') ?? 'sin nombre',
+    emisor: campo(cert.issuer, 'CN') ?? campo(cert.issuer, 'O') ?? 'sin emisor',
+    vigente_desde: new Date(cert.validity.notBefore).toISOString(),
+    vigente_hasta: new Date(cert.validity.notAfter).toISOString(),
+  };
+}
+
+/**
+ * Un sello a partir de un P12 que ya se tiene en la mano — el que la consola
+ * guardó cifrado en la base (077) y `services/sello.ts` resolvió y descifró.
+ *
+ * Instancia nueva cada vez que se llama: el que cachea es el servicio, por
+ * (proveedor, fecha de carga), para que un certificado recargado desde la
+ * consola se use en la próxima firma sin reiniciar nada.
+ */
+export function selloDesdeP12(p12: Buffer, passphrase: string, codigo: string): Firmante {
+  const datos = leerCertificadoP12(p12, passphrase);
+  return new SelloPlataforma(p12, passphrase, datos.titular, codigo);
+}
+
+/**
+ * Carga el sello desde el entorno. ⚠ Desde el 10/9 es el RESPALDO: se usa
+ * cuando ningún certificado cargado desde la consola aplica al país
+ * (`services/sello.ts`). Hasta que Claudio cargue uno, es el que firma.
  *
  * Se acepta el P12 en base64 (`SELLO_P12`) o una ruta (`SELLO_P12_RUTA`). En
  * Railway va la variable; en desarrollo, el archivo. Si no hay ninguno, esto NO

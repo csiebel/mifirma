@@ -261,7 +261,14 @@ function instrumentoDe(datos: any): {
   valido_hasta: string | null; proveedor: string | null;
 } {
   const d = datos && typeof datos === 'object' ? datos : {};
-  const con = typeof d.sello === 'string' && d.sello ? d.sello : 'sello';
+  // ⚠ Desde el 6/9 el evento anota `sello: firmante.codigo`, que para el sello
+  // de la plataforma es 'sello_plataforma' — y desde el 10/9 puede ser
+  // 'sello_plataforma_uy' (uno por país, 077). Todos son EL SELLO: la plantilla
+  // los tiene que leer como 'sello', no como un proveedor con ese nombre.
+  // Corregido el 10/9: entre el 6/9 y hoy el certificado de una firma simple
+  // decía «hecha con el certificado del propio firmante en sello_plataforma».
+  const crudo = typeof d.sello === 'string' && d.sello ? d.sello : 'sello';
+  const con = crudo === 'sello' || crudo.startsWith('sello_plataforma') ? 'sello' : crudo;
   const pf = d.proveedor_firma && typeof d.proveedor_firma === 'object' ? d.proveedor_firma : null;
   return {
     con,

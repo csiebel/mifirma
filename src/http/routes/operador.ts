@@ -59,6 +59,7 @@ import {
 } from '../../services/integracion_facturacion';
 import { asistirOperador } from '../../services/asistente_operador';
 import { listarPaises, guardarPais, borrarPais } from '../../services/paises';
+import { estadoDelCertificado, cargarCertificadoDelSitio } from '../../services/sello';
 import {
   listarIndustriasOperador,
   crearIndustria,
@@ -885,6 +886,40 @@ export function registrarRutasOperador(app: FastifyInstance) {
     const s = await sesion(req);
     exigirCap(s, 'gestionar_pagos');
     return listarProveedores();
+  });
+
+  // ── El certificado del sitio (077, 10/9): con qué se sella la firma simple.
+  //
+  // Va aparte del alta de proveedores porque no es uno: no tiene URLs ni
+  // client_id, tiene un archivo y una contraseña. El P12 llega en base64 en el
+  // cuerpo (son unos KB) y se abre en el servidor antes de guardarse.
+  app.get('/operador/sello', async (req) => {
+    const s = await sesion(req);
+    exigirCap(s, 'gestionar_pagos');
+    return estadoDelCertificado(s.operadorId);
+  });
+
+  const cargarSelloSchema = z.object({
+    p12_b64: z.string().min(100).max(120_000),
+    password: z.string().max(200).default(''),
+  });
+
+  app.put<{ Params: { ambito: string } }>('/operador/sello/:ambito', async (req) => {
+    const s = await sesion(req);
+    exigirCap(s, 'gestionar_pagos');
+    const b = cargarSelloSchema.parse(req.body);
+    const r = await cargarCertificadoDelSitio(s.operadorId, req.params.ambito, b.p12_b64, b.password);
+    // Queda en la bitácora de plataforma: cambiar con qué se sella es de las
+    // cosas que un auditor pregunta primero. Sin el secreto, claro.
+    await registrarPlataforma(null, {
+      accion: 'sello.certificado_cargado',
+      recursoTipo: 'proveedor_firma',
+      recursoId: r.codigo,
+      despues: { ambito: req.params.ambito, titular: r.titular, emisor: r.emisor, vigente_hasta: r.vigente_hasta, por: s.operadorId },
+      ip: req.ip,
+      userAgent: req.headers['user-agent'] ?? null,
+    });
+    return { ok: true, ...r };
   });
 
   const guardarProveedorSchema = z.object({

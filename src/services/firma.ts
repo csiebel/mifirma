@@ -7,7 +7,7 @@ import { verificarEnlaceFirma } from '../auth/enlace_firma';
 import { almacen, nuevaClave } from '../almacenamiento/almacen';
 import { normalizar, sellar, verificar } from '../firma/pades';
 import type { Marca } from '../firma/apariencia';
-import { selloDePlataforma } from '../firma/adaptadores/sello_plataforma';
+import { selloParaPais } from './sello';
 import type { Firmante } from '../firma/adaptadores/tipos';
 import { tomarFirmanteAutorizado, hayAutorizacionVigente } from './tuid_firma';
 import { anotar } from './evidencia';
@@ -581,6 +581,12 @@ export async function firmar(token: string, input: FirmaInput) {
 
   const preparado = await withExterno(e.otorgamientoId, e.identidadId, async (trx) => ({
     campos: await prepararCampos(trx, ctx.instancia_id, ctx.posicion ?? 1),
+    // El certificado con el que se sella la firma simple, elegido por el país
+    // del marco legal del circuito: el cargado desde la consola para ese país,
+    // si no el global, si no el del entorno (077, 10/9). Se resuelve acá
+    // porque es lo único de la firma que necesita la base y todavía no la
+    // tiene abierta.
+    sello: await selloParaPais(trx, ctx.pais ?? ''),
     // Sólo la primera vez. Si ya hay una firma, el documento ya quedó declarado
     // —o quedó sin declarar, si se despachó antes de que esto existiera— y no
     // hay nada que se pueda cambiar sin romper esa firma.
@@ -650,7 +656,7 @@ export async function firmar(token: string, input: FirmaInput) {
       'La autorización de tuID para firmar venció o ya se usó. Volvé a apretar «Firmar con tuID» y repetí.',
     );
   }
-  const firmante: Firmante = tuid?.firmante ?? selloDePlataforma();
+  const firmante: Firmante = tuid?.firmante ?? preparado.sello;
 
   let salida;
   try {
