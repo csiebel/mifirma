@@ -488,6 +488,56 @@ begin
   end if;
 end $coherencia$;
 
+-- ═══ 13. Las dos puertas que llama el código ════════════════════════════════
+--
+-- ⚠⚠ `app.medir_ia` y `app.medir_sms` son lo que invocan `consumo_ia.ts` y
+-- `twilio.ts`. El camino de TypeScript NO se puede ejercitar desde acá, y en el
+-- caso de la IA tampoco en producción: el asistente todavía no existe como
+-- producto (RUMBO R1). Así que se prueba la mitad que sí se puede — la función—
+-- y la otra mitad queda declarada como no ejecutada, que es distinto de
+-- declararla buena.
+do $puertas$
+declare v_id uuid; r record; v_vista record;
+begin
+  select app.medir_ia('22222222-2222-2222-2222-222222222222', 'claude-opus-5',
+                      1200, 800, 0.031500, 'USD', 'ej79:ia:uno') into v_id;
+  if v_id is null then raise exception '13. medir_ia no dejó línea'; end if;
+
+  select * into r from evento_medible where id = v_id;
+  if r.tipo is distinct from 'asistente_ia' then raise exception '13. Tipo %', r.tipo; end if;
+  if r.cantidad is distinct from 2000::numeric then
+    raise exception '13. La cantidad es % y son 1200 + 800 tokens', r.cantidad;
+  end if;
+  if r.unidad is distinct from 'token' then raise exception '13. Unidad %', r.unidad; end if;
+  if (r.detalle ->> 'modelo') is distinct from 'claude-opus-5' then
+    raise exception '13. El detalle perdió el modelo';
+  end if;
+  if (r.detalle ->> 'input_tokens')::bigint is distinct from 1200::bigint then
+    raise exception '13. El detalle perdió los tokens de entrada';
+  end if;
+
+  -- ⚠ Y la ventana `consumo_ia` tiene que seguir devolviendo lo que devolvía la
+  -- tabla: agregado por (cuenta, período, modelo). Es lo que leen la pantalla de
+  -- Consumos, operador.ts y borrar_empresa.ts.
+  perform app.medir_ia('22222222-2222-2222-2222-222222222222', 'claude-opus-5',
+                       300, 100, 0.008000, 'USD', 'ej79:ia:dos');
+  select * into v_vista from consumo_ia
+   where cuenta_id = '22222222-2222-2222-2222-222222222222'
+     and modelo = 'claude-opus-5' and periodo = to_char(now(), 'YYYY-MM');
+  if v_vista.input_tokens is distinct from 1500::bigint then
+    raise exception '13. ⚠⚠ La ventana de IA suma % tokens de entrada y son 1200 + 300: dejó de agregar', v_vista.input_tokens;
+  end if;
+  if v_vista.output_tokens is distinct from 900::bigint then
+    raise exception '13. La ventana de IA suma % tokens de salida y son 800 + 100', v_vista.output_tokens;
+  end if;
+
+  -- Y el SMS por su puerta propia, con el mínimo de un segmento.
+  select app.medir_sms('22222222-2222-2222-2222-222222222222', 0, 'UY', 'ej79:sms:cero') into v_id;
+  if (select cantidad from evento_medible where id = v_id) is distinct from 1::numeric then
+    raise exception '13. Un SMS de cero segmentos tiene que contar uno: se manda igual y se paga igual';
+  end if;
+end $puertas$;
+
 do $listo$ begin
   raise notice '✓ 079: se mide todo lo que se consume, por una sola puerta, y la ventana de firmas sigue mostrando lo de siempre.';
 end $listo$;
