@@ -1,4 +1,5 @@
 import { sql } from 'kysely';
+import { randomUUID } from 'node:crypto';
 import Decimal from 'decimal.js';
 import type { Transaction } from 'kysely';
 import type { DB } from '../db/schema';
@@ -96,8 +97,16 @@ async function tarifaVigente(trx: Transaction<DB>, modelo: string) {
 export async function registrarConsumoIA(
   cuentaId: string,
   usuarioId: string,
-  datos: { periodo: string; modelo: string; inputTokens: number; outputTokens: number },
+  datos: {
+    periodo: string;
+    modelo: string;
+    inputTokens: number;
+    outputTokens: number;
+    /** Clave estable del pedido, si quien llama puede reintentarlo. */
+    claveIdempotencia?: string;
+  },
 ): Promise<void> {
+  const clave = datos.claveIdempotencia ?? `ia:${cuentaId}:${randomUUID()}`;
   try {
     await withUsuario(cuentaId, usuarioId, async (trx) => {
       const tarifa = await tarifaVigente(trx, datos.modelo);
@@ -107,18 +116,27 @@ export async function registrarConsumoIA(
             .mul(tarifa.input)
             .add(new Decimal(datos.outputTokens).div(1_000_000).mul(tarifa.output))
         : new Decimal(0);
-      await trx
-        .insertInto('consumo_ia')
-        .values({
-          cuenta_id: cuentaId,
-          periodo: datos.periodo,
-          modelo: datos.modelo,
-          input_tokens: datos.inputTokens,
-          output_tokens: datos.outputTokens,
-          costo_base: costo.toFixed(6),
-          moneda: tarifa?.moneda ?? 'USD',
-        })
-        .execute();
+      // Desde la 079 el consumo de IA es una línea más de `evento_medible`, la
+      // lista única donde se anota todo lo que consume un cliente. `consumo_ia`
+      // sigue existiendo como VISTA agregada por (cuenta, período, modelo), así
+      // que todo lo que la LEE ve exactamente lo de antes — pero ya no se puede
+      // escribir ahí, y por eso esto cambió.
+      //
+      // ⚠ Una línea por LLAMADA al modelo, no un acumulado que se pisa: es lo
+      // que permite reconstruir de dónde salió un número seis meses después, que
+      // es lo que el resto del sistema sí sabe hacer.
+      //
+      // ⚠ La clave de idempotencia la trae quien llama cuando puede repetir el
+      // pedido. Si no la trae, cada llamada es un consumo propio y se le da una
+      // clave única: no hay reintento que pudiera duplicarla.
+      await sql`select app.medir_ia(
+        ${cuentaId}::uuid,
+        ${datos.modelo}::text,
+        ${datos.inputTokens}::bigint,
+        ${datos.outputTokens}::bigint,
+        ${costo.toFixed(6)}::numeric,
+        ${tarifa?.moneda ?? 'USD'}::char(3),
+        ${clave}::text)`.execute(trx);
     });
   } catch (e) {
     console.error('registrarConsumoIA:', (e as Error).message);
