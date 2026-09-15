@@ -328,7 +328,9 @@ export async function pedirCodigoDeTelefono(
       'Todavía no podemos mandar mensajes al celular. Escribinos y lo activamos.',
     );
   }
-  await enviarOtpPorTwilio(porDonde, tel, codigo, TTL_CONFIRMACION_MIN, 'confirmar_telefono');
+  // Esto SÍ lo provoca una empresa: está confirmando el celular de uno de sus
+  // usuarios, y se le cobra a ella.
+  await enviarOtpPorTwilio(porDonde, tel, codigo, TTL_CONFIRMACION_MIN, 'confirmar_telefono', cuentaId);
 
   await registrarSistema(cuentaId, identidadId, {
     accion: 'perfil.telefono_codigo',

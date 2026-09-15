@@ -298,7 +298,11 @@ async function crearYEnviarOtp(
 
   try {
     if (canal === 'sms' || canal === 'whatsapp') {
-      await enviarOtpPorTwilio(canal, tel, codigo, OTP_TTL_MIN, 'entrar');
+      // ⚠ Sin cuenta A PROPÓSITO: esto sale ANTES de que la persona elija empresa.
+      // Se sabe quién es, no desde dónde entra —y si pertenece a varias, tampoco
+      // cuál va a elegir—, así que es costo de la plataforma y no de un cliente.
+      // Se mide igual, para saber cuánto cuesta (decisión de Claudio, 15/9).
+      await enviarOtpPorTwilio(canal, tel, codigo, OTP_TTL_MIN, 'entrar', null);
     } else {
       await enviarOtpPorCorreo(destino.email, codigo);
     }

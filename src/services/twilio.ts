@@ -1,4 +1,5 @@
-import { operadorDb } from '../db/pool';
+import { sql } from 'kysely';
+import { operadorDb, sinCuenta } from '../db/pool';
 import { HttpError } from '../http/errors';
 import { cifrar, descifrar, enmascarar } from '../operador/cripto';
 
@@ -138,7 +139,24 @@ function textoSms(proposito: PropositoSms, codigo: string, ttlMin: number): stri
   return `Tu código para entrar a MiFirma es ${codigo}. Vence en ${ttlMin} minutos. Si no intentaste entrar, ignoralo.`;
 }
 
-async function enviarMensaje(c: FilaTwilio, params: Record<string, string>) {
+/**
+ * Lo que Twilio contesta cuando el envío salió: el identificador del mensaje y
+ * en cuántos SEGMENTOS lo partió.
+ *
+ * ⚠⚠ Los segmentos son plata. Twilio cobra POR SEGMENTO, no por mensaje: un
+ * texto largo, o uno con tildes y ñ —que fuerzan UCS-2 y bajan el límite de 160
+ * a 70 caracteres— sale dos o tres veces más caro. Hasta la 081 esta respuesta
+ * se descartaba y no había forma de saber cuánto se estaba gastando.
+ */
+interface EnviadoPorTwilio {
+  sid: string | null;
+  segmentos: number;
+}
+
+async function enviarMensaje(
+  c: FilaTwilio,
+  params: Record<string, string>,
+): Promise<EnviadoPorTwilio> {
   const token = descifrar(c.auth_token_cifrado);
   if (!token) throw new HttpError(503, 'La conexión de Twilio no tiene Auth Token.');
   const url = `${TWILIO_API}/Accounts/${encodeURIComponent(c.account_sid)}/Messages.json`;
@@ -168,6 +186,58 @@ async function enviarMensaje(c: FilaTwilio, params: Record<string, string>) {
     }
     throw new HttpError(502, 'Twilio rechazó el envío' + (detalle ? ': ' + detalle : ` (HTTP ${r.status}).`));
   }
+
+  // ⚠ El mensaje YA SALIÓ. Si la respuesta viniera rara, lo que no se puede
+  // hacer es tirar: se devuelve un segmento, que es el mínimo que se paga, y
+  // sigue. Perder la cuenta de un segmento es barato; tirar después de haber
+  // mandado sería cobrarle al usuario un error nuestro.
+  try {
+    const j = (await r.json()) as { sid?: string; num_segments?: string | number };
+    const n = Number(j.num_segments);
+    return { sid: j.sid ?? null, segmentos: Number.isFinite(n) && n > 0 ? n : 1 };
+  } catch {
+    return { sid: null, segmentos: 1 };
+  }
+}
+
+/**
+ * Anota lo que acaba de salir, para que se pueda cobrar y costear.
+ *
+ * ⚠⚠ NUNCA TIRA. El mensaje ya salió y el código ya viaja: si medir fallara y
+ * eso tumbara el envío, el usuario se quedaría sin poder entrar por un problema
+ * de facturación. Misma regla que el medidor de firmas.
+ *
+ * ⚠ `cuentaId` en null NO es un olvido: es el SMS de entrar al producto, que
+ * sale antes de que la persona elija empresa. Se mide sin cobrárselo a nadie
+ * (decisión de Claudio del 15/9).
+ */
+async function medirMensaje(
+  canal: 'sms' | 'whatsapp',
+  cuentaId: string | null,
+  telefono: string,
+  enviado: EnviadoPorTwilio,
+  proposito: PropositoSms,
+) {
+  try {
+    // La clave de idempotencia es el identificador de Twilio: un reintento del
+    // mismo envío no se cobra dos veces. Sin sid —respuesta rara— se arma una
+    // clave propia, que no se repite y por eso tampoco duplica.
+    const clave = enviado.sid
+      ? `msg:${enviado.sid}`
+      : `msg:sin-sid:${canal}:${Date.now()}:${Math.random().toString(36).slice(2, 10)}`;
+    await sinCuenta(
+      (trx) =>
+        sql`select app.medir_mensaje(
+          ${canal}::text,
+          ${cuentaId}::uuid,
+          ${enviado.segmentos}::int,
+          ${telefono}::text,
+          ${clave}::text,
+          ${proposito}::text)`.execute(trx),
+    );
+  } catch (e) {
+    console.error('medirMensaje:', (e as Error).message);
+  }
 }
 
 /** Manda el código por SMS. Requiere from_sms. */
@@ -177,9 +247,9 @@ async function enviarSms(
   codigo: string,
   ttlMin: number,
   proposito: PropositoSms,
-) {
+): Promise<EnviadoPorTwilio> {
   if (!c.from_sms) throw new HttpError(503, 'No hay número de SMS configurado en Twilio.');
-  await enviarMensaje(c, { To: telefono, From: c.from_sms, Body: textoSms(proposito, codigo, ttlMin) });
+  return enviarMensaje(c, { To: telefono, From: c.from_sms, Body: textoSms(proposito, codigo, ttlMin) });
 }
 
 /** Manda el código por WhatsApp. Usa la plantilla aprobada (Content SID) si está
@@ -190,7 +260,7 @@ async function enviarWhatsapp(
   codigo: string,
   ttlMin: number,
   proposito: PropositoSms,
-) {
+): Promise<EnviadoPorTwilio> {
   if (!c.from_whatsapp) throw new HttpError(503, 'No hay remitente de WhatsApp configurado en Twilio.');
   const to = telefono.startsWith('whatsapp:') ? telefono : `whatsapp:${telefono}`;
   const from = c.from_whatsapp.startsWith('whatsapp:') ? c.from_whatsapp : `whatsapp:${c.from_whatsapp}`;
@@ -199,15 +269,14 @@ async function enviarWhatsapp(
     // código: el propósito NO puede cambiarlo. Una plantilla de «authentication»
     // habla de iniciar sesión, así que para confirmar un celular el texto va a
     // quedar impreciso hasta que haya una plantilla propia para eso.
-    await enviarMensaje(c, {
+    return enviarMensaje(c, {
       To: to,
       From: from,
       ContentSid: c.wa_content_sid,
       ContentVariables: JSON.stringify({ '1': codigo }),
     });
-  } else {
-    await enviarMensaje(c, { To: to, From: from, Body: textoSms(proposito, codigo, ttlMin) });
   }
+  return enviarMensaje(c, { To: to, From: from, Body: textoSms(proposito, codigo, ttlMin) });
 }
 
 /** Dispatcher: manda el código por el canal pedido. Lanza HttpError si falla. */
@@ -219,11 +288,18 @@ export async function enviarOtpPorTwilio(
   // ⚠ Sin valor por omisión A PROPÓSITO: quien manda un código tiene que decir
   // a qué viene. Un default sería volver al problema de que todos digan lo mismo.
   proposito: PropositoSms,
+  // ⚠ Sin valor por omisión A PROPÓSITO, igual que `proposito`: quien manda un
+  // mensaje tiene que decir a quién se le cobra, o decir expresamente que a
+  // nadie. Un default en null convertiría todo en costo nuestro por descuido.
+  cuentaId: string | null,
 ) {
   const c = await twilioActivo();
   if (!c) throw new HttpError(503, 'No hay conexión de Twilio activa.');
-  if (canal === 'whatsapp') await enviarWhatsapp(c, telefono, codigo, ttlMin, proposito);
-  else await enviarSms(c, telefono, codigo, ttlMin, proposito);
+  const enviado =
+    canal === 'whatsapp'
+      ? await enviarWhatsapp(c, telefono, codigo, ttlMin, proposito)
+      : await enviarSms(c, telefono, codigo, ttlMin, proposito);
+  await medirMensaje(canal, cuentaId, telefono, enviado, proposito);
 }
 
 /** Envío de prueba desde la consola del operador, con un código de ejemplo. */
@@ -238,7 +314,12 @@ export async function enviarPruebaTwilio(canal: 'sms' | 'whatsapp', telefono: st
   // en SMS el texto de prueba no lleva ningún código, para que no se confunda
   // con uno real.
   const codigo = '123456';
-  if (canal === 'whatsapp') await enviarWhatsapp(c, limpio, codigo, 10, 'prueba');
-  else await enviarSms(c, limpio, codigo, 10, 'prueba');
-  return { ok: true, canal, telefono: limpio };
+  const enviado =
+    canal === 'whatsapp'
+      ? await enviarWhatsapp(c, limpio, codigo, 10, 'prueba')
+      : await enviarSms(c, limpio, codigo, 10, 'prueba');
+  // ⚠ La prueba del operador no es de ningún cliente, pero Twilio la cobra
+  // igual: se mide sin dueño, como el SMS de entrar.
+  await medirMensaje(canal, null, limpio, enviado, 'prueba');
+  return { ok: true, canal, telefono: limpio, segmentos: enviado.segmentos };
 }
