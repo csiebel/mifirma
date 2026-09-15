@@ -126,17 +126,58 @@ export type PropositoSms = 'entrar' | 'confirmar_telefono' | 'prueba';
  * > Regla: si dos mensajes distintos dicen lo mismo, no se pueden distinguir
  * > cuando importa. Y el momento en que importa es siempre el peor.
  *
- * ⚠ Se cuidan los 160 caracteres: pasarse cuesta el doble por mensaje.
+ * ⚠⚠ SIN TILDES, SIN Ñ Y SIN COMILLAS ANGULARES — Y NO ES DESCUIDO.
+ *
+ * El límite de 160 caracteres vale sólo mientras el texto entre en el alfabeto
+ * básico de SMS (GSM-7). **Un solo carácter fuera de él fuerza UCS-2 y el límite
+ * cae de 160 a 70**, así que un mensaje corto se parte en dos o tres, y Twilio
+ * cobra POR PEDAZO.
+ *
+ * Medido en producción el 15/9/2026: el mensaje de prueba —una sola frase— salió
+ * en **2 segmentos**, por la tilde de la palabra que decía «código». El comentario
+ * que estaba acá decía «se cuidan los 160 caracteres» y era cierto y era inútil:
+ * nadie se había dado cuenta de que con una tilde el límite no es 160.
+ *
+ * Por eso dice «clave» y no «código», e «ignorala» sin tilde. Decisión de
+ * Claudio del 15/9: en un SMS nadie extraña una tilde, y cada mensaje pasa a
+ * costar la mitad.
+ *
+ * ⚠ `test/texto_sms.test.ts` falla si alguien vuelve a meter un carácter que
+ * fuerce UCS-2. Sin esa prueba, la próxima tilde volvería a ser invisible.
  * ⚠ Salen sólo en castellano, como el resto de los avisos (deuda 56).
  */
 function textoSms(proposito: PropositoSms, codigo: string, ttlMin: number): string {
   if (proposito === 'prueba') {
-    return `Mensaje de prueba de MiFirma. Si no lo pediste vos, ignoralo: no es un código de acceso.`;
+    return `Mensaje de prueba de MiFirma. Si no lo pediste vos, ignoralo: no es una clave de acceso.`;
   }
   if (proposito === 'confirmar_telefono') {
-    return `Tu código para confirmar este celular en MiFirma es ${codigo}. Vence en ${ttlMin} minutos. Si no lo pediste, ignoralo.`;
+    return `Tu clave para confirmar este celular en MiFirma es ${codigo}. Vence en ${ttlMin} minutos. Si no la pediste, ignorala.`;
   }
-  return `Tu código para entrar a MiFirma es ${codigo}. Vence en ${ttlMin} minutos. Si no intentaste entrar, ignoralo.`;
+  return `Tu clave para entrar a MiFirma es ${codigo}. Vence en ${ttlMin} minutos. Si no intentaste entrar, ignorala.`;
+}
+
+/**
+ * El alfabeto básico de SMS (GSM 03.38), que es lo que decide si un mensaje entra
+ * en 160 caracteres o en 70. Se exporta sólo para que la prueba pueda usarlo.
+ *
+ * ⚠ No alcanza con «no tiene tildes»: las comillas angulares, el guion largo y
+ * las comillas tipográficas tampoco están, y son justo lo que un editor de texto
+ * mete solo.
+ */
+export const GSM7 =
+  '@\u00a3$\u00a5\u00e8\u00e9\u00f9\u00ec\u00f2\u00c7\n\u00d8\u00f8\r\u00c5\u00e5\u0394_\u03a6\u0393\u039b\u03a9\u03a0\u03a8\u03a3\u0398\u039e\u00c6\u00e6\u00df\u00c9 !"#\u00a4%&\'()*+,-./0123456789:;<=>?' +
+  '\u00a1ABCDEFGHIJKLMNOPQRSTUVWXYZ\u00c4\u00d6\u00d1\u00dc\u00a7\u00bfabcdefghijklmnopqrstuvwxyz\u00e4\u00f6\u00f1\u00fc\u00e0' +
+  '\f^{}\\[~]|\u20ac';
+
+/** Los caracteres del texto que NO entran en GSM-7, si hay alguno. */
+export function fueraDeGsm7(texto: string): string[] {
+  return [...texto].filter((c) => !GSM7.includes(c));
+}
+
+/** Los tres textos, para que la prueba los recorra sin duplicarlos. */
+export function textosSmsParaPrueba(): Array<{ proposito: PropositoSms; texto: string }> {
+  const propositos: PropositoSms[] = ['prueba', 'confirmar_telefono', 'entrar'];
+  return propositos.map((proposito) => ({ proposito, texto: textoSms(proposito, '123456', 10) }));
 }
 
 /**
